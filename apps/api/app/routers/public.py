@@ -1,5 +1,3 @@
-import uuid
-
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -7,13 +5,20 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import DbSession
 from app.db.models import Branch, Repair
 from app.schemas.repair import PublicRepairOut
+from app.services.ratelimit import public_limiter
 from app.services.settings import get_legal_text
+from app.services.stats import city_stats
 
 router = APIRouter(prefix="/public", tags=["public"])
 
 
 @router.get("/r/{token}", response_model=PublicRepairOut)
 async def public_repair(token: str, db: DbSession, request: Request):
+    # Rate-limit anonymous QR page.
+    client_key = request.client.host if request.client else "unknown"
+    if not public_limiter.allow(f"r:{client_key}"):
+        raise HTTPException(429, "Слишком много запросов")
+
     row = await db.execute(
         select(Repair)
         .where(Repair.public_token == token)
@@ -31,8 +36,8 @@ async def public_repair(token: str, db: DbSession, request: Request):
             branch_name = branch.name
             branch_phone = branch.phone
 
-    # Full legal text is always from settings (not hardcoded).
     legal_text = await get_legal_text(db)
+    stats = await city_stats(db, repair.city_id, repair.device_type)
 
     return PublicRepairOut(
         number=repair.number,
@@ -49,4 +54,5 @@ async def public_repair(token: str, db: DbSession, request: Request):
         storage_text=legal_text,
         branch_name=branch_name,
         branch_phone=branch_phone,
+        city_stats=stats,
     )

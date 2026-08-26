@@ -1,9 +1,10 @@
 """Print jobs: render PDF blank -> queue for the on-site print-agent.
 
-The print-agent polls `GET /print/jobs?status=queued`, downloads the PDF and
-sends it to the OS printer (Epson EcoTank L3250 via driver). ESC/POS thermal
-printing is kept as a future option (feature flag `print_mode`).
+The blank layout is driven by the default `print_templates` row (editable in
+admin). The print-agent polls `GET /print/jobs?status=queued`, downloads the PDF
+and sends it to the OS printer (Epson EcoTank L3250 via driver).
 """
+import base64
 import uuid
 
 from fastapi import APIRouter, HTTPException
@@ -11,9 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
-from app.core.deps import CurrentUser, DbSession, require_roles
-from app.db.models import Branch, City, PrintJob, Repair, RepairEvent
-from app.services.print import render_blank_pdf
+from app.core.deps import CurrentUser, DbSession
+from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, RepairEvent
+from app.services.print import body_to_template, render_blank_pdf
 from app.services.settings import get_legal_text
 
 router = APIRouter(tags=["print"])
@@ -23,52 +24,72 @@ def _fmt(dt) -> str:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
 
 
+async def get_default_template(db) -> dict:
+    row = await db.execute(
+        select(PrintTemplate).where(PrintTemplate.is_default.is_(True)).order_by(
+            PrintTemplate.created_at.desc()
+        )
+    )
+    tpl = row.scalars().first()
+    return body_to_template(tpl.body) if tpl else body_to_template("")
+
+
+async def build_context(db, repair: Repair) -> dict:
+    city = await db.get(City, repair.city_id)
+    branch = await db.get(Branch, repair.branch_id) if repair.branch_id else None
+    legal_text = await get_legal_text(db)
+    device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
+    complectation = (
+        ", ".join(repair.complectation.get("items", []))
+        if repair.complectation
+        else "—"
+    )
+    accepted_by = repair.accepted_by_user.name if repair.accepted_by_user else "—"
+    master = repair.master.name if repair.master else "в очереди"
+    qr_url = f"{settings.PUBLIC_BASE_URL}/r/{repair.public_token}"
+
+    return {
+        "number": repair.number,
+        "accepted_at": _fmt(repair.accepted_at),
+        "city_name": city.name if city else "—",
+        "branch_name": branch.name if branch else "—",
+        "client_name": repair.client.full_name,
+        "client_phone": repair.client.phone,
+        "device": device,
+        "serial": repair.serial or "—",
+        "complectation": complectation,
+        "fault": repair.fault_client or "—",
+        "accepted_by": accepted_by,
+        "master": master,
+        "eta_days": str(repair.eta_days) if repair.eta_days else "",
+        "legal_text": legal_text,
+        "storage_until": _fmt(repair.storage_until),
+        "qr_url": qr_url,
+    }
+
+
 @router.post("/repairs/{repair_id}/print")
 async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
-        .options(selectinload(Repair.client))
+        .options(
+            selectinload(Repair.client),
+            selectinload(Repair.accepted_by_user),
+            selectinload(Repair.master),
+        )
     )
     repair = row.scalar_one_or_none()
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
 
-    city = await db.get(City, repair.city_id)
-    branch = await db.get(Branch, repair.branch_id) if repair.branch_id else None
-    legal_text = await get_legal_text(db)
-
-    device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
-    complectation = ", ".join(repair.complectation.get("items", [])) if repair.complectation else "—"
-    accepted_by = repair.accepted_by_user.name
-    master = repair.master.name if repair.master else "в очереди"
-
-    qr_url = f"{settings.PUBLIC_BASE_URL}/r/{repair.public_token}"
-
-    pdf = render_blank_pdf(
-        number=repair.number,
-        accepted_at=_fmt(repair.accepted_at),
-        city_name=city.name,
-        branch_name=branch.name if branch else "—",
-        client_name=repair.client.full_name,
-        client_phone=repair.client.phone,
-        device=device,
-        complectation=complectation,
-        fault=repair.fault_client or "—",
-        accepted_by=accepted_by,
-        master=master,
-        legal_text=legal_text,
-        storage_until=_fmt(repair.storage_until),
-        qr_url=qr_url,
-        brand=settings.APP_NAME,
-    )
-
-    import base64
+    template = await get_default_template(db)
+    ctx = await build_context(db, repair)
+    pdf = render_blank_pdf(template=template, **ctx)
 
     job = PrintJob(
         repair_id=repair.id,
-        template_id="default_a4",
-        # MVP: inline base64 PDF in the job. Production path: MinIO/S3 object URL.
+        template_id="default",
         payload={"pdf_base64": base64.b64encode(pdf).decode("ascii")},
         status="queued",
         branch_id=repair.branch_id,

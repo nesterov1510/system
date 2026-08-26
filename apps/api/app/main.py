@@ -13,6 +13,7 @@ from app.db.session import async_session_factory, engine
 from app.routers import (
     admin,
     auth,
+    callcenter,
     chat,
     lookups,
     notifications,
@@ -58,6 +59,7 @@ app.include_router(auth.router, prefix=api_prefix)
 app.include_router(chat.router, prefix=api_prefix)
 app.include_router(lookups.router, prefix=api_prefix)
 app.include_router(repairs.router, prefix=api_prefix)
+app.include_router(callcenter.router, prefix=api_prefix)
 app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(public.router, prefix=api_prefix)
 app.include_router(prints.router, prefix=api_prefix)

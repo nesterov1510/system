@@ -116,3 +116,4 @@ class PublicRepairOut(BaseModel):
     storage_text: str | None = None
     branch_name: str | None = None
     branch_phone: str | None = None
+    city_stats: dict | None = None

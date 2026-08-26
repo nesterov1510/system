@@ -3,9 +3,10 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
 from app.core.security import hash_password
-from app.db.models import Branch, City, Setting, User
+from app.db.models import Branch, City, PrintTemplate, Repair, Setting, User
 from app.schemas.admin import (
     BranchCreate,
     BranchOut,
@@ -15,6 +16,14 @@ from app.schemas.admin import (
     SettingOut,
 )
 from app.schemas.user import UserCreate, UserOut, UserUpdate
+from app.services.print import (
+    AVAILABLE_FIELDS,
+    DEFAULT_TEMPLATE,
+    body_to_template,
+    normalize_template,
+    render_blank_pdf,
+    template_to_body,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminOnly])
 
@@ -136,3 +145,125 @@ async def upsert_setting(key: str, payload: SettingIn, db: DbSession):
         setting.description = payload.description
     await db.commit()
     return setting
+
+
+# --- Print templates (бланк) ---
+@router.get("/print-templates")
+async def list_print_templates(db: DbSession):
+    row = await db.execute(select(PrintTemplate).order_by(PrintTemplate.created_at))
+    out = []
+    for t in row.scalars().all():
+        out.append(
+            {
+                "id": t.id,
+                "name": t.name,
+                "is_default": t.is_default,
+                "body": body_to_template(t.body),
+            }
+        )
+    return out
+
+
+@router.get("/print-templates/meta")
+async def print_template_meta():
+    return {"fields": AVAILABLE_FIELDS, "default": DEFAULT_TEMPLATE}
+
+
+@router.post("/print-templates")
+async def create_print_template(db: DbSession, body: dict):
+    template = normalize_template(body.get("body") or {})
+    if body.get("is_default"):
+        await _unset_defaults(db)
+    tpl = PrintTemplate(
+        name=body.get("name") or template["name"],
+        body=template_to_body(template),
+        is_default=bool(body.get("is_default")),
+    )
+    db.add(tpl)
+    await db.commit()
+    await db.refresh(tpl)
+    return {"id": tpl.id, "name": tpl.name, "is_default": tpl.is_default, "body": template}
+
+
+@router.patch("/print-templates/{template_id}")
+async def update_print_template(template_id: uuid.UUID, db: DbSession, body: dict):
+    tpl = await db.get(PrintTemplate, template_id)
+    if tpl is None:
+        raise HTTPException(404, "Шаблон не найден")
+    if "name" in body:
+        tpl.name = body["name"]
+    if "body" in body:
+        tpl.body = template_to_body(normalize_template(body["body"]))
+    if body.get("is_default"):
+        await _unset_defaults(db)
+        tpl.is_default = True
+    await db.commit()
+    await db.refresh(tpl)
+    return {
+        "id": tpl.id,
+        "name": tpl.name,
+        "is_default": tpl.is_default,
+        "body": body_to_template(tpl.body),
+    }
+
+
+async def _unset_defaults(db):
+    row = await db.execute(
+        select(PrintTemplate).where(PrintTemplate.is_default.is_(True))
+    )
+    for t in row.scalars().all():
+        t.is_default = False
+
+
+@router.post("/print-templates/preview")
+async def preview_print_template(db: DbSession, body: dict):
+    """Render a preview PDF from a template (and optional real repair)."""
+    from fastapi.responses import Response as PDFResponse
+
+    template = normalize_template(body.get("body") or {})
+
+    repair = None
+    if body.get("repair_id"):
+        from sqlalchemy.orm import selectinload
+
+        row = await db.execute(
+            select(Repair)
+            .where(Repair.id == uuid.UUID(body["repair_id"]))
+            .options(
+                selectinload(Repair.client),
+                selectinload(Repair.accepted_by_user),
+                selectinload(Repair.master),
+            )
+        )
+        repair = row.scalar_one_or_none()
+
+    if repair:
+        from app.routers.prints import build_context
+
+        ctx = await build_context(db, repair)
+    else:
+        ctx = {
+            "number": "TV-MSK-2026-00000",
+            "accepted_at": "26.08.2026 14:02",
+            "city_name": "Москва",
+            "branch_name": "Центральная точка",
+            "client_name": "Иванов Иван Иванович",
+            "client_phone": "+7 900 000-00-00",
+            "device": "ТВ Samsung UE55",
+            "serial": "SN123456",
+            "complectation": "ПДУ, Кабель питания",
+            "fault": "не включается",
+            "accepted_by": "Оператор Анна",
+            "master": "Мастер Сергей",
+            "eta_days": "6",
+            "legal_text": "Техника хранится в сервисном центре бесплатно в течение 3 (трёх) месяцев с момента уведомления о готовности.",
+            "storage_until": "26.11.2026 14:02",
+            "qr_url": f"{settings.PUBLIC_BASE_URL}/r/example-token",
+        }
+
+    pdf = render_blank_pdf(template=template, **ctx)
+    return PDFResponse(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline; filename=preview.pdf"},
+    )

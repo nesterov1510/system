@@ -4,11 +4,10 @@
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
 
-> Статус: **Итерация 0 (фундамент) + 1 (чат) + 2 (приёмка + печать)** готовы.
-> Работают: PWA-форма приёмки (клиент → техника/комплект → фото/мастер/ETA →
-> подтверждение), карточка ремонта с timeline/фото/комментариями, «Повторить
-> печать», PDF-бланк + print-agent, публичная QR-страница, прайс и статистика
-> — следующие итерации.
+> Статус: **Итерации 0–4** готовы. Работают: PWA-форма приёмки, карточка ремонта
+> (timeline/фото/комментарии), печать с **редактором шаблона бланка** (админка),
+> публичная QR-страница со статистикой «как обычно», доска-канбан, очередь
+> call-центра. Следующие: прайс (Итерация 5) и дашборд статистики + AI (Итерация 6).
 
 ---
 
@@ -150,8 +149,14 @@ python agent.py
 - **macOS:** `lp -d EPSON_L3250 {file}`
 
 Термопринтер 58/80 мм (ESC/POS, CP866) — опция на будущее, включается
-feature flag `print_mode=escpos`. Текст «хранение 3 месяца», название сервиса
-и другие бизнес-тексты берутся из `settings` в БД (не зашиты в код).
+feature flag `print_mode=escpos`.
+
+**Редактор шаблона бланка** — в админке (`/admin/print-templates`). Бланк
+управляется шаблоном из БД (`print_templates`): название сервиса, заголовок,
+подзаголовок, набор полей (клиент/телефон/техника/серийник/комплект/неисправность/
+принял/мастер/хранение/срок), юртекст, футер, формат A4/A5, подписи. Кнопка
+«Превью» рендерит PDF. Юртекст «хранение 3 месяца» по умолчанию берётся из
+`settings` (не зашит в код).
 
 ---
 
@@ -167,12 +172,15 @@ POST /api/repairs                    (Idempotency-Key)
 GET  /api/repairs | /:id | /by-number/:number
 PATCH /api/repairs/:id               POST /api/repairs/:id/events
 POST /api/repairs/:id/print          GET /api/print/jobs | PATCH /api/print/jobs/:id
-GET  /api/public/r/:token            (публичная QR-страница, limited DTO)
+GET  /api/public/r/:token            (публичная QR-страница, limited DTO + city_stats)
 GET  /api/notifications              POST /api/notifications/:id/read
 GET  /api/lookups/cities|branches|masters|complectation-items
 GET/POST /api/repairs/:id/photos          (multipart фото, отдаётся через /media)
+GET  /api/callcenter/queue?kind=agree|ready|overdue|all
 GET/POST/PATCH /api/admin/cities|branches|users
 GET/PUT /api/admin/settings
+GET/POST/PATCH /api/admin/print-templates        (редактор шаблона бланка)
+POST /api/admin/print-templates/preview          (PDF-превью бланка)
 ```
 
 ---
@@ -198,9 +206,11 @@ GET/PUT /api/admin/settings
 - [x] **2 — Приёмка + печать**: PWA-форма приёмки (клиент → техника/комплект →
       фото/мастер/ETA → подтверждение), создание Repair+Client, номер, QR-token,
       фото с камеры (multipart → /media), PDF-бланк + print-agent, «Повторить
-      печать», карточка ремонта с timeline/комментариями
-- [ ] **3 — Публичная QR-страница** (уже отдаётся API, нужен UI + «как обычно»)
-- [ ] **4 — Доска ремонтов + роли мастера/call-центра** (канбан, очередь)
+      печать», карточка ремонта с timeline/комментариями, **редактор шаблона бланка**
+- [x] **3 — Публичная QR-страница**: статус + прогресс, техника/комплект, даты,
+      «хранение 3 мес», «как обычно» (обезличенная статистика), контакты, noindex + rate-limit
+- [x] **4 — Доска ремонтов + роли**: канбан со статусами/фильтрами/сменой статуса,
+      очередь call-центра (согласовать / готово / просрочка), мастера видят только своё
 - [ ] **5 — Прайс API** + подсказки
 - [ ] **6 — Дашборд статистики + AI ETA/саммари**
 

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import Client, City, Repair, RepairEvent, RepairPhoto
+from app.db.models import Client, City, Repair, RepairEvent, RepairPhoto, UserRole
 from app.schemas.repair import (
     PhotoOut,
     RepairCreate,
@@ -20,6 +20,13 @@ from app.services.storage import object_key_for, public_url, save_object
 from app.ws.manager import manager
 
 router = APIRouter(prefix="/repairs", tags=["repairs"])
+
+
+def _can_access(user, repair: Repair) -> bool:
+    """Masters see only their own repairs; others see all."""
+    if user.role == UserRole.MASTER.value:
+        return repair.master_id == user.id
+    return True
 
 
 def _serialize(repair: Repair) -> RepairOut:
@@ -193,6 +200,9 @@ async def list_repairs(
         q_stmt = q_stmt.where(
             (Repair.number.ilike(like)) | (Repair.client.has(Client.phone.ilike(like)))
         )
+    # Masters are scoped to their own repairs (unless explicitly overridden by admin).
+    if user.role == UserRole.MASTER.value:
+        q_stmt = q_stmt.where(Repair.master_id == user.id)
     q_stmt = q_stmt.limit(limit).offset(offset)
     row = await db.execute(q_stmt)
     return [_serialize(r) for r in row.scalars().all()]
@@ -208,12 +218,17 @@ async def get_by_number(number: str, db: DbSession, user: CurrentUser):
     repair = row.scalar_one_or_none()
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     return _serialize(repair)
 
 
 @router.get("/{repair_id}", response_model=RepairOut)
 async def get_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    return _serialize(await _get_repair_or_404(db, repair_id))
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+    return _serialize(repair)
 
 
 @router.patch("/{repair_id}", response_model=RepairOut)
@@ -221,6 +236,8 @@ async def update_repair(
     repair_id: uuid.UUID, payload: RepairUpdate, db: DbSession, user: CurrentUser
 ):
     repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
 
     from app.db.base import utcnow
 
@@ -260,6 +277,8 @@ async def add_event(
     repair_id: uuid.UUID, db: DbSession, user: CurrentUser, comment: dict
 ):
     repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     repair.events.append(
         RepairEvent(
             repair_id=repair.id,
@@ -274,7 +293,9 @@ async def add_event(
 
 @router.get("/{repair_id}/photos", response_model=list[PhotoOut])
 async def list_photos(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    await _get_repair_or_404(db, repair_id)
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     row = await db.execute(
         select(RepairPhoto)
         .where(RepairPhoto.repair_id == repair_id)
@@ -301,6 +322,8 @@ async def upload_photo(
     caption: str | None = Form(default=None),
 ):
     repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     data = await file.read()
     if len(data) > 20 * 1024 * 1024:  # 20 MB cap
         raise HTTPException(413, "Файл слишком большой (макс. 20 МБ)")

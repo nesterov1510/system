@@ -6,9 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getStoredUser, type User } from "@/lib/api";
 
 const NAV = [
-  { href: "/repairs", label: "Ремонты" },
-  { href: "/repairs/new", label: "Приёмка" },
-  { href: "/chat", label: "Чат" },
+  { href: "/repairs", label: "Доска", icon: "🔧" },
+  { href: "/repairs/new", label: "Приёмка", icon: "➕" },
+  { href: "/callcenter", label: "Call-центр", icon: "📞" },
+  { href: "/chat", label: "Чат", icon: "💬" },
+];
+
+const ADMIN_NAV = [
+  { href: "/admin/print-templates", label: "Бланк", icon: "🖨" },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -72,12 +77,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 pathname === n.href ? "text-slate-900" : "text-gray-500"
               }`}
             >
-              <span className="text-lg leading-none">
-                {n.label === "Ремонты" ? "🔧" : n.label === "Приёмка" ? "➕" : "💬"}
-              </span>
+              <span className="text-lg leading-none">{n.icon}</span>
               {n.label}
             </Link>
           ))}
+          {user.role === "admin" &&
+            ADMIN_NAV.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                className={`flex flex-1 flex-col items-center gap-0.5 py-3 text-xs ${
+                  pathname.startsWith(n.href) ? "text-slate-900" : "text-gray-500"
+                }`}
+              >
+                <span className="text-lg leading-none">{n.icon}</span>
+                {n.label}
+              </Link>
+            ))}
         </div>
       </nav>
 
@@ -93,9 +109,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   : "text-gray-600 hover:bg-gray-100"
               }`}
             >
-              {n.label}
+              {n.icon} {n.label}
             </Link>
           ))}
+          {user.role === "admin" && (
+            <div className="mt-2 border-t border-gray-200 pt-2">
+              <div className="px-3 py-1 text-xs uppercase text-gray-400">
+                Админ
+              </div>
+              {ADMIN_NAV.map((n) => (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  className={`block rounded-lg px-3 py-2 text-sm ${
+                    pathname.startsWith(n.href)
+                      ? "bg-slate-900 text-white"
+                      : "text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {n.icon} {n.label}
+                </Link>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

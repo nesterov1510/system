@@ -11,10 +11,12 @@ from app.db.models import (
     ChatChannel,
     City,
     ComplectationItem,
+    PrintTemplate,
     Setting,
     User,
     UserRole,
 )
+from app.services.print import DEFAULT_TEMPLATE, template_to_body
 from app.services.settings import DEFAULT_SETTINGS
 
 
@@ -123,5 +125,16 @@ async def seed(db: AsyncSession) -> None:
         )
         if row.scalar_one_or_none() is None:
             db.add(ComplectationItem(name=name, sort=i))
+
+    # --- Default print template (бланк) ---
+    row = await db.execute(select(PrintTemplate))
+    if row.scalars().first() is None:
+        db.add(
+            PrintTemplate(
+                name=DEFAULT_TEMPLATE["name"],
+                body=template_to_body(DEFAULT_TEMPLATE),
+                is_default=True,
+            )
+        )
 
     await db.commit()

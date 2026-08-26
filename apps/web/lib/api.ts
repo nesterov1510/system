@@ -193,8 +193,93 @@ export const api = {
       body: form,
     });
   },
+
+  // Call-center queue
+  callcenterQueue: (kind: string) =>
+    request<Repair[]>(`/api/callcenter/queue?kind=${kind}`),
+
+  // Print templates (admin)
+  printTemplates: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        is_default: boolean;
+        body: Record<string, unknown>;
+      }>
+    >("/api/admin/print-templates"),
+  printTemplatesMeta: () =>
+    request<{ fields: string[]; default: Record<string, unknown> }>(
+      "/api/admin/print-templates/meta",
+    ),
+  savePrintTemplate: (data: {
+    id?: string;
+    name?: string;
+    body?: Record<string, unknown>;
+    is_default?: boolean;
+  }) =>
+    request<Record<string, unknown>>(
+      data.id ? `/api/admin/print-templates/${data.id}` : "/api/admin/print-templates",
+      {
+        method: data.id ? "PATCH" : "POST",
+        body: JSON.stringify(data),
+      },
+    ),
+  previewPrintTemplate: async (
+    body: Record<string, unknown>,
+    repairId?: string,
+  ): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_URL}/api/admin/print-templates/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ body, repair_id: repairId }),
+    });
+    if (!res.ok) throw new Error(`Ошибка превью: ${res.status}`);
+    return res.blob();
+  },
 };
 
 export function mediaUrl(path: string): string {
   return `${API_URL}${path}`;
+}
+
+// --- Public (no auth) ---
+export interface PublicRepair {
+  number: string;
+  status: string;
+  device_type: string;
+  brand?: string | null;
+  model?: string | null;
+  complectation?: Record<string, unknown> | null;
+  accepted_at: string;
+  eta_days?: number | null;
+  ready_at?: string | null;
+  issued_at?: string | null;
+  storage_until?: string | null;
+  storage_text?: string | null;
+  branch_name?: string | null;
+  branch_phone?: string | null;
+  city_stats?: {
+    n: number;
+    threshold: number;
+    avg_days?: number | null;
+    median_days?: number | null;
+    avg_price?: number | null;
+    message?: string | null;
+  } | null;
+}
+
+export async function fetchPublicRepair(token: string): Promise<PublicRepair> {
+  const res = await fetch(`${API_URL}/api/public/r/${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(
+      typeof body?.detail === "string" ? body.detail : `HTTP ${res.status}`,
+    );
+  }
+  return res.json();
 }
