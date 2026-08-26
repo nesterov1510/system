@@ -246,7 +246,7 @@ export const api = {
   createRepair: (payload: Record<string, unknown>) =>
     request<Repair>("/api/repairs", {
       method: "POST",
-      headers: { "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Idempotency-Key": uuid() },
       body: JSON.stringify(payload),
     }),
   updateRepair: (id: string, payload: Record<string, unknown>) =>
@@ -453,6 +453,22 @@ export const api = {
 
 export function mediaUrl(path: string): string {
   return `${API_URL}${path}`;
+}
+
+// UUID для Idempotency-Key. `crypto.randomUUID()` доступен только в HTTPS/localhost,
+// а на http://192.168.x.x:3000 его нет — поэтому свой генератор (работает везде).
+export function uuid(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 // Скачать PDF-бланк из base64 (запасной вариант, если print-agent не работает).
