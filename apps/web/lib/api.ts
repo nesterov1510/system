@@ -260,7 +260,7 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
   print: (repairId: string) =>
-    request<{ job_id: string; status: string }>(
+    request<{ job_id: string; status: string; pdf_base64: string }>(
       `/api/repairs/${repairId}/print`,
       { method: "POST" },
     ),
@@ -453,6 +453,20 @@ export const api = {
 
 export function mediaUrl(path: string): string {
   return `${API_URL}${path}`;
+}
+
+// Скачать PDF-бланк из base64 (запасной вариант, если print-agent не работает).
+export function downloadPdfBase64(pdfBase64: string, filename: string) {
+  const bin = atob(pdfBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // --- Public (no auth) ---

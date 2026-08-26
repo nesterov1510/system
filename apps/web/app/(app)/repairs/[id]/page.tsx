@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   api,
+  downloadPdfBase64,
   mediaUrl,
   money,
   type Part,
@@ -71,6 +72,7 @@ export default function RepairCardPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
+  const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
@@ -99,9 +101,13 @@ export default function RepairCardPage() {
   async function doPrint() {
     setBusy(true);
     setPrintMsg(null);
+    setPdfBase64(null);
     try {
-      await api.print(id);
-      setPrintMsg("Задание на печать отправлено на принтер");
+      const res = await api.print(id);
+      setPdfBase64(res.pdf_base64);
+      setPrintMsg(
+        "Задание отправлено принтеру. Если не печатает — проверьте print-agent, либо скачайте PDF ниже и распечатайте вручную.",
+      );
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка печати");
@@ -581,9 +587,19 @@ export default function RepairCardPage() {
       </div>
 
       {printMsg && (
-        <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          {printMsg}
-        </p>
+        <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+          <p>{printMsg}</p>
+          {pdfBase64 && (
+            <button
+              onClick={() =>
+                downloadPdfBase64(pdfBase64, `blank-${repair.number}.pdf`)
+              }
+              className="mt-2 rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-green-200"
+            >
+              ⬇ Скачать PDF бланка
+            </button>
+          )}
+        </div>
       )}
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
