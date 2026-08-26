@@ -2,8 +2,12 @@
 
 Uses ReportLab + DejaVuSans for Cyrillic. The blank layout is **data-driven**:
 an editable template (stored in the `print_templates` table, JSON) selects which
-fields to show, the brand/title/footer, paper size, and the legal text. Nothing
-business-specific is hardcoded in the layout code.
+fields to show, the brand/title/footer, paper size, legal text, and layout.
+
+Layout modes (template field `layout`):
+  - "one-per-page" : каждый экземпляр на отдельной странице (по умолчанию).
+  - "two-per-page" : 2 экземпляра (клиент + сервис) на ОДНОМ листе A4,
+                     вертикально, с линией разреза между ними (потом порезать).
 """
 import io
 import json
@@ -65,6 +69,8 @@ DEFAULT_TEMPLATE = {
     "signature": True,
     # Количество экземпляров договора (клиент + сервис).
     "copies": 2,
+    # Раскладка: one-per-page | two-per-page (2 на одном листе).
+    "layout": "one-per-page",
 }
 
 
@@ -124,25 +130,15 @@ def render_blank_pdf(
     t = normalize_template(template)
     _register_fonts()
 
-    paper = t.get("paper", "A4").upper()
-    page = A4 if paper == "A4" else A5
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=page)
-    w, h = page
-    left = 12 * mm
-    top = h - 12 * mm
+    layout = t.get("layout", "one-per-page")
+    copies = max(1, int(t.get("copies", 2) or 2))
+    copy_labels = ["ЭКЗЕМПЛЯР КЛИЕНТА", "ЭКЗЕМПЛЯР СЕРВИСА"]
 
     brand = t.get("brand") or "RemontFlow"
     title = t.get("title") or ""
     subtitle = t.get("subtitle") or ""
     footer = t.get("footer") or ""
 
-    def draw(text, x, y, size=10, bold=False):
-        c.setFont(FONT_BOLD if bold else FONT, size)
-        c.setFillColorRGB(0, 0, 0)
-        c.drawString(x, y, text)
-
-    # Field values keyed by template field name.
     values = {
         "client": client_name,
         "phone": client_phone,
@@ -155,102 +151,154 @@ def render_blank_pdf(
         "storage_until": storage_until,
         "eta": f"{eta_days} дн" if eta_days else "—",
     }
-
     legal = t.get("legal_text") or legal_text or ""
 
-    def draw_page(copy_label: str) -> None:
-        nonlocal c
-        y = top
+    def draw_copy(c, w, top, bottom, label: str, s: float) -> None:
+        """Рисует один экземпляр в вертикальной полосе [bottom, top]. s — масштаб."""
+        left = 12 * mm * s
+        content_w = w - 2 * left
 
-        # Метка экземпляра (клиент / сервис).
-        if copy_label:
-            c.setFont(FONT_BOLD, 10)
-            c.setFillColorRGB(0, 0, 0)
-            c.drawRightString(w - left, y, copy_label)
-            y -= 10 * mm
+        def draw(text, x, y, size, bold=False, color=None, align=None):
+            c.setFont(FONT_BOLD if bold else FONT, size)
+            c.setFillColor(color if color else (0, 0, 0))
+            if align == "right":
+                c.drawRightString(x, y, text)
+            elif align == "center":
+                c.drawCentredString(x, y, text)
+            else:
+                c.drawString(x, y, text)
 
-        draw(brand.upper(), left, y, size=16, bold=True)
-        y -= 8 * mm
+        y = top - 6 * mm * s
+
+        # Метка экземпляра.
+        if label:
+            draw(label, w - left, y, 8 * s, bold=True, align="right")
+            y -= 7 * mm * s
+
+        draw(brand.upper(), left, y, 15 * s, bold=True)
+        y -= 7 * mm * s
+
         if subtitle:
             try:
                 sub = subtitle.format(city=city_name, branch=branch_name)
             except (KeyError, IndexError):
                 sub = subtitle
-            draw(sub, left, y, size=9)
-            y -= 6 * mm
+            draw(sub, left, y, 8 * s)
+            y -= 5.5 * mm * s
         if title:
-            draw(title, left, y, size=10, bold=True)
-            y -= 6 * mm
+            draw(title, left, y, 9 * s, bold=True)
+            y -= 5.5 * mm * s
 
-        # Big repair number
-        draw("№ ремонта", left, y, size=9)
-        y -= 7 * mm
-        draw(number, left, y, size=26, bold=True)
-        y -= 12 * mm
+        draw("№ ремонта", left, y, 8 * s)
+        y -= 6 * mm * s
+        draw(number, left, y, 22 * s, bold=True)
+        y -= 10 * mm * s
 
-        draw(f"Дата приёма: {accepted_at}", left, y)
-        y -= 6 * mm
+        draw(f"Дата приёма: {accepted_at}", left, y, 8 * s)
+        y -= 5 * mm * s
 
+        # Поля.
+        value_x = left + 38 * mm * s
         for field in t.get("fields", []):
-            label = FIELD_LABELS.get(field, field)
+            label_ = FIELD_LABELS.get(field, field)
             value = values.get(field) or "—"
-            draw(f"{label}:", left, y, size=9)
-            draw(value, left + 40 * mm, y, size=9, bold=True)
-            y -= 5.5 * mm
+            draw(f"{label_}:", left, y, 8 * s)
+            draw(value, value_x, y, 8 * s, bold=True)
+            y -= 4.5 * mm * s
 
+        # Условия хранения.
         if legal:
-            y -= 4 * mm
-            draw("УСЛОВИЯ ХРАНЕНИЯ", left, y, size=9, bold=True)
-            y -= 5 * mm
-            for chunk in simpleSplit(legal, FONT, 8, w - 2 * left):
-                draw(chunk, left, y, size=8)
-                y -= 4.5 * mm
+            y -= 3.5 * mm * s
+            draw("УСЛОВИЯ ХРАНЕНИЯ", left, y, 8 * s, bold=True)
+            y -= 4.5 * mm * s
+            for chunk in simpleSplit(legal, FONT, 7 * s, content_w):
+                draw(chunk, left, y, 7 * s)
+                y -= 4 * mm * s
 
-        # Согласие на диагностику и ремонт (юридический блок).
+        # Согласие на диагностику и ремонт.
         if consent_repair_text:
-            y -= 4 * mm
-            draw("СОГЛАСИЕ НА ДИАГНОСТИКУ И РЕМОНТ", left, y, size=9, bold=True)
-            y -= 5 * mm
-            for chunk in simpleSplit(consent_repair_text, FONT, 8, w - 2 * left):
-                draw(chunk, left, y, size=8)
-                y -= 4.5 * mm
-            y -= 4 * mm
+            y -= 3.5 * mm * s
+            draw("СОГЛАСИЕ НА ДИАГНОСТИКУ И РЕМОНТ", left, y, 8 * s, bold=True)
+            y -= 4.5 * mm * s
+            for chunk in simpleSplit(consent_repair_text, FONT, 7 * s, content_w):
+                draw(chunk, left, y, 7 * s)
+                y -= 4 * mm * s
+            y -= 3 * mm * s
             marker = "[X] Согласен" if consent_repair else "[ ] Согласен"
-            draw(marker, left, y, size=9, bold=True)
-            y -= 6 * mm
+            draw(marker, left, y, 8 * s, bold=True)
 
-        # QR in top-right area.
+        # QR в правом верхнем углу копии.
         try:
             qr_buf = _qr_png(qr_url)
-            c.drawImage(qr_buf, w - 45 * mm, h - 52 * mm, width=33 * mm, height=33 * mm)
-            draw("Статус ремонта по QR", w - 45 * mm, h - 56 * mm, size=7)
+            qr_size = 26 * mm * s
+            qr_x = w - left - qr_size
+            qr_y = top - 6 * mm * s - qr_size
+            c.drawImage(qr_buf, qr_x, qr_y, width=qr_size, height=qr_size)
+            draw("QR статус", qr_x, qr_y - 3.5 * mm * s, 6 * s)
         except Exception:
-            draw(f"QR: {qr_url}", w - 60 * mm, h - 30 * mm, size=6)
+            pass
 
-        # Footer.
+        # Footer (внизу копии).
         if footer:
-            c.setFont(FONT, 8)
-            c.setFillColorRGB(0.35, 0.35, 0.35)
-            c.drawCentredString(w / 2, 14 * mm, footer)
+            draw(footer, w / 2, bottom + 6 * mm * s, 7 * s, color=(0.35, 0.35, 0.35), align="center")
 
-        # Signature block: подпись клиента и подпись сервиса.
+        # Подписи (внизу копии).
         if t.get("signature", True):
-            y = 20 * mm
+            sig_y = bottom + 13 * mm * s
             c.setFillColorRGB(0, 0, 0)
-            c.line(left, y, left + 70 * mm, y)
-            c.line(w - 70 * mm - left, y, w - left, y)
-            draw("Подпись клиента", left, y - 5 * mm, size=8)
-            draw("Подпись сервиса", w - 70 * mm - left, y - 5 * mm, size=8)
+            c.setLineWidth(0.5)
+            c.line(left, sig_y, left + 62 * mm * s, sig_y)
+            c.line(w - 62 * mm * s - left, sig_y, w - left, sig_y)
+            draw("Подпись клиента", left, sig_y - 4 * mm * s, 7 * s)
+            draw("Подпись сервиса", w - 62 * mm * s - left, sig_y - 4 * mm * s, 7 * s)
 
-        c.showPage()
+    buf = io.BytesIO()
 
-    copies = max(1, int(t.get("copies", 2) or 2))
-    copy_labels = ["ЭКЗЕМПЛЯР КЛИЕНТА", "ЭКЗЕМПЛЯР СЕРВИСА"]
-    for i in range(copies):
-        label = copy_labels[i] if i < len(copy_labels) else f"ЭКЗЕМПЛЯР {i + 1}"
-        draw_page(label)
+    if layout == "two-per-page":
+        # 2 экземпляра на одном листе A4 (вертикально) + линия разреза.
+        page = A4
+        c = canvas.Canvas(buf, pagesize=page)
+        w, h = page
+        margin = 7 * mm
+        gutter = 10 * mm
+        half = (h - 2 * margin - gutter) / 2
 
-    c.save()
+        regions = [
+            (h - margin, h - margin - half),                                  # верх
+            (h - margin - half - gutter, h - margin - half - gutter - half),  # низ
+        ]
+
+        for i in range(min(copies, 2)):
+            top, bottom = regions[i]
+            label = copy_labels[i] if i < len(copy_labels) else f"ЭКЗЕМПЛЯР {i + 1}"
+            draw_copy(c, w, top, bottom, label, s=0.66)
+
+        # Линия разреза между экземплярами.
+        cut_y = (regions[0][1] + regions[1][0]) / 2
+        c.setDash(3, 3)
+        c.setStrokeColorRGB(0.4, 0.4, 0.4)
+        c.setLineWidth(0.4)
+        c.line(margin, cut_y, w - margin, cut_y)
+        c.setDash()
+        c.setFont(FONT, 6.5)
+        c.setFillColorRGB(0.4, 0.4, 0.4)
+        c.drawCentredString(w / 2, cut_y - 3.2 * mm, "— ✂ разрез ✂ —")
+        c.save()
+    else:
+        # Каждый экземпляр на отдельной странице.
+        paper = t.get("paper", "A4").upper()
+        page = A4 if paper == "A4" else A5
+        c = canvas.Canvas(buf, pagesize=page)
+        w, h = page
+        margin = 12 * mm
+        for i in range(copies):
+            label = copy_labels[i] if i < len(copy_labels) else f"ЭКЗЕМПЛЯР {i + 1}"
+            top = h - margin
+            bottom = margin
+            draw_copy(c, w, top, bottom, label, s=1.0)
+            c.showPage()
+        c.save()
+
     return buf.getvalue()
 
 

@@ -158,6 +158,31 @@ export default function PrintTemplatesPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
+              <label className={label}>Раскладка экземпляров</label>
+              <select
+                className={input}
+                value={current.body.layout ?? "one-per-page"}
+                onChange={(e) => update({ layout: e.target.value })}
+              >
+                <option value="one-per-page">По 1 на странице</option>
+                <option value="two-per-page">2 на одном листе (разрезать)</option>
+              </select>
+            </div>
+            <div>
+              <label className={label}>Кол-во экземпляров</label>
+              <select
+                className={input}
+                value={current.body.copies ?? 2}
+                onChange={(e) => update({ copies: Number(e.target.value) })}
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
               <label className={label}>Название сервиса (brand)</label>
               <input
                 className={input}
