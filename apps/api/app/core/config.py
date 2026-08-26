@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "RemontFlow"
     ENV: str = "dev"  # dev | prod
     API_PREFIX: str = "/api"
-    PUBLIC_BASE_URL: str = "http://localhost:8000"  # used to build QR links
+    # Публичный адрес фронтенда, куда ведёт QR на бланке (/r/{token}).
+    # Для локальной сети укажите IP машины, например http://192.168.1.10:3000
+    PUBLIC_BASE_URL: str = "http://localhost:3000"
 
     # --- Database ---
     # prod: postgresql+asyncpg://user:pass@postgres:5432/remontflow
