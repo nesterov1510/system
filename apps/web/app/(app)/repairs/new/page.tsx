@@ -6,6 +6,8 @@ import { api, getStoredUser, money, type Lookup, type PriceHint, type Repair } f
 
 const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
 const BRAND_CHIPS = ["Samsung", "LG", "Xiaomi", "Sony", "Philips", "TCL"];
+// Дефекты внешнего вида (чекбоксы) — попадают в condition_notes.
+const CONDITION_ITEMS = ["Линии на экране", "Царапины"];
 
 export default function NewRepairPage() {
   const router = useRouter();
@@ -21,6 +23,8 @@ export default function NewRepairPage() {
   const [model, setModel] = useState("");
   const [serial, setSerial] = useState("");
   const [complect, setComplect] = useState<string[]>([]);
+  const [conditions, setConditions] = useState<string[]>([]);
+  const [conditionOther, setConditionOther] = useState("");
   const [fault, setFault] = useState("");
   const [masterId, setMasterId] = useState("");
   const [etaDays, setEtaDays] = useState("");
@@ -73,6 +77,19 @@ export default function NewRepairPage() {
     );
   }
 
+  function toggleCondition(item: string) {
+    setConditions((prev) =>
+      prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item],
+    );
+  }
+
+  // Собираем внешний вид: чекбоксы дефектов + «другое».
+  function buildConditionNotes(): string {
+    const parts = [...conditions];
+    if (conditionOther.trim()) parts.push(conditionOther.trim());
+    return parts.join(", ");
+  }
+
   async function submit() {
     setLoading(true);
     setError(null);
@@ -90,6 +107,7 @@ export default function NewRepairPage() {
         model: model || null,
         serial: serial || null,
         complectation: { items: complect },
+        condition_notes: buildConditionNotes() || null,
         fault_client: fault || null,
         master_id: masterId || null,
         eta_days: etaDays ? parseInt(etaDays, 10) : null,
@@ -147,6 +165,8 @@ export default function NewRepairPage() {
               setClientName("");
               setClientPhone("");
               setComplect([]);
+              setConditions([]);
+              setConditionOther("");
               setFault("");
               setPhotos([]);
               setMasterId("");
@@ -305,6 +325,34 @@ export default function NewRepairPage() {
                 </label>
               ))}
           </div>
+
+          <p className={`${label} mt-4`}>Внешний вид / дефекты</p>
+          <div className="grid grid-cols-2 gap-2">
+            {CONDITION_ITEMS.map((item) => (
+              <label
+                key={item}
+                className={`flex items-center gap-2 rounded-lg border px-3 py-3 text-sm ${
+                  conditions.includes(item)
+                    ? "border-amber-400 bg-amber-50"
+                    : "border-gray-300"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={conditions.includes(item)}
+                  onChange={() => toggleCondition(item)}
+                  className="h-5 w-5"
+                />
+                {item}
+              </label>
+            ))}
+          </div>
+          <input
+            className={`${input} mt-2`}
+            placeholder="Другое (внешний вид)…"
+            value={conditionOther}
+            onChange={(e) => setConditionOther(e.target.value)}
+          />
         </section>
 
         {/* Шаг 3 — Неисправность / мастер / ETA / фото */}

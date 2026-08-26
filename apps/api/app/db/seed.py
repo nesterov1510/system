@@ -124,8 +124,8 @@ async def seed(db: AsyncSession) -> None:
         if row.scalar_one_or_none() is None:
             db.add(ChatChannel(slug=slug, name=name, kind="public"))
 
-    # --- Complectation items ---
-    items = ["ПДУ", "Кабель питания", "Подставка", "Документы", "Аккумулятор"]
+    # --- Complectation items (комплектация при приёмке) ---
+    items = ["Пульт", "Шнур питания", "Ножки", "Крепление", "Документы"]
     for i, name in enumerate(items):
         row = await db.execute(
             select(ComplectationItem).where(ComplectationItem.name == name)

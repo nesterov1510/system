@@ -37,6 +37,7 @@ FIELD_LABELS = {
     "serial": "Серийник",
     "complect": "Комплект",
     "fault": "Неисправность",
+    "condition": "Внешний вид",
     "accepted_by": "Принял",
     "master": "Мастер",
     "storage_until": "Хранение до",
@@ -58,6 +59,7 @@ DEFAULT_TEMPLATE = {
         "device",
         "serial",
         "complect",
+        "condition",
         "fault",
         "accepted_by",
         "master",
@@ -70,7 +72,7 @@ DEFAULT_TEMPLATE = {
     # Количество экземпляров договора (клиент + сервис).
     "copies": 2,
     # Раскладка: one-per-page | two-per-page (2 на одном листе).
-    "layout": "one-per-page",
+    "layout": "two-per-page",
 }
 
 
@@ -117,6 +119,7 @@ def render_blank_pdf(
     serial: str,
     complectation: str,
     fault: str,
+    condition: str = "",
     accepted_by: str,
     master: str,
     eta_days: str,
@@ -146,6 +149,7 @@ def render_blank_pdf(
         "serial": serial,
         "complect": complectation,
         "fault": fault,
+        "condition": condition,
         "accepted_by": accepted_by,
         "master": master,
         "storage_until": storage_until,

@@ -65,6 +65,7 @@ async def build_context(db, repair: Repair) -> dict:
         "serial": repair.serial or "—",
         "complectation": complectation,
         "fault": repair.fault_client or "—",
+        "condition": repair.condition_notes or "—",
         "accepted_by": accepted_by,
         "master": master,
         "eta_days": str(repair.eta_days) if repair.eta_days else "",
