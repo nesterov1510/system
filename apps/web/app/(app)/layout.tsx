@@ -14,6 +14,7 @@ const NAV = [
 ];
 
 const ADMIN_NAV = [
+  { href: "/parts", label: "Склад", icon: "📦" },
   { href: "/admin/print-templates", label: "Бланк", icon: "🖨" },
 ];
 

@@ -14,6 +14,7 @@ from app.db.models import (
     City,
     Client,
     ComplectationItem,
+    Part,
     PriceItem,
     PrintTemplate,
     Repair,
@@ -176,6 +177,30 @@ async def seed(db: AsyncSession) -> None:
     )
     if row.scalars().first() is None:
         await _seed_demo_repairs(db, city, branch)
+
+    # --- Demo parts (склад) ---
+    row = await db.execute(select(Part))
+    if row.scalars().first() is None:
+        demo_parts = [
+            ("Блок питания ТВ", "PS-TV-001", "Блок питания", 5, 2, 800, 1800, "ООО Поставщик"),
+            ("Матрица LED 55\"", "MAT-55-002", "Матрица", 2, 3, 12000, 18000, "ООО Поставщик"),
+            ("Подсветка LED-полоса", "BL-003", "Подсветка", 20, 10, 400, 1200, "ООО Поставщик"),
+            ("Конденсатор 100мкФ", "CAP-004", "Компоненты", 100, 50, 5, 40, "ООО Компоненты"),
+            ("ПДУ универсальный", "RC-005", "Аксессуары", 8, 3, 150, 600, "ООО Поставщик"),
+        ]
+        for name, sku, cat, qty, min_s, cost, sell, sup in demo_parts:
+            db.add(
+                Part(
+                    name=name,
+                    sku=sku,
+                    category=cat,
+                    stock_qty=qty,
+                    min_stock=min_s,
+                    cost_price=cost,
+                    sell_price=sell,
+                    supplier=sup,
+                )
+            )
 
     await db.commit()
 

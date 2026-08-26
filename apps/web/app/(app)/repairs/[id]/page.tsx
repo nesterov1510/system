@@ -6,8 +6,10 @@ import { useParams } from "next/navigation";
 import {
   api,
   mediaUrl,
+  type Part,
   type Photo,
   type Repair,
+  type RepairPart,
 } from "@/lib/api";
 
 const STATUSES = [
@@ -55,6 +57,8 @@ export default function RepairCardPage() {
 
   const [repair, setRepair] = useState<Repair | null>(null);
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [repairParts, setRepairParts] = useState<RepairPart[]>([]);
+  const [partsCatalog, setPartsCatalog] = useState<Part[]>([]);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,6 +68,8 @@ export default function RepairCardPage() {
   const load = useCallback(() => {
     api.repair(id).then(setRepair).catch((e) => setError(e.message));
     api.photos(id).then(setPhotos).catch(() => {});
+    api.repairParts(id).then(setRepairParts).catch(() => {});
+    api.parts().then(setPartsCatalog).catch(() => {});
   }, [id]);
 
   useEffect(load, [load]);
@@ -123,6 +129,30 @@ export default function RepairCardPage() {
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  async function addPart(partId: string) {
+    setBusy(true);
+    try {
+      await api.addRepairPart(id, partId, 1);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePart(rpId: string) {
+    setBusy(true);
+    try {
+      await api.removeRepairPart(id, rpId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -239,6 +269,55 @@ export default function RepairCardPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Parts (склад) */}
+      <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
+        <h2 className="mb-3 font-semibold">Запчасти</h2>
+        {repairParts.length === 0 ? (
+          <p className="text-sm text-gray-400">Запчасти не добавлены</p>
+        ) : (
+          <ul className="mb-3 space-y-1">
+            {repairParts.map((rp) => (
+              <li key={rp.id} className="flex items-center justify-between text-sm">
+                <span className="text-gray-700">
+                  {rp.part_name} ×{rp.qty}
+                </span>
+                <span className="flex items-center gap-2">
+                  {rp.price != null && (
+                    <span className="font-medium text-gray-900">
+                      {(rp.price * rp.qty).toLocaleString("ru")} ₽
+                    </span>
+                  )}
+                  <button
+                    onClick={() => removePart(rp.id)}
+                    disabled={busy}
+                    className="text-red-500 hover:underline"
+                  >
+                    удалить
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <select
+          onChange={(e) => {
+            if (e.target.value) addPart(e.target.value);
+            e.target.value = "";
+          }}
+          disabled={busy}
+          defaultValue=""
+          className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+        >
+          <option value="">+ Добавить запчасть…</option>
+          {partsCatalog.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} · {p.stock_qty} шт ·{" "}
+              {p.sell_price ? `${p.sell_price.toLocaleString("ru")} ₽` : "—"}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Timeline */}

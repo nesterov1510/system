@@ -238,6 +238,39 @@ class RepairPhoto(Base, TimestampMixin):
     )
 
 
+# --------------------------------------------------------------------------
+# Parts / warehouse (склад запчастей)
+# --------------------------------------------------------------------------
+class Part(Base, TimestampMixin):
+    __tablename__ = "parts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    sku: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    stock_qty: Mapped[int] = mapped_column(Integer, default=0)
+    min_stock: Mapped[int] = mapped_column(Integer, default=0)
+    cost_price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    sell_price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    supplier: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class RepairPart(Base, TimestampMixin):
+    __tablename__ = "repair_parts"
+    __table_args__ = (
+        UniqueConstraint("repair_id", "part_id", name="uq_repair_part"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    repair_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("repairs.id"), index=True)
+    part_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("parts.id"), index=True)
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+    part: Mapped["Part"] = relationship()
+
+
 class ComplectationItem(Base, TimestampMixin):
     __tablename__ = "complectation_items"
 

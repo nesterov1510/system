@@ -91,6 +91,28 @@ export interface EtaPrediction {
   n?: number | null;
 }
 
+export interface Part {
+  id: string;
+  name: string;
+  sku?: string | null;
+  category?: string | null;
+  stock_qty: number;
+  min_stock: number;
+  cost_price?: number | null;
+  sell_price?: number | null;
+  supplier?: string | null;
+  active: boolean;
+}
+
+export interface RepairPart {
+  id: string;
+  part_id: string;
+  part_name: string;
+  sku?: string | null;
+  qty: number;
+  price?: number | null;
+}
+
 export interface Repair {
   id: string;
   number: string;
@@ -253,11 +275,39 @@ export const api = {
     );
   },
 
+  // Parts (склад)
+  parts: (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<Part[]>(`/api/parts?${qs}`);
+  },
+  partCategories: () => request<string[]>("/api/parts/categories"),
+  createPart: (payload: Record<string, unknown>) =>
+    request<Part>("/api/parts", { method: "POST", body: JSON.stringify(payload) }),
+  updatePart: (id: string, payload: Record<string, unknown>) =>
+    request<Part>(`/api/parts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  repairParts: (repairId: string) =>
+    request<RepairPart[]>(`/api/repairs/${repairId}/parts`),
+  addRepairPart: (repairId: string, partId: string, qty: number) =>
+    request<RepairPart>(`/api/repairs/${repairId}/parts`, {
+      method: "POST",
+      body: JSON.stringify({ part_id: partId, qty }),
+    }),
+  removeRepairPart: (repairId: string, rpId: string) =>
+    request<{ ok: boolean }>(`/api/repairs/${repairId}/parts/${rpId}`, {
+      method: "DELETE",
+    }),
+
   // Stats + AI
   statsOverview: () =>
-    request<{ total: number; active: number; overdue_storage: number }>(
-      "/api/stats/overview",
-    ),
+    request<{
+      total: number;
+      active: number;
+      overdue_storage: number;
+      low_stock: number;
+    }>("/api/stats/overview"),
   statsTiles: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request<StatTile[]>(`/api/stats/tiles?${qs}`);

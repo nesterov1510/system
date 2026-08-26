@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Repair
+from app.db.models import Part, Repair
 
 MIN_SAMPLE = 3
 
@@ -96,7 +96,19 @@ async def overview(db: AsyncSession) -> dict:
             )
         )
     ).scalar_one()
-    return {"total": total, "active": active, "overdue_storage": overdue}
+    low_stock = (
+        await db.execute(
+            select(func.count(Part.id)).where(
+                Part.active.is_(True), Part.stock_qty <= Part.min_stock
+            )
+        )
+    ).scalar_one()
+    return {
+        "total": total,
+        "active": active,
+        "overdue_storage": overdue,
+        "low_stock": low_stock,
+    }
 
 
 async def _aggregate(db, filters: list, group_label: str) -> dict:

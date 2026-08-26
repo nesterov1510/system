@@ -4,10 +4,12 @@
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
 
-> Статус: **Итерации 0–6 (MVP) готовы.** Работают: PWA-форма приёмки с прайс-подсказкой,
-> карточка ремонта (timeline/фото/комментарии), печать с **редактором шаблона бланка**,
-> публичная QR-страница со статистикой «как обычно», доска-канбан, очередь call-центра,
-> прайс API, дашборд «курс ремонта» и AI-прогноз ETA (с честным «мало данных»).
+> Статус: **MVP (итерации 0–6) + склад запчастей + PWA-офлайн + тесты** готовы.
+> Работают: PWA-форма приёмки с прайс-подсказкой, карточка ремонта
+> (timeline/фото/комментарии/**запчасти**), печать с редактором шаблона бланка,
+> публичная QR-страница, доска-канбан, очередь call-центра, прайс API, дашборд
+> «курс ремонта» + AI-прогноз ETA, **склад запчастей** (каталог/остатки/привязка к ремонту),
+> **service worker** (PWA-офлайн), **21 pytest-тест**.
 
 ---
 
@@ -56,6 +58,14 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 # по умолчанию использует SQLite (файл remontflow.db), таблицы и сиды
 # создаются автоматически при старте.
+```
+
+### Тесты
+
+```bash
+cd apps/api
+pip install -r requirements-dev.txt
+python -m pytest tests/ -q
 ```
 
 ```bash
@@ -190,6 +200,10 @@ GET  /api/callcenter/queue?kind=agree|ready|overdue|all
 GET  /api/prices?type=&brand=&model=&city=&fault  (прайс, вилка от–до + срок)
 GET  /api/prices/hint                             (подсказка цены для формы)
 POST/PATCH/DELETE /api/prices                     (admin/manager)
+GET  /api/parts                                   (склад: каталог + остатки, ?low_stock=true)
+POST/PATCH/DELETE /api/parts                      (admin/manager)
+GET/POST /api/repairs/:id/parts                   (запчасти ремонта, списание остатков)
+DELETE /api/repairs/:id/parts/:rp_id
 GET  /api/stats/overview                          (счётчики)
 GET  /api/stats/tiles?type=&brand=&city=          («курс ремонта»)
 POST /api/ai/predict-eta                          (прогноз ETA)
@@ -233,5 +247,9 @@ POST /api/admin/print-templates/preview          (PDF-превью бланка)
 - [x] **6 — Дашборд статистики + AI**: плитки «курс ремонта» (срок/чек/p90/SLA/загрузка
       мастеров), AI-прогноз ETA с анти-галлюцинацией (`n < порога` → «мало данных»),
       weekly-summary
+- [x] **7 — Склад запчастей**: каталог (название/SKU/категория/остатки/цены/поставщик),
+      привязка к ремонту (списание остатков, события в timeline), low-stock в дашборде
+- [x] **PWA-офлайн**: service worker (app-shell кеш) + manifest
+- [x] **Тесты**: 21 pytest-смоук-тест (auth/чат/ремонты/прайс/склад/статистика/AI)
 
 Подробное ТЗ, ER-модель, wireframes и риски — в `docs/remontflow-kickoff.md`.

@@ -5,6 +5,8 @@ __pycache__/
 venv/
 *.db
 uploads/
+test_uploads/
+.pytest_cache/
 
 # Node / Next
 node_modules/

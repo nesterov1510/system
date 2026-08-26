@@ -17,11 +17,14 @@ async def _repair_preview(db, number: str) -> dict | None:
     row = await db.execute(select(Repair).where(Repair.number == number))
     repair = row.scalar_one_or_none()
     if repair is None:
-        # Short ref like "TV-MSK-00001" (no year) -> match by trailing digits.
-        row = await db.execute(
-            select(Repair).where(Repair.number.like(f"%-{number.rsplit('-', 1)[-1]}"))
-        )
-        repair = row.scalar_one_or_none()
+        # Short ref like "TV-MSK-00001" (no year) -> match prefix + seq.
+        parts = number.split("-")
+        if len(parts) == 3:
+            prefix, city, seq = parts
+            like = f"{prefix}-{city}-%-{seq}"
+            row = await db.execute(select(Repair).where(Repair.number.like(like)))
+            repairs = row.scalars().all()
+            repair = repairs[0] if len(repairs) == 1 else None
     if repair is None:
         return None
     return {

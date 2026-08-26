@@ -18,6 +18,7 @@ from app.routers import (
     chat,
     lookups,
     notifications,
+    parts,
     prices,
     prints,
     public,
@@ -64,6 +65,7 @@ app.include_router(lookups.router, prefix=api_prefix)
 app.include_router(repairs.router, prefix=api_prefix)
 app.include_router(callcenter.router, prefix=api_prefix)
 app.include_router(prices.router, prefix=api_prefix)
+app.include_router(parts.router, prefix=api_prefix)
 app.include_router(stats.router, prefix=api_prefix)
 app.include_router(ai.router, prefix=api_prefix)
 app.include_router(notifications.router, prefix=api_prefix)
