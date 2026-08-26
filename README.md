@@ -4,10 +4,10 @@
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
 
-> Статус: **Итерации 0–4** готовы. Работают: PWA-форма приёмки, карточка ремонта
-> (timeline/фото/комментарии), печать с **редактором шаблона бланка** (админка),
-> публичная QR-страница со статистикой «как обычно», доска-канбан, очередь
-> call-центра. Следующие: прайс (Итерация 5) и дашборд статистики + AI (Итерация 6).
+> Статус: **Итерации 0–6 (MVP) готовы.** Работают: PWA-форма приёмки с прайс-подсказкой,
+> карточка ремонта (timeline/фото/комментарии), печать с **редактором шаблона бланка**,
+> публичная QR-страница со статистикой «как обычно», доска-канбан, очередь call-центра,
+> прайс API, дашборд «курс ремонта» и AI-прогноз ETA (с честным «мало данных»).
 
 ---
 
@@ -151,6 +151,16 @@ python agent.py
 Термопринтер 58/80 мм (ESC/POS, CP866) — опция на будущее, включается
 feature flag `print_mode=escpos`.
 
+## AI (Итерация 6)
+
+AI идёт за абстракцией `app/services/ai.py`: `predict_eta()` и
+`weekly_summary()`. По умолчанию (без ключа) работает **честный статистический
+фолбэк** — медиана срока по истории, с явным `source: stats`. Если в `.env`
+заданы `AI_API_KEY` + `AI_BASE_URL` + `AI_MODEL` (OpenAI-совместимый API),
+вызывается внешняя модель. Анти-галлюцинация: при `n < 3` возвращается
+`«мало данных»`, ничего не выдумывается. Каждый вызов пишется в `ai_runs`
+(аудит промптов/ответов).
+
 **Редактор шаблона бланка** — в админке (`/admin/print-templates`). Бланк
 управляется шаблоном из БД (`print_templates`): название сервиса, заголовок,
 подзаголовок, набор полей (клиент/телефон/техника/серийник/комплект/неисправность/
@@ -177,6 +187,13 @@ GET  /api/notifications              POST /api/notifications/:id/read
 GET  /api/lookups/cities|branches|masters|complectation-items
 GET/POST /api/repairs/:id/photos          (multipart фото, отдаётся через /media)
 GET  /api/callcenter/queue?kind=agree|ready|overdue|all
+GET  /api/prices?type=&brand=&model=&city=&fault  (прайс, вилка от–до + срок)
+GET  /api/prices/hint                             (подсказка цены для формы)
+POST/PATCH/DELETE /api/prices                     (admin/manager)
+GET  /api/stats/overview                          (счётчики)
+GET  /api/stats/tiles?type=&brand=&city=          («курс ремонта»)
+POST /api/ai/predict-eta                          (прогноз ETA)
+POST /api/ai/weekly-summary                       (разбор недели)
 GET/POST/PATCH /api/admin/cities|branches|users
 GET/PUT /api/admin/settings
 GET/POST/PATCH /api/admin/print-templates        (редактор шаблона бланка)
@@ -211,7 +228,10 @@ POST /api/admin/print-templates/preview          (PDF-превью бланка)
       «хранение 3 мес», «как обычно» (обезличенная статистика), контакты, noindex + rate-limit
 - [x] **4 — Доска ремонтов + роли**: канбан со статусами/фильтрами/сменой статуса,
       очередь call-центра (согласовать / готово / просрочка), мастера видят только своё
-- [ ] **5 — Прайс API** + подсказки
-- [ ] **6 — Дашборд статистики + AI ETA/саммари**
+- [x] **5 — Прайс API**: справочник цен (тип/бренд/неисправность/город), вилка
+      `от–до`, срок, подсказка в форме приёмки, CRUD в админке (admin/manager)
+- [x] **6 — Дашборд статистики + AI**: плитки «курс ремонта» (срок/чек/p90/SLA/загрузка
+      мастеров), AI-прогноз ETA с анти-галлюцинацией (`n < порога` → «мало данных»),
+      weekly-summary
 
 Подробное ТЗ, ER-модель, wireframes и риски — в `docs/remontflow-kickoff.md`.

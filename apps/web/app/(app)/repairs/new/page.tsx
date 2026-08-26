@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type Lookup, type Repair } from "@/lib/api";
+import { api, type Lookup, type PriceHint, type Repair } from "@/lib/api";
 
 const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
 const BRAND_CHIPS = ["Samsung", "LG", "Xiaomi", "Sony", "Philips", "TCL"];
@@ -30,6 +30,7 @@ export default function NewRepairPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Repair | null>(null);
+  const [priceHint, setPriceHint] = useState<PriceHint | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -44,6 +45,20 @@ export default function NewRepairPage() {
       if (c[0]) setCityId(c[0].id);
     });
   }, []);
+
+  // Прайс-подсказка по типу/бренду.
+  useEffect(() => {
+    if (!deviceType) return;
+    const params: Record<string, string> = { type: deviceType };
+    if (brand) params.brand = brand;
+    const t = setTimeout(() => {
+      api
+        .priceHint(params)
+        .then((r) => setPriceHint(r.hint))
+        .catch(() => setPriceHint(null));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [deviceType, brand]);
 
   function toggleComplect(item: string) {
     setComplect((prev) =>
@@ -233,6 +248,20 @@ export default function NewRepairPage() {
               onChange={(e) => setSerial(e.target.value)}
             />
           </div>
+
+          {priceHint && (
+            <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800 ring-1 ring-blue-100">
+              💰 Ориентир: {priceHint.price_min?.toLocaleString("ru")} –{" "}
+              {priceHint.price_max?.toLocaleString("ru")} ₽
+              {priceHint.typical_days_min != null && (
+                <> · срок {priceHint.typical_days_min}
+                  {priceHint.typical_days_min !== priceHint.typical_days_max
+                    ? `–${priceHint.typical_days_max}`
+                    : ""}{" "}
+                  дн</>
+              )}
+            </div>
+          )}
 
           <p className={`${label} mt-3`}>Комплектация</p>
           <div className="grid grid-cols-2 gap-2">

@@ -12,14 +12,17 @@ from app.db.seed import seed
 from app.db.session import async_session_factory, engine
 from app.routers import (
     admin,
+    ai,
     auth,
     callcenter,
     chat,
     lookups,
     notifications,
+    prices,
     prints,
     public,
     repairs,
+    stats,
     ws,
 )
 
@@ -60,6 +63,9 @@ app.include_router(chat.router, prefix=api_prefix)
 app.include_router(lookups.router, prefix=api_prefix)
 app.include_router(repairs.router, prefix=api_prefix)
 app.include_router(callcenter.router, prefix=api_prefix)
+app.include_router(prices.router, prefix=api_prefix)
+app.include_router(stats.router, prefix=api_prefix)
+app.include_router(ai.router, prefix=api_prefix)
 app.include_router(notifications.router, prefix=api_prefix)
 app.include_router(public.router, prefix=api_prefix)
 app.include_router(prints.router, prefix=api_prefix)

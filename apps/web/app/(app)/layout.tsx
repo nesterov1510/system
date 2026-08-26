@@ -10,6 +10,7 @@ const NAV = [
   { href: "/repairs/new", label: "Приёмка", icon: "➕" },
   { href: "/callcenter", label: "Call-центр", icon: "📞" },
   { href: "/chat", label: "Чат", icon: "💬" },
+  { href: "/dashboard", label: "Курс", icon: "📈" },
 ];
 
 const ADMIN_NAV = [

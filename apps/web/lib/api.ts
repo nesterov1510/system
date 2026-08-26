@@ -48,6 +48,49 @@ export interface Photo {
   url: string;
 }
 
+export interface PriceItem {
+  id: string;
+  device_type?: string | null;
+  brand?: string | null;
+  model_or_line?: string | null;
+  fault?: string | null;
+  city_id?: string | null;
+  price_min?: number | null;
+  price_max?: number | null;
+  price_avg?: number | null;
+  typical_days?: number | null;
+  source?: string | null;
+  active: boolean;
+}
+
+export interface PriceHint {
+  price_min?: number | null;
+  price_max?: number | null;
+  typical_days_min?: number | null;
+  typical_days_max?: number | null;
+  n?: number | null;
+}
+
+export interface StatTile {
+  group: string;
+  n: number;
+  threshold: number;
+  avg_days?: number | null;
+  median_days?: number | null;
+  p90_days?: number | null;
+  avg_price?: number | null;
+  sla_pct?: number | null;
+  message?: string | null;
+}
+
+export interface EtaPrediction {
+  eta_days?: number | null;
+  source?: string | null;
+  confidence?: number | null;
+  message?: string | null;
+  n?: number | null;
+}
+
 export interface Repair {
   id: string;
   number: string;
@@ -197,6 +240,44 @@ export const api = {
   // Call-center queue
   callcenterQueue: (kind: string) =>
     request<Repair[]>(`/api/callcenter/queue?kind=${kind}`),
+
+  // Prices
+  prices: (params: Record<string, string>) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<PriceItem[]>(`/api/prices?${qs}`);
+  },
+  priceHint: (params: Record<string, string>) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<{ hint: PriceHint | null; message?: string }>(
+      `/api/prices/hint?${qs}`,
+    );
+  },
+
+  // Stats + AI
+  statsOverview: () =>
+    request<{ total: number; active: number; overdue_storage: number }>(
+      "/api/stats/overview",
+    ),
+  statsTiles: (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<StatTile[]>(`/api/stats/tiles?${qs}`);
+  },
+  predictEta: (payload: {
+    device_type: string;
+    brand?: string | null;
+    fault?: string | null;
+  }) =>
+    request<EtaPrediction>("/api/ai/predict-eta", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  weeklySummary: () =>
+    request<{
+      accepted_week: number;
+      ready_week: number;
+      masters_week: Record<string, number>;
+      note?: string | null;
+    }>("/api/ai/weekly-summary", { method: "POST" }),
 
   // Print templates (admin)
   printTemplates: () =>
