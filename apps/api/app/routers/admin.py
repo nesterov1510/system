@@ -126,6 +126,18 @@ async def update_user(user_id: uuid.UUID, payload: UserUpdate, db: DbSession):
     return user
 
 
+@router.delete("/users/{user_id}")
+async def deactivate_user(user_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "Пользователь не найден")
+    if target.id == user.id:
+        raise HTTPException(400, "Нельзя отключить самого себя")
+    target.active = False
+    await db.commit()
+    return {"ok": True}
+
+
 # --- Settings ---
 @router.get("/settings", response_model=list[SettingOut])
 async def list_settings(db: DbSession):

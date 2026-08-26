@@ -38,6 +38,10 @@ docs/              kickoff-документ (ТЗ, ER, API, wireframes)
 
 ## Быстрый старт
 
+> 🚀 **Запуск без Docker** — подробная пошаговая инструкция в файле
+> [`RUN_LOCAL.md`](RUN_LOCAL.md) (backend на `localhost:8000` + frontend на
+> `localhost:3000`, SQLite, ничего настраивать не нужно).
+
 ### 1. Docker Compose (prod-подобный путь)
 
 ```bash
@@ -211,6 +215,7 @@ GET  /api/stats/tiles?type=&brand=&city=          («курс ремонта»)
 POST /api/ai/predict-eta                          (прогноз ETA)
 POST /api/ai/weekly-summary                       (разбор недели)
 GET/POST/PATCH /api/admin/cities|branches|users
+DELETE /api/admin/users/:id                        (отключение пользователя)
 GET/PUT /api/admin/settings
 GET/POST/PATCH /api/admin/print-templates        (редактор шаблона бланка)
 POST /api/admin/print-templates/preview          (PDF-превью бланка)
@@ -253,7 +258,9 @@ POST /api/admin/print-templates/preview          (PDF-превью бланка)
       привязка к ремонту (списание остатков, события в timeline), low-stock в дашборде
 - [x] **8 — Оплаты / касса**: платежи по ремонту (сумма/метод cash|card|transfer),
       остаток, отмена платежа (admin/manager), выручка (всего/30 дней) в дашборде
+- [x] **Админка: пользователи**: CRUD сотрудников (создание/редактирование/роль/пароль/
+      отключение), защита от дублей email и отключения самого себя
 - [x] **PWA-офлайн**: service worker (app-shell кеш) + manifest
-- [x] **Тесты**: 25 pytest-смоук-тестов (auth/чат/ремонты/прайс/склад/оплаты/статистика/AI)
+- [x] **Тесты**: 28 pytest-смоук-тестов (auth/чат/ремонты/прайс/склад/оплаты/админ/статистика/AI)
 
 Подробное ТЗ, ER-модель, wireframes и риски — в `docs/remontflow-kickoff.md`.

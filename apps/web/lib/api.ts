@@ -351,6 +351,21 @@ export const api = {
       note?: string | null;
     }>("/api/ai/weekly-summary", { method: "POST" }),
 
+  // Admin: users
+  adminUsers: () => request<User[]>("/api/admin/users"),
+  createUser: (payload: Record<string, unknown>) =>
+    request<User>("/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateUser: (id: string, payload: Record<string, unknown>) =>
+    request<User>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deactivateUser: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+
   // Print templates (admin)
   printTemplates: () =>
     request<
