@@ -1,0 +1,54 @@
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import settings
+from app.db.base import Base
+from app.db.models import *  # noqa: F401,F403 — register all models
+from app.db.seed import seed
+from app.db.session import async_session_factory, engine
+from app.routers import admin, auth, chat, notifications, prints, public, repairs, ws
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # MVP: create tables + seed. Replace with Alembic migrations later.
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with async_session_factory() as db:
+        await seed(db)
+    yield
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+api_prefix = settings.API_PREFIX
+
+app.include_router(auth.router, prefix=api_prefix)
+app.include_router(chat.router, prefix=api_prefix)
+app.include_router(repairs.router, prefix=api_prefix)
+app.include_router(notifications.router, prefix=api_prefix)
+app.include_router(public.router, prefix=api_prefix)
+app.include_router(prints.router, prefix=api_prefix)
+app.include_router(admin.router, prefix=api_prefix)
+app.include_router(ws.router)  # WS has no prefix
+
+
+@app.get("/health", tags=["health"])
+async def health():
+    return {"status": "ok", "app": settings.APP_NAME}
