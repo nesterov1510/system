@@ -10,6 +10,7 @@ from app.db.models import (
     Branch,
     ChatChannel,
     City,
+    ComplectationItem,
     Setting,
     User,
     UserRole,
@@ -113,5 +114,14 @@ async def seed(db: AsyncSession) -> None:
         row = await db.execute(select(ChatChannel).where(ChatChannel.slug == slug))
         if row.scalar_one_or_none() is None:
             db.add(ChatChannel(slug=slug, name=name, kind="public"))
+
+    # --- Complectation items ---
+    items = ["ПДУ", "Кабель питания", "Подставка", "Документы", "Аккумулятор"]
+    for i, name in enumerate(items):
+        row = await db.execute(
+            select(ComplectationItem).where(ComplectationItem.name == name)
+        )
+        if row.scalar_one_or_none() is None:
+            db.add(ComplectationItem(name=name, sort=i))
 
     await db.commit()

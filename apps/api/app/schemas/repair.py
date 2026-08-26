@@ -51,6 +51,16 @@ class RepairEventOut(BaseModel):
     created_at: datetime
 
 
+class PhotoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repair_id: uuid.UUID
+    caption: str | None = None
+    created_at: datetime
+    url: str = ""
+
+
 class RepairOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

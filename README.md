@@ -4,10 +4,11 @@
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
 
-> Статус: **Итерация 0 (фундамент) + Итерация 1 (чат)** готовы и покрыты
-> smoke-тестами. Приёмка (создание ремонта), публичная QR-страница и печать
-> бланка уже работают как «вертикальный срез». Полная PWA-форма приёмки,
-> прайс, call-центр и AI-статистика — следующие итерации.
+> Статус: **Итерация 0 (фундамент) + 1 (чат) + 2 (приёмка + печать)** готовы.
+> Работают: PWA-форма приёмки (клиент → техника/комплект → фото/мастер/ETA →
+> подтверждение), карточка ремонта с timeline/фото/комментариями, «Повторить
+> печать», PDF-бланк + print-agent, публичная QR-страница, прайс и статистика
+> — следующие итерации.
 
 ---
 
@@ -168,6 +169,8 @@ PATCH /api/repairs/:id               POST /api/repairs/:id/events
 POST /api/repairs/:id/print          GET /api/print/jobs | PATCH /api/print/jobs/:id
 GET  /api/public/r/:token            (публичная QR-страница, limited DTO)
 GET  /api/notifications              POST /api/notifications/:id/read
+GET  /api/lookups/cities|branches|masters|complectation-items
+GET/POST /api/repairs/:id/photos          (multipart фото, отдаётся через /media)
 GET/POST/PATCH /api/admin/cities|branches|users
 GET/PUT /api/admin/settings
 ```
@@ -192,8 +195,10 @@ GET/PUT /api/admin/settings
 - [x] **0 — Фундамент**: монорепо, Docker, Postgres, auth (JWT+роли), модели,
       админка (юзеры/города/точки), README, .env.example
 - [x] **1 — Чат**: каналы, сообщения, realtime WS, упоминание ремонта, уведомления
-- [x] **2 (частично) — Приёмка + печать**: создание ремонта, номер, QR-token,
-      PDF-бланк + print-agent (PWA-форма и ESC/POS — дальше)
+- [x] **2 — Приёмка + печать**: PWA-форма приёмки (клиент → техника/комплект →
+      фото/мастер/ETA → подтверждение), создание Repair+Client, номер, QR-token,
+      фото с камеры (multipart → /media), PDF-бланк + print-agent, «Повторить
+      печать», карточка ремонта с timeline/комментариями
 - [ ] **3 — Публичная QR-страница** (уже отдаётся API, нужен UI + «как обычно»)
 - [ ] **4 — Доска ремонтов + роли мастера/call-центра** (канбан, очередь)
 - [ ] **5 — Прайс API** + подсказки

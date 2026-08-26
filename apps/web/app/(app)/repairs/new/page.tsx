@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, type Repair } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { api, type Lookup, type Repair } from "@/lib/api";
 
 const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
 const BRAND_CHIPS = ["Samsung", "LG", "Xiaomi", "Sony", "Philips", "TCL"];
-const COMPLECT_ITEMS = ["ПДУ", "Кабель питания", "Подставка", "Документы"];
 
 export default function NewRepairPage() {
-  const [cities, setCities] = useState<Array<{ id: string; name: string }>>([]);
+  const router = useRouter();
+  const [cities, setCities] = useState<Lookup[]>([]);
+  const [masters, setMasters] = useState<Lookup[]>([]);
+  const [items, setItems] = useState<Lookup[]>([]);
+
   const [cityId, setCityId] = useState("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
@@ -18,14 +22,25 @@ export default function NewRepairPage() {
   const [serial, setSerial] = useState("");
   const [complect, setComplect] = useState<string[]>([]);
   const [fault, setFault] = useState("");
+  const [masterId, setMasterId] = useState("");
+  const [etaDays, setEtaDays] = useState("");
   const [consent, setConsent] = useState(true);
+  const [photos, setPhotos] = useState<File[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Repair | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api.cities().then((c) => {
+    Promise.all([
+      api.cities(),
+      api.masters(),
+      api.complectationItems(),
+    ]).then(([c, m, it]) => {
       setCities(c);
+      setMasters(m);
+      setItems(it);
       if (c[0]) setCityId(c[0].id);
     });
   }, []);
@@ -54,7 +69,17 @@ export default function NewRepairPage() {
         serial: serial || null,
         complectation: { items: complect },
         fault_client: fault || null,
+        master_id: masterId || null,
+        eta_days: etaDays ? parseInt(etaDays, 10) : null,
+        eta_source: etaDays ? "manual" : null,
       });
+
+      // Upload captured photos (best-effort, не блокирует выдачу номера).
+      if (photos.length) {
+        for (const f of photos) {
+          await api.uploadPhoto(repair.id, f).catch(() => {});
+        }
+      }
       setDone(repair);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -88,12 +113,21 @@ export default function NewRepairPage() {
             🖨 Печатать бланк
           </button>
           <button
+            onClick={() => router.push(`/repairs/${done.id}`)}
+            className="rounded-lg border border-slate-300 px-4 py-3 font-semibold text-slate-700"
+          >
+            Открыть карточку
+          </button>
+          <button
             onClick={() => {
               setDone(null);
               setClientName("");
               setClientPhone("");
               setComplect([]);
               setFault("");
+              setPhotos([]);
+              setMasterId("");
+              setEtaDays("");
             }}
             className="rounded-lg border border-gray-300 px-4 py-3 font-semibold text-gray-700"
           >
@@ -202,38 +236,88 @@ export default function NewRepairPage() {
 
           <p className={`${label} mt-3`}>Комплектация</p>
           <div className="grid grid-cols-2 gap-2">
-            {COMPLECT_ITEMS.map((item) => (
-              <label
-                key={item}
-                className={`flex items-center gap-2 rounded-lg border px-3 py-3 text-sm ${
-                  complect.includes(item)
-                    ? "border-slate-900 bg-slate-50"
-                    : "border-gray-300"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={complect.includes(item)}
-                  onChange={() => toggleComplect(item)}
-                  className="h-5 w-5"
-                />
-                {item}
-              </label>
-            ))}
+            {(items.length ? items.map((i) => ({ name: i.name })) : [])
+              .map((it) => it.name)
+              .map((item) => (
+                <label
+                  key={item}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-3 text-sm ${
+                    complect.includes(item)
+                      ? "border-slate-900 bg-slate-50"
+                      : "border-gray-300"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={complect.includes(item)}
+                    onChange={() => toggleComplect(item)}
+                    className="h-5 w-5"
+                  />
+                  {item}
+                </label>
+              ))}
           </div>
         </section>
 
-        {/* Шаг 3 — Неисправность */}
+        {/* Шаг 3 — Неисправность / мастер / ETA / фото */}
         <section>
           <h2 className="mb-3 text-sm font-semibold text-gray-500">
-            3 · Неисправность (со слов клиента)
+            3 · Неисправность, мастер и фото
           </h2>
           <textarea
             className={`${input} min-h-[80px]`}
             value={fault}
             onChange={(e) => setFault(e.target.value)}
-            placeholder="например: не включается"
+            placeholder="неисправность со слов клиента (например: не включается)"
           />
+
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>Мастер</label>
+              <select
+                className={input}
+                value={masterId}
+                onChange={(e) => setMasterId(e.target.value)}
+              >
+                <option value="">в очередь</option>
+                {masters.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={label}>ETA (дней)</label>
+              <input
+                className={input}
+                value={etaDays}
+                onChange={(e) => setEtaDays(e.target.value)}
+                inputMode="numeric"
+                placeholder="авто"
+              />
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-600"
+            >
+              📷 Фото с камеры ({photos.length})
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              onChange={(e) =>
+                setPhotos((prev) => [...prev, ...Array.from(e.target.files || [])])
+              }
+              className="hidden"
+            />
+          </div>
         </section>
 
         {error && (

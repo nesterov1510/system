@@ -1,13 +1,14 @@
 import uuid
 from datetime import timedelta
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import Client, City, Repair, RepairEvent
+from app.db.models import Client, City, Repair, RepairEvent, RepairPhoto
 from app.schemas.repair import (
+    PhotoOut,
     RepairCreate,
     RepairEventOut,
     RepairOut,
@@ -15,6 +16,7 @@ from app.schemas.repair import (
 )
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.settings import get_storage_months
+from app.services.storage import object_key_for, public_url, save_object
 from app.ws.manager import manager
 
 router = APIRouter(prefix="/repairs", tags=["repairs"])
@@ -268,3 +270,70 @@ async def add_event(
     )
     await db.commit()
     return _serialize(await _get_repair_or_404(db, repair_id))
+
+
+@router.get("/{repair_id}/photos", response_model=list[PhotoOut])
+async def list_photos(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    await _get_repair_or_404(db, repair_id)
+    row = await db.execute(
+        select(RepairPhoto)
+        .where(RepairPhoto.repair_id == repair_id)
+        .order_by(RepairPhoto.created_at)
+    )
+    return [
+        PhotoOut(
+            id=p.id,
+            repair_id=p.repair_id,
+            caption=p.caption,
+            created_at=p.created_at,
+            url=public_url(p.object_key),
+        )
+        for p in row.scalars().all()
+    ]
+
+
+@router.post("/{repair_id}/photos", response_model=PhotoOut, status_code=201)
+async def upload_photo(
+    repair_id: uuid.UUID,
+    db: DbSession,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    caption: str | None = Form(default=None),
+):
+    repair = await _get_repair_or_404(db, repair_id)
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:  # 20 MB cap
+        raise HTTPException(413, "Файл слишком большой (макс. 20 МБ)")
+
+    try:
+        object_key = object_key_for(str(repair.id), file.filename or "photo.jpg")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    await save_object(data, object_key)
+
+    photo = RepairPhoto(
+        repair_id=repair.id,
+        object_key=object_key,
+        caption=caption,
+        uploaded_by=user.id,
+    )
+    db.add(photo)
+    repair.events.append(
+        RepairEvent(
+            repair_id=repair.id,
+            type="photo",
+            actor_id=user.id,
+            data={"photo_id": str(photo.id)},
+        )
+    )
+    await db.commit()
+    await db.refresh(photo)
+
+    return PhotoOut(
+        id=photo.id,
+        repair_id=photo.repair_id,
+        caption=photo.caption,
+        created_at=photo.created_at,
+        url=public_url(photo.object_key),
+    )

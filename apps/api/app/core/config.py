@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
 
     # --- Storage ---
+    # local = filesystem (dev/MVP), s3 = MinIO/S3-compatible (prod).
+    STORAGE_MODE: str = "local"
+    UPLOAD_DIR: str = "./uploads"
     S3_ENDPOINT: str = "http://localhost:9000"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"

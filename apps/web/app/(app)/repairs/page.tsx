@@ -48,10 +48,11 @@ export default function RepairsPage() {
 
       <ul className="space-y-2">
         {repairs.map((r) => (
-          <li
-            key={r.id}
-            className="rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200"
-          >
+          <li key={r.id}>
+            <Link
+              href={`/repairs/${r.id}`}
+              className="block rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-200 transition hover:ring-slate-300"
+            >
             <div className="flex items-center justify-between">
               <span className="font-mono font-semibold text-slate-900">
                 {r.number}
@@ -73,6 +74,7 @@ export default function RepairsPage() {
             <div className="mt-2 flex gap-2 text-xs text-gray-400">
               <span>принято {new Date(r.accepted_at).toLocaleString("ru")}</span>
             </div>
+            </Link>
           </li>
         ))}
       </ul>
