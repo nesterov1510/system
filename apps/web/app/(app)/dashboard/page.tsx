@@ -10,6 +10,8 @@ export default function DashboardPage() {
     active: number;
     overdue_storage: number;
     low_stock: number;
+    revenue: number;
+    revenue_30d: number;
   } | null>(null);
   const [eta, setEta] = useState<EtaPrediction | null>(null);
   const [etaType, setEtaType] = useState("ТВ");
@@ -41,20 +43,32 @@ export default function DashboardPage() {
 
       {/* Overview */}
       {overview && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Card label="Всего ремонтов" value={String(overview.total)} />
-          <Card label="В работе" value={String(overview.active)} />
-          <Card
-            label="Просрочка хранения"
-            value={String(overview.overdue_storage)}
-            accent={overview.overdue_storage > 0}
-          />
-          <Card
-            label="Мало на складе"
-            value={String(overview.low_stock)}
-            accent={overview.low_stock > 0}
-          />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Card label="Всего ремонтов" value={String(overview.total)} />
+            <Card label="В работе" value={String(overview.active)} />
+            <Card
+              label="Просрочка хранения"
+              value={String(overview.overdue_storage)}
+              accent={overview.overdue_storage > 0}
+            />
+            <Card
+              label="Мало на складе"
+              value={String(overview.low_stock)}
+              accent={overview.low_stock > 0}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Card
+              label="Выручка (всего)"
+              value={`${Math.round(overview.revenue).toLocaleString("ru")} ₽`}
+            />
+            <Card
+              label="Выручка (30 дней)"
+              value={`${Math.round(overview.revenue_30d).toLocaleString("ru")} ₽`}
+            />
+          </div>
+        </>
       )}
 
       {/* Tiles */}

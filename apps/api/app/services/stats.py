@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Part, Repair
+from app.db.models import Part, Payment, Repair
 
 MIN_SAMPLE = 3
 
@@ -103,11 +103,23 @@ async def overview(db: AsyncSession) -> dict:
             )
         )
     ).scalar_one()
+    revenue = (
+        await db.execute(select(func.coalesce(func.sum(Payment.amount), 0)))
+    ).scalar_one()
+    revenue_30d = (
+        await db.execute(
+            select(func.coalesce(func.sum(Payment.amount), 0)).where(
+                Payment.paid_at >= now - __import__("datetime").timedelta(days=30)
+            )
+        )
+    ).scalar_one()
     return {
         "total": total,
         "active": active,
         "overdue_storage": overdue,
         "low_stock": low_stock,
+        "revenue": float(revenue or 0),
+        "revenue_30d": float(revenue_30d or 0),
     }
 
 

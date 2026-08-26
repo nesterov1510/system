@@ -271,6 +271,25 @@ class RepairPart(Base, TimestampMixin):
     part: Mapped["Part"] = relationship()
 
 
+# --------------------------------------------------------------------------
+# Payments / касса
+# --------------------------------------------------------------------------
+class Payment(Base, TimestampMixin):
+    __tablename__ = "payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    repair_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("repairs.id"), index=True)
+    amount: Mapped[float] = mapped_column(Numeric(12, 2))
+    method: Mapped[str] = mapped_column(String(16), default="cash")  # cash|card|transfer
+    operator_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True
+    )
+    paid_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    repair: Mapped["Repair"] = relationship()
+    operator: Mapped["User | None"] = relationship(foreign_keys=[operator_id])
+
+
 class ComplectationItem(Base, TimestampMixin):
     __tablename__ = "complectation_items"
 

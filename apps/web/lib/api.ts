@@ -113,6 +113,15 @@ export interface RepairPart {
   price?: number | null;
 }
 
+export interface Payment {
+  id: string;
+  repair_id: string;
+  amount: number;
+  method: string;
+  operator_id?: string | null;
+  paid_at: string;
+}
+
 export interface Repair {
   id: string;
   number: string;
@@ -300,6 +309,17 @@ export const api = {
       method: "DELETE",
     }),
 
+  // Payments (касса)
+  payments: (repairId: string) =>
+    request<Payment[]>(`/api/repairs/${repairId}/payments`),
+  addPayment: (repairId: string, amount: number, method: string) =>
+    request<Payment>(`/api/repairs/${repairId}/payments`, {
+      method: "POST",
+      body: JSON.stringify({ amount, method }),
+    }),
+  deletePayment: (paymentId: string) =>
+    request<{ ok: boolean }>(`/api/payments/${paymentId}`, { method: "DELETE" }),
+
   // Stats + AI
   statsOverview: () =>
     request<{
@@ -307,6 +327,8 @@ export const api = {
       active: number;
       overdue_storage: number;
       low_stock: number;
+      revenue: number;
+      revenue_30d: number;
     }>("/api/stats/overview"),
   statsTiles: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();

@@ -7,6 +7,7 @@ import {
   api,
   mediaUrl,
   type Part,
+  type Payment,
   type Photo,
   type Repair,
   type RepairPart,
@@ -59,6 +60,9 @@ export default function RepairCardPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [repairParts, setRepairParts] = useState<RepairPart[]>([]);
   const [partsCatalog, setPartsCatalog] = useState<Part[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("cash");
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,6 +74,7 @@ export default function RepairCardPage() {
     api.photos(id).then(setPhotos).catch(() => {});
     api.repairParts(id).then(setRepairParts).catch(() => {});
     api.parts().then(setPartsCatalog).catch(() => {});
+    api.payments(id).then(setPayments).catch(() => {});
   }, [id]);
 
   useEffect(load, [load]);
@@ -156,6 +161,33 @@ export default function RepairCardPage() {
     }
   }
 
+  async function addPayment() {
+    const amount = Number(payAmount);
+    if (!amount || amount <= 0) return;
+    setBusy(true);
+    try {
+      await api.addPayment(id, amount, payMethod);
+      setPayAmount("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refundPayment(paymentId: string) {
+    setBusy(true);
+    try {
+      await api.deletePayment(paymentId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!repair) {
     return (
       <div className="py-16 text-center text-gray-400">
@@ -163,6 +195,16 @@ export default function RepairCardPage() {
       </div>
     );
   }
+
+  const paidTotal = payments.reduce((s, p) => s + p.amount, 0);
+  const priceFinal = repair.price_final ?? repair.price_max ?? 0;
+  const balance = priceFinal - paidTotal;
+
+  const METHOD_LABELS: Record<string, string> = {
+    cash: "Наличные",
+    card: "Карта",
+    transfer: "Перевод",
+  };
 
   const complect = (repair.complectation as { items?: string[] } | null)?.items;
 
@@ -318,6 +360,89 @@ export default function RepairCardPage() {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Payment (касса) */}
+      <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
+        <h2 className="mb-3 font-semibold">Оплата</h2>
+        <div className="mb-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg bg-gray-50 p-2">
+            <div className="text-xs text-gray-400">К оплате</div>
+            <div className="text-lg font-semibold text-gray-900">
+              {priceFinal.toLocaleString("ru")} ₽
+            </div>
+          </div>
+          <div className="rounded-lg bg-gray-50 p-2">
+            <div className="text-xs text-gray-400">Оплачено</div>
+            <div className="text-lg font-semibold text-green-600">
+              {paidTotal.toLocaleString("ru")} ₽
+            </div>
+          </div>
+          <div className="rounded-lg bg-gray-50 p-2">
+            <div className="text-xs text-gray-400">Остаток</div>
+            <div
+              className={`text-lg font-semibold ${
+                balance > 0 ? "text-amber-600" : "text-gray-900"
+              }`}
+            >
+              {balance > 0 ? balance.toLocaleString("ru") : "0"} ₽
+            </div>
+          </div>
+        </div>
+
+        {payments.length > 0 && (
+          <ul className="mb-3 space-y-1">
+            {payments.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between text-sm"
+              >
+                <span className="text-gray-600">
+                  {new Date(p.paid_at).toLocaleDateString("ru")} ·{" "}
+                  {METHOD_LABELS[p.method] ?? p.method}
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className="font-medium text-gray-900">
+                    {p.amount.toLocaleString("ru")} ₽
+                  </span>
+                  <button
+                    onClick={() => refundPayment(p.id)}
+                    disabled={busy}
+                    className="text-xs text-red-500 hover:underline"
+                  >
+                    отменить
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            type="number"
+            value={payAmount}
+            onChange={(e) => setPayAmount(e.target.value)}
+            placeholder="Сумма"
+            className="w-28 rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+          />
+          <select
+            value={payMethod}
+            onChange={(e) => setPayMethod(e.target.value)}
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+          >
+            <option value="cash">Наличные</option>
+            <option value="card">Карта</option>
+            <option value="transfer">Перевод</option>
+          </select>
+          <button
+            onClick={addPayment}
+            disabled={busy || !payAmount}
+            className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+          >
+            Принять
+          </button>
+        </div>
       </div>
 
       {/* Timeline */}
