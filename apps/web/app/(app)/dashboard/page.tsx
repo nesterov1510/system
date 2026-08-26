@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type EtaPrediction, type StatTile } from "@/lib/api";
+import { api, money, type EtaPrediction, type StatTile } from "@/lib/api";
 
 export default function DashboardPage() {
   const [tiles, setTiles] = useState<StatTile[]>([]);
@@ -12,6 +12,10 @@ export default function DashboardPage() {
     low_stock: number;
     revenue: number;
     revenue_30d: number;
+    finished_count: number;
+    finished_revenue: number;
+    finished_cost: number;
+    profit: number;
   } | null>(null);
   const [eta, setEta] = useState<EtaPrediction | null>(null);
   const [etaType, setEtaType] = useState("ТВ");
@@ -60,12 +64,21 @@ export default function DashboardPage() {
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Card
-              label="Выручка (всего)"
-              value={`${Math.round(overview.revenue).toLocaleString("ru")} ₽`}
+              label="Выручка (30 дней)"
+              value={money(overview.revenue_30d)}
             />
             <Card
-              label="Выручка (30 дней)"
-              value={`${Math.round(overview.revenue_30d).toLocaleString("ru")} ₽`}
+              label="Расходы (завершённые)"
+              value={money(overview.finished_cost)}
+            />
+            <Card
+              label="Прибыль"
+              value={money(overview.profit)}
+              accent={overview.profit < 0}
+            />
+            <Card
+              label="Выручка (всего)"
+              value={money(overview.revenue)}
             />
           </div>
         </>
@@ -86,7 +99,7 @@ export default function DashboardPage() {
               ) : (
                 <div className="mt-2 grid grid-cols-3 gap-2 text-center">
                   <Stat label="Срок" value={`${t.avg_days} дн`} sub={`p90 ${t.p90_days}`} />
-                  <Stat label="Чек" value={`${t.avg_price?.toLocaleString("ru")} ₽`} sub={`n=${t.n}`} />
+                  <Stat label="Чек" value={money(t.avg_price)} sub={`n=${t.n}`} />
                   <Stat label="SLA" value={`${t.sla_pct}%`} sub={`медиана ${t.median_days}д`} />
                 </div>
               )}

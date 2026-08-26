@@ -63,6 +63,8 @@ DEFAULT_TEMPLATE = {
     "legal_text": None,
     "footer": "Спасибо, что выбрали нас!",
     "signature": True,
+    # Количество экземпляров договора (клиент + сервис).
+    "copies": 2,
 }
 
 
@@ -115,6 +117,7 @@ def render_blank_pdf(
     legal_text: str,
     storage_until: str,
     qr_url: str,
+    currency_symbol: str = "ман.",
 ) -> bytes:
     t = normalize_template(template)
     _register_fonts()
@@ -137,30 +140,6 @@ def render_blank_pdf(
         c.setFillColorRGB(0, 0, 0)
         c.drawString(x, y, text)
 
-    y = top
-
-    draw(brand.upper(), left, y, size=16, bold=True)
-    y -= 8 * mm
-    if subtitle:
-        try:
-            sub = subtitle.format(city=city_name, branch=branch_name)
-        except (KeyError, IndexError):
-            sub = subtitle
-        draw(sub, left, y, size=9)
-        y -= 6 * mm
-    if title:
-        draw(title, left, y, size=10, bold=True)
-        y -= 6 * mm
-
-    # Big repair number
-    draw("№ ремонта", left, y, size=9)
-    y -= 7 * mm
-    draw(number, left, y, size=26, bold=True)
-    y -= 12 * mm
-
-    draw(f"Дата приёма: {accepted_at}", left, y)
-    y -= 6 * mm
-
     # Field values keyed by template field name.
     values = {
         "client": client_name,
@@ -175,47 +154,87 @@ def render_blank_pdf(
         "eta": f"{eta_days} дн" if eta_days else "—",
     }
 
-    for field in t.get("fields", []):
-        label = FIELD_LABELS.get(field, field)
-        value = values.get(field) or "—"
-        draw(f"{label}:", left, y, size=9)
-        draw(value, left + 40 * mm, y, size=9, bold=True)
-        y -= 5.5 * mm
-
-    # Legal text (from template override or DB setting).
     legal = t.get("legal_text") or legal_text or ""
-    if legal:
-        y -= 4 * mm
-        draw("УСЛОВИЯ ХРАНЕНИЯ", left, y, size=9, bold=True)
-        y -= 5 * mm
-        for chunk in simpleSplit(legal, FONT, 8, w - 2 * left):
-            draw(chunk, left, y, size=8)
-            y -= 4.5 * mm
 
-    # QR in top-right area.
-    try:
-        qr_buf = _qr_png(qr_url)
-        c.drawImage(qr_buf, w - 45 * mm, h - 52 * mm, width=33 * mm, height=33 * mm)
-        draw("Статус ремонта по QR", w - 45 * mm, h - 56 * mm, size=7)
-    except Exception:
-        draw(f"QR: {qr_url}", w - 60 * mm, h - 30 * mm, size=6)
+    def draw_page(copy_label: str) -> None:
+        nonlocal c
+        y = top
 
-    # Footer.
-    if footer:
-        c.setFont(FONT, 8)
-        c.setFillColorRGB(0.35, 0.35, 0.35)
-        c.drawCentredString(w / 2, 14 * mm, footer)
+        # Метка экземпляра (клиент / сервис).
+        if copy_label:
+            c.setFont(FONT_BOLD, 10)
+            c.setFillColorRGB(0, 0, 0)
+            c.drawRightString(w - left, y, copy_label)
+            y -= 10 * mm
 
-    # Signature block.
-    if t.get("signature", True):
-        y = 20 * mm
-        c.setFillColorRGB(0, 0, 0)
-        c.line(left, y, left + 70 * mm, y)
-        c.line(w - 70 * mm - left, y, w - left, y)
-        draw("Подпись клиента", left, y - 5 * mm, size=8)
-        draw("Подпись приёмщика", w - 70 * mm - left, y - 5 * mm, size=8)
+        draw(brand.upper(), left, y, size=16, bold=True)
+        y -= 8 * mm
+        if subtitle:
+            try:
+                sub = subtitle.format(city=city_name, branch=branch_name)
+            except (KeyError, IndexError):
+                sub = subtitle
+            draw(sub, left, y, size=9)
+            y -= 6 * mm
+        if title:
+            draw(title, left, y, size=10, bold=True)
+            y -= 6 * mm
 
-    c.showPage()
+        # Big repair number
+        draw("№ ремонта", left, y, size=9)
+        y -= 7 * mm
+        draw(number, left, y, size=26, bold=True)
+        y -= 12 * mm
+
+        draw(f"Дата приёма: {accepted_at}", left, y)
+        y -= 6 * mm
+
+        for field in t.get("fields", []):
+            label = FIELD_LABELS.get(field, field)
+            value = values.get(field) or "—"
+            draw(f"{label}:", left, y, size=9)
+            draw(value, left + 40 * mm, y, size=9, bold=True)
+            y -= 5.5 * mm
+
+        if legal:
+            y -= 4 * mm
+            draw("УСЛОВИЯ ХРАНЕНИЯ", left, y, size=9, bold=True)
+            y -= 5 * mm
+            for chunk in simpleSplit(legal, FONT, 8, w - 2 * left):
+                draw(chunk, left, y, size=8)
+                y -= 4.5 * mm
+
+        # QR in top-right area.
+        try:
+            qr_buf = _qr_png(qr_url)
+            c.drawImage(qr_buf, w - 45 * mm, h - 52 * mm, width=33 * mm, height=33 * mm)
+            draw("Статус ремонта по QR", w - 45 * mm, h - 56 * mm, size=7)
+        except Exception:
+            draw(f"QR: {qr_url}", w - 60 * mm, h - 30 * mm, size=6)
+
+        # Footer.
+        if footer:
+            c.setFont(FONT, 8)
+            c.setFillColorRGB(0.35, 0.35, 0.35)
+            c.drawCentredString(w / 2, 14 * mm, footer)
+
+        # Signature block: подпись клиента и подпись сервиса.
+        if t.get("signature", True):
+            y = 20 * mm
+            c.setFillColorRGB(0, 0, 0)
+            c.line(left, y, left + 70 * mm, y)
+            c.line(w - 70 * mm - left, y, w - left, y)
+            draw("Подпись клиента", left, y - 5 * mm, size=8)
+            draw("Подпись сервиса", w - 70 * mm - left, y - 5 * mm, size=8)
+
+        c.showPage()
+
+    copies = max(1, int(t.get("copies", 2) or 2))
+    copy_labels = ["ЭКЗЕМПЛЯР КЛИЕНТА", "ЭКЗЕМПЛЯР СЕРВИСА"]
+    for i in range(copies):
+        label = copy_labels[i] if i < len(copy_labels) else f"ЭКЗЕМПЛЯР {i + 1}"
+        draw_page(label)
+
     c.save()
     return buf.getvalue()
 

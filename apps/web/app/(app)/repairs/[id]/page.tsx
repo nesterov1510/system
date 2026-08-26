@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import {
   api,
   mediaUrl,
+  money,
   type Part,
   type Payment,
   type Photo,
@@ -63,6 +64,9 @@ export default function RepairCardPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
+  const [finalCost, setFinalCost] = useState("");
+  const [finalPrice, setFinalPrice] = useState("");
+  const [finalPaid, setFinalPaid] = useState(false);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -180,6 +184,37 @@ export default function RepairCardPage() {
     setBusy(true);
     try {
       await api.deletePayment(paymentId);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Оформление починки (оператор): расходы + цена + оплата.
+  useEffect(() => {
+    if (repair) {
+      setFinalCost(repair.cost_amount?.toString() ?? "");
+      setFinalPrice(repair.price_final?.toString() ?? "");
+      setFinalPaid(repair.paid);
+    }
+  }, [repair]);
+
+  async function finalize() {
+    if (!repair) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const payload: Record<string, unknown> = {
+        cost_amount: finalCost ? Number(finalCost) : null,
+        price_final: finalPrice ? Number(finalPrice) : null,
+        paid: finalPaid,
+      };
+      if (finalPaid && repair.status === "Готово к выдаче") {
+        payload.status = "Выдано";
+      }
+      await api.updateRepair(id, payload);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -328,7 +363,7 @@ export default function RepairCardPage() {
                 <span className="flex items-center gap-2">
                   {rp.price != null && (
                     <span className="font-medium text-gray-900">
-                      {(rp.price * rp.qty).toLocaleString("ru")} ₽
+                      {money(rp.price * rp.qty)}
                     </span>
                   )}
                   <button
@@ -355,11 +390,67 @@ export default function RepairCardPage() {
           <option value="">+ Добавить запчасть…</option>
           {partsCatalog.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.name} · {p.stock_qty} шт ·{" "}
-              {p.sell_price ? `${p.sell_price.toLocaleString("ru")} ₽` : "—"}
+              {p.name} · {p.stock_qty} шт · {money(p.sell_price)}
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Оформление починки (оператор) */}
+      <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
+        <h2 className="mb-3 font-semibold">Оформление починки</h2>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Сумма расходов (себестоимость), ман.
+            </label>
+            <input
+              type="number"
+              value={finalCost}
+              onChange={(e) => setFinalCost(e.target.value)}
+              placeholder="0"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-500">
+              Сумма за ремонт (взяли с клиента), ман.
+            </label>
+            <input
+              type="number"
+              value={finalPrice}
+              onChange={(e) => setFinalPrice(e.target.value)}
+              placeholder="0"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <input
+              type="checkbox"
+              checked={finalPaid}
+              onChange={(e) => setFinalPaid(e.target.checked)}
+              className="h-5 w-5"
+            />
+            Отмечено как оплаченное
+          </label>
+          <div className="text-sm text-gray-600">
+            Прибыль:{" "}
+            <span className="font-semibold">
+              {money((Number(finalPrice) || 0) - (Number(finalCost) || 0))}
+            </span>
+          </div>
+        </div>
+
+        <button
+          onClick={finalize}
+          disabled={busy}
+          className="mt-3 w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40"
+        >
+          Сохранить оформление
+        </button>
       </div>
 
       {/* Payment (касса) */}
@@ -369,13 +460,13 @@ export default function RepairCardPage() {
           <div className="rounded-lg bg-gray-50 p-2">
             <div className="text-xs text-gray-400">К оплате</div>
             <div className="text-lg font-semibold text-gray-900">
-              {priceFinal.toLocaleString("ru")} ₽
+              {money(priceFinal)}
             </div>
           </div>
           <div className="rounded-lg bg-gray-50 p-2">
             <div className="text-xs text-gray-400">Оплачено</div>
             <div className="text-lg font-semibold text-green-600">
-              {paidTotal.toLocaleString("ru")} ₽
+              {money(paidTotal)}
             </div>
           </div>
           <div className="rounded-lg bg-gray-50 p-2">
@@ -385,7 +476,7 @@ export default function RepairCardPage() {
                 balance > 0 ? "text-amber-600" : "text-gray-900"
               }`}
             >
-              {balance > 0 ? balance.toLocaleString("ru") : "0"} ₽
+              {money(balance > 0 ? balance : 0)}
             </div>
           </div>
         </div>
@@ -403,7 +494,7 @@ export default function RepairCardPage() {
                 </span>
                 <span className="flex items-center gap-2">
                   <span className="font-medium text-gray-900">
-                    {p.amount.toLocaleString("ru")} ₽
+                    {money(p.amount)}
                   </span>
                   <button
                     onClick={() => refundPayment(p.id)}

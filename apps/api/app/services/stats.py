@@ -113,6 +113,20 @@ async def overview(db: AsyncSession) -> dict:
             )
         )
     ).scalar_one()
+
+    # Прибыль по завершённым ремонтам: выручка (price_final) − расходы (cost_amount).
+    fin = (
+        await db.execute(
+            select(
+                func.count(Repair.id),
+                func.coalesce(func.sum(Repair.price_final), 0),
+                func.coalesce(func.sum(Repair.cost_amount), 0),
+            ).where(Repair.price_final.isnot(None))
+        )
+    ).one()
+    finished_count, finished_revenue, finished_cost = fin
+    profit = float(finished_revenue or 0) - float(finished_cost or 0)
+
     return {
         "total": total,
         "active": active,
@@ -120,6 +134,10 @@ async def overview(db: AsyncSession) -> dict:
         "low_stock": low_stock,
         "revenue": float(revenue or 0),
         "revenue_30d": float(revenue_30d or 0),
+        "finished_count": int(finished_count or 0),
+        "finished_revenue": float(finished_revenue or 0),
+        "finished_cost": float(finished_cost or 0),
+        "profit": profit,
     }
 
 

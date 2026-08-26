@@ -1,5 +1,5 @@
 def test_create_repair_number(client, created_repair):
-    assert created_repair["number"].startswith("TV-MSK-2026-")
+    assert created_repair["number"].startswith("TV-ASG-2026-")
     assert created_repair["status"] == "Принято"
     assert created_repair["storage_until"] is not None
 
@@ -43,6 +43,36 @@ def test_master_scoped_to_own(client, master_headers, created_repair):
     numbers = {x["number"] for x in r.json()}
     # The operator-created repair has no master assigned, so master shouldn't see it.
     assert created_repair["number"] not in numbers
+
+
+def test_master_auto_assigned_on_intake(client, master_headers, city_id):
+    """Мастер принимает заявку — он автоматически становится исполнителем."""
+    r = client.post(
+        "/api/repairs",
+        headers={**master_headers, "Idempotency-Key": "master-intake-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "От Мастера", "phone": "+993 61 999999"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["master_id"] is not None
+
+
+def test_finalize_repair(client, admin_headers, created_repair):
+    """Оператор оформляет починку: расходы + цена + оплата."""
+    r = client.patch(
+        f"/api/repairs/{created_repair['id']}",
+        headers=admin_headers,
+        json={"cost_amount": 300, "price_final": 550, "paid": True, "status": "Выдано"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["cost_amount"] == 300
+    assert body["price_final"] == 550
+    assert body["paid"] is True
+    assert body["status"] == "Выдано"
 
 
 def test_update_status_timeline(client, admin_headers, created_repair):

@@ -122,6 +122,14 @@ export interface Payment {
   paid_at: string;
 }
 
+// Валюта: туркменский манат (TMT). Символ — «ман.».
+export const CURRENCY = { code: "TMT", symbol: "ман." } as const;
+
+export function money(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return `${Math.round(n).toLocaleString("ru")} ${CURRENCY.symbol}`;
+}
+
 export interface Repair {
   id: string;
   number: string;
@@ -147,6 +155,8 @@ export interface Repair {
   price_min?: number | null;
   price_max?: number | null;
   price_final?: number | null;
+  cost_amount?: number | null;
+  paid: boolean;
   print_count: number;
   events: RepairEvent[];
 }
@@ -329,6 +339,10 @@ export const api = {
       low_stock: number;
       revenue: number;
       revenue_30d: number;
+      finished_count: number;
+      finished_revenue: number;
+      finished_cost: number;
+      profit: number;
     }>("/api/stats/overview"),
   statsTiles: (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams(params).toString();

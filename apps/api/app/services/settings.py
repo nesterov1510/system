@@ -54,6 +54,14 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "value": {"mode": "pdf"},
         "description": "Режим печати: pdf (A4) | escpos (термопринтер)",
     },
+    "currency": {
+        "value": {"code": "TMT", "symbol": "ман.", "decimals": 0},
+        "description": "Валюта: туркменский манат (TMT)",
+    },
+    "region": {
+        "value": {"country": "Туркменистан", "timezone": "Asia/Ashgabat"},
+        "description": "Регион развёртывания",
+    },
 }
 
 
@@ -91,3 +99,10 @@ async def get_legal_text(db: AsyncSession) -> str:
     if s and s.get("text"):
         return s["text"]
     return DEFAULT_SETTINGS["legal_text"]["value"]["text"]
+
+
+async def get_currency(db: AsyncSession) -> dict:
+    s = await get_setting(db, "currency")
+    if s:
+        return s
+    return DEFAULT_SETTINGS["currency"]["value"]

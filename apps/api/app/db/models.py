@@ -184,6 +184,10 @@ class Repair(Base, TimestampMixin):
     price_min: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_max: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_final: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Расходы (себестоимость) — сколько потратили на ремонт.
+    cost_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Отметка «оплачено» оператором при оформлении починки.
+    paid: Mapped[bool] = mapped_column(Boolean, default=False)
 
     accepted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     ready_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -59,6 +59,8 @@ def _serialize(repair: Repair) -> RepairOut:
         price_min=repair.price_min,
         price_max=repair.price_max,
         price_final=repair.price_final,
+        cost_amount=repair.cost_amount,
+        paid=repair.paid,
         accepted_at=repair.accepted_at,
         ready_at=repair.ready_at,
         issued_at=repair.issued_at,
@@ -128,6 +130,11 @@ async def create_repair(
     storage_months = await get_storage_months(db)
     now = utcnow()
 
+    # Если приёмку ведёт мастер — он автоматически назначается исполнителем.
+    master_id = payload.master_id
+    if master_id is None and user.role == UserRole.MASTER.value:
+        master_id = user.id
+
     repair = Repair(
         number=number,
         public_token=new_public_token(),
@@ -142,7 +149,7 @@ async def create_repair(
         fault_client=payload.fault_client,
         condition_notes=payload.condition_notes,
         accepted_by=user.id,
-        master_id=payload.master_id,
+        master_id=master_id,
         status="Принято",
         eta_days=payload.eta_days,
         eta_source=payload.eta_source,
@@ -258,6 +265,30 @@ async def update_repair(
             repair.ready_at = utcnow()
         if payload.status == "Выдано":
             repair.issued_at = utcnow()
+
+    # Финализация починки: оператор указал расходы/цену/оплату.
+    if payload.cost_amount is not None or payload.price_final is not None:
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="price",
+                actor_id=user.id,
+                data={
+                    "message": "Оформлена починка",
+                    "cost_amount": payload.cost_amount,
+                    "price_final": payload.price_final,
+                },
+            )
+        )
+    if payload.paid is True and not repair.paid:
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="price",
+                actor_id=user.id,
+                data={"message": "Отмечено как оплаченное"},
+            )
+        )
 
     await db.commit()
     repair = await _get_repair_or_404(db, repair.id)

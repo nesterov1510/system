@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, RepairEvent
 from app.services.print import body_to_template, render_blank_pdf
-from app.services.settings import get_legal_text
+from app.services.settings import get_currency, get_legal_text
 
 router = APIRouter(tags=["print"])
 
@@ -85,7 +85,10 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
 
     template = await get_default_template(db)
     ctx = await build_context(db, repair)
-    pdf = render_blank_pdf(template=template, **ctx)
+    currency = await get_currency(db)
+    pdf = render_blank_pdf(
+        template=template, currency_symbol=currency.get("symbol", "ман."), **ctx
+    )
 
     job = PrintJob(
         repair_id=repair.id,

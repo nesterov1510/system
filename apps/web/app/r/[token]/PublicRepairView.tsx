@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchPublicRepair, type PublicRepair } from "@/lib/api";
+import { fetchPublicRepair, money, type PublicRepair } from "@/lib/api";
 
 const STATUS_ORDER = [
   "Принято",
@@ -147,7 +147,7 @@ export default function PublicRepairView({ token }: { token: string }) {
                 <div className="rounded-lg bg-gray-50 p-3">
                   <div className="text-xs text-gray-400">Средний чек</div>
                   <div className="text-lg font-semibold text-gray-800">
-                    {stats.avg_price?.toLocaleString("ru")} ₽
+                    {money(stats.avg_price)}
                   </div>
                 </div>
               </div>

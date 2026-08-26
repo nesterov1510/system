@@ -11,7 +11,7 @@ def test_send_message_with_mention(client, admin_headers, created_repair):
     r = client.post(
         f"/api/chat/channels/{channel_id}/messages",
         headers=admin_headers,
-        json={"text": "Проверка #TV-MSK-00001"},
+        json={"text": "Проверка #TV-ASG-00001"},
     )
     assert r.status_code == 200
     assert r.json()["repair_ref"] is not None

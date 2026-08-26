@@ -39,6 +39,8 @@ class RepairUpdate(BaseModel):
     price_min: float | None = None
     price_max: float | None = None
     price_final: float | None = None
+    cost_amount: float | None = None
+    paid: bool | None = None
 
 
 class RepairEventOut(BaseModel):
@@ -86,6 +88,8 @@ class RepairOut(BaseModel):
     price_min: float | None = None
     price_max: float | None = None
     price_final: float | None = None
+    cost_amount: float | None = None
+    paid: bool = False
     accepted_at: datetime
     ready_at: datetime | None = None
     issued_at: datetime | None = None

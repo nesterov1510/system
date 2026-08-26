@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, type Lookup, type PriceHint, type Repair } from "@/lib/api";
+import { api, getStoredUser, money, type Lookup, type PriceHint, type Repair } from "@/lib/api";
 
 const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
 const BRAND_CHIPS = ["Samsung", "LG", "Xiaomi", "Sony", "Philips", "TCL"];
@@ -33,6 +33,8 @@ export default function NewRepairPage() {
   const [priceHint, setPriceHint] = useState<PriceHint | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const currentUser = getStoredUser();
+
   useEffect(() => {
     Promise.all([
       api.cities(),
@@ -43,6 +45,10 @@ export default function NewRepairPage() {
       setMasters(m);
       setItems(it);
       if (c[0]) setCityId(c[0].id);
+      // Если приёмку делает мастер — назначаем его самого.
+      if (currentUser?.role === "master" && currentUser.id) {
+        setMasterId(currentUser.id);
+      }
     });
   }, []);
 
@@ -179,7 +185,7 @@ export default function NewRepairPage() {
             value={clientPhone}
             onChange={(e) => setClientPhone(e.target.value)}
             inputMode="tel"
-            placeholder="+7 900 000-00-00"
+            placeholder="+993 61 000000"
           />
           <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
             <input
@@ -251,8 +257,7 @@ export default function NewRepairPage() {
 
           {priceHint && (
             <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2 text-sm text-blue-800 ring-1 ring-blue-100">
-              💰 Ориентир: {priceHint.price_min?.toLocaleString("ru")} –{" "}
-              {priceHint.price_max?.toLocaleString("ru")} ₽
+              💰 Ориентир: {money(priceHint.price_min)} – {money(priceHint.price_max)}
               {priceHint.typical_days_min != null && (
                 <> · срок {priceHint.typical_days_min}
                   {priceHint.typical_days_min !== priceHint.typical_days_max
@@ -303,18 +308,24 @@ export default function NewRepairPage() {
           <div className="mt-3 grid grid-cols-2 gap-3">
             <div>
               <label className={label}>Мастер</label>
-              <select
-                className={input}
-                value={masterId}
-                onChange={(e) => setMasterId(e.target.value)}
-              >
-                <option value="">в очередь</option>
-                {masters.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              {currentUser?.role === "master" ? (
+                <div className="rounded-lg bg-slate-50 px-3 py-2.5 text-sm text-slate-700 ring-1 ring-slate-200">
+                  Вы (приёмку ведёте сами)
+                </div>
+              ) : (
+                <select
+                  className={input}
+                  value={masterId}
+                  onChange={(e) => setMasterId(e.target.value)}
+                >
+                  <option value="">в очередь</option>
+                  {masters.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
             <div>
               <label className={label}>ETA (дней)</label>

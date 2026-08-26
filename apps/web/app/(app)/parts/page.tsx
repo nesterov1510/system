@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type Part } from "@/lib/api";
+import { api, money, type Part } from "@/lib/api";
 
 export default function PartsPage() {
   const [parts, setParts] = useState<Part[]>([]);
@@ -111,10 +111,10 @@ export default function PartsPage() {
             <input className={input} type="number" placeholder="Мин. остаток"
               value={form.min_stock}
               onChange={(e) => setForm({ ...form, min_stock: Number(e.target.value) })} />
-            <input className={input} type="number" placeholder="Закуп (₽)"
+            <input className={input} type="number" placeholder="Закуп (ман.)"
               value={form.cost_price}
               onChange={(e) => setForm({ ...form, cost_price: e.target.value })} />
-            <input className={input} type="number" placeholder="Продажа (₽)"
+            <input className={input} type="number" placeholder="Продажа (ман.)"
               value={form.sell_price}
               onChange={(e) => setForm({ ...form, sell_price: e.target.value })} />
           </div>
@@ -149,7 +149,7 @@ export default function PartsPage() {
                 </span>
                 {p.sell_price != null && (
                   <span className="text-sm font-semibold text-gray-700">
-                    {p.sell_price.toLocaleString("ru")} ₽
+                    {money(p.sell_price)}
                   </span>
                 )}
                 <div className="flex gap-1">

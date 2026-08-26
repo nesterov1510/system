@@ -36,11 +36,11 @@ async def seed(db: AsyncSession) -> None:
                 Setting(key=key, value=meta["value"], description=meta["description"])
             )
 
-    # --- City ---
-    row = await db.execute(select(City).where(City.slug == "msk"))
+    # --- City (Туркменистан, Ашхабад) ---
+    row = await db.execute(select(City).where(City.slug == "asg"))
     city = row.scalar_one_or_none()
     if city is None:
-        city = City(slug="msk", name="Москва", timezone="Europe/Moscow")
+        city = City(slug="asg", name="Ашхабад", timezone="Asia/Ashgabat")
         db.add(city)
         await db.flush()
 
@@ -51,8 +51,8 @@ async def seed(db: AsyncSession) -> None:
         branch = Branch(
             city_id=city.id,
             name="Центральная точка",
-            address="г. Москва, ул. Примерная, 1",
-            phone="+7 495 000-00-00",
+            address="г. Ашхабад, ул. Примерная, 1",
+            phone="+993 12 000-000",
             # Epson EcoTank L3250 = A4 inkjet via OS driver -> mode "pdf"
             print_config={"mode": "pdf", "paper": "A4"},
         )
@@ -72,28 +72,28 @@ async def seed(db: AsyncSession) -> None:
             "name": "Оператор Анна",
             "email": "operator@remontflow.local",
             "password": "operator123",
-            "phone": "+70000000001",
+            "phone": "+993 61 000001",
             "role": UserRole.OPERATOR.value,
         },
         {
             "name": "Мастер Сергей",
             "email": "master@remontflow.local",
             "password": "master123",
-            "phone": "+70000000002",
+            "phone": "+993 61 000002",
             "role": UserRole.MASTER.value,
         },
         {
             "name": "Оператор КЦ Мария",
             "email": "call@remontflow.local",
             "password": "call123",
-            "phone": "+70000000003",
+            "phone": "+993 61 000003",
             "role": UserRole.CALLCENTER.value,
         },
         {
             "name": "Менеджер Иван",
             "email": "manager@remontflow.local",
             "password": "manager123",
-            "phone": "+70000000004",
+            "phone": "+993 61 000004",
             "role": UserRole.MANAGER.value,
         },
     ]
@@ -147,13 +147,14 @@ async def seed(db: AsyncSession) -> None:
     # --- Seed price items (прайс) — демо-данные, правятся через админку ---
     row = await db.execute(select(PriceItem))
     if row.scalars().first() is None:
+        # Цены в туркменских манатах (TMT).
         demo_prices = [
-            ("ТВ", "Samsung", None, "не включается", 3500, 6000, 4500, 5),
-            ("ТВ", "Samsung", None, "нет изображения", 3000, 5000, 4000, 4),
-            ("ТВ", "LG", None, "подсветка", 5000, 9000, 7000, 6),
-            ("Монитор", "LG", None, "нет изображения", 2500, 4500, 3500, 4),
-            ("Аудио", None, None, "не включается", 1500, 3000, 2200, 3),
-            ("ТВ", None, None, "диагностика", 500, 1000, 800, 1),
+            ("ТВ", "Samsung", None, "не включается", 350, 600, 450, 5),
+            ("ТВ", "Samsung", None, "нет изображения", 300, 500, 400, 4),
+            ("ТВ", "LG", None, "подсветка", 500, 900, 700, 6),
+            ("Монитор", "LG", None, "нет изображения", 250, 450, 350, 4),
+            ("Аудио", None, None, "не включается", 150, 300, 220, 3),
+            ("ТВ", None, None, "диагностика", 50, 100, 80, 1),
         ]
         for dt, br, ml, fault, pmin, pmax, pavg, days in demo_prices:
             db.add(
@@ -182,11 +183,11 @@ async def seed(db: AsyncSession) -> None:
     row = await db.execute(select(Part))
     if row.scalars().first() is None:
         demo_parts = [
-            ("Блок питания ТВ", "PS-TV-001", "Блок питания", 5, 2, 800, 1800, "ООО Поставщик"),
-            ("Матрица LED 55\"", "MAT-55-002", "Матрица", 2, 3, 12000, 18000, "ООО Поставщик"),
-            ("Подсветка LED-полоса", "BL-003", "Подсветка", 20, 10, 400, 1200, "ООО Поставщик"),
-            ("Конденсатор 100мкФ", "CAP-004", "Компоненты", 100, 50, 5, 40, "ООО Компоненты"),
-            ("ПДУ универсальный", "RC-005", "Аксессуары", 8, 3, 150, 600, "ООО Поставщик"),
+            ("Блок питания ТВ", "PS-TV-001", "Блок питания", 5, 2, 80, 180, "Поставщик Ашхабад"),
+            ("Матрица LED 55\"", "MAT-55-002", "Матрица", 2, 3, 1200, 1800, "Поставщик Ашхабад"),
+            ("Подсветка LED-полоса", "BL-003", "Подсветка", 20, 10, 40, 120, "Поставщик Ашхабад"),
+            ("Конденсатор 100мкФ", "CAP-004", "Компоненты", 100, 50, 1, 4, "Компоненты ТМ"),
+            ("ПДУ универсальный", "RC-005", "Аксессуары", 8, 3, 15, 60, "Поставщик Ашхабад"),
         ]
         for name, sku, cat, qty, min_s, cost, sell, sup in demo_parts:
             db.add(
@@ -213,26 +214,27 @@ async def _seed_demo_repairs(db, city, branch) -> None:
         return
     master = masters[0]
 
+    # (тип, бренд, неисправность, цена ремонта, расходы, срок дней)
     demo = [
-        ("ТВ", "Samsung", "не включается", 5200, 6),
-        ("ТВ", "Samsung", "подсветка", 7600, 7),
-        ("ТВ", "Samsung", "не включается", 4800, 5),
-        ("ТВ", "LG", "нет изображения", 6900, 8),
-        ("ТВ", "LG", "подсветка", 8100, 9),
-        ("ТВ", "Samsung", "не включается", 5300, 6),
-        ("Монитор", "LG", "нет изображения", 3400, 4),
-        ("Монитор", "LG", "не включается", 3600, 5),
-        ("Монитор", "Samsung", "нет изображения", 3800, 4),
-        ("Аудио", None, "не включается", 2100, 3),
-        ("ТВ", "Samsung", "подсветка", 7400, 7),
-        ("ТВ", "LG", "не включается", 6100, 6),
+        ("ТВ", "Samsung", "не включается", 520, 300, 6),
+        ("ТВ", "Samsung", "подсветка", 760, 420, 7),
+        ("ТВ", "Samsung", "не включается", 480, 260, 5),
+        ("ТВ", "LG", "нет изображения", 690, 400, 8),
+        ("ТВ", "LG", "подсветка", 810, 470, 9),
+        ("ТВ", "Samsung", "не включается", 530, 310, 6),
+        ("Монитор", "LG", "нет изображения", 340, 180, 4),
+        ("Монитор", "LG", "не включается", 360, 190, 5),
+        ("Монитор", "Samsung", "нет изображения", 380, 200, 4),
+        ("Аудио", None, "не включается", 210, 110, 3),
+        ("ТВ", "Samsung", "подсветка", 740, 400, 7),
+        ("ТВ", "LG", "не включается", 610, 350, 6),
     ]
 
     now = datetime.now(timezone.utc)
-    for i, (dt, brand, fault, price, days) in enumerate(demo):
+    for i, (dt, brand, fault, price, cost, days) in enumerate(demo):
         accepted = now - timedelta(days=rng.randint(30, 120))
         ready = accepted + timedelta(days=days)
-        phone = f"+7900{100000 + i}"
+        phone = f"+993 61 {200000 + i}"
         phone_norm = normalize_phone(phone)
         client = Client(full_name=f"Клиент {i+1}", phone=phone, phone_norm=phone_norm)
         db.add(client)
@@ -259,6 +261,8 @@ async def _seed_demo_repairs(db, city, branch) -> None:
                 eta_days=days,
                 eta_source="stats",
                 price_final=price,
+                cost_amount=cost,
+                paid=True,
                 accepted_at=accepted,
                 ready_at=ready,
                 issued_at=ready + timedelta(days=1),
