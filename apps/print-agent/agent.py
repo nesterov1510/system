@@ -122,6 +122,38 @@ def _write_temp_pdf(pdf_bytes: bytes) -> str:
 
 
 # --------------------------------------------------------------------------
+# CUPS helpers (Linux / macOS).
+# --------------------------------------------------------------------------
+def _cups_printers() -> list[str]:
+    """Список установленных очередей принтеров (`lpstat -p`)."""
+    try:
+        out = subprocess.run(
+            ["lpstat", "-p"], capture_output=True, text=True, timeout=10
+        ).stdout
+    except Exception:
+        return []
+    names = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] == "printer":
+            names.append(parts[1])
+    return names
+
+
+def _cups_default() -> str | None:
+    try:
+        out = subprocess.run(
+            ["lpstat", "-d"], capture_output=True, text=True, timeout=10
+        ).stdout.strip()
+    except Exception:
+        return None
+    # "system default destination: NAME"
+    if ":" in out:
+        return out.rsplit(":", 1)[-1].strip()
+    return None
+
+
+# --------------------------------------------------------------------------
 # Режим agent: печать через драйвер ОС.
 # --------------------------------------------------------------------------
 def print_via_os(pdf_bytes: bytes, printer: dict | None) -> None:
@@ -148,10 +180,36 @@ def print_via_os(pdf_bytes: bytes, printer: dict | None) -> None:
         os.startfile(tmp, "print")  # type: ignore[attr-defined]
         return
 
-    # macOS / Linux: CUPS `lp`.
-    cmd = f'lp -d "{printer_name}" "{tmp}"'
-    log(f"печать: {cmd}")
-    subprocess.run(cmd, shell=True, check=True, timeout=120)
+    # --- macOS / Linux: CUPS `lp`. ---
+    def _lp(name: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["lp", "-d", name, tmp], capture_output=True, text=True, timeout=120
+        )
+
+    r = _lp(printer_name)
+    if r.returncode == 0:
+        log(f"печать: lp -d {printer_name}")
+        return
+
+    # Ошибка — собрать список доступных принтеров и подсказать.
+    available = _cups_printers()
+    stderr = (r.stderr or "").strip()
+
+    # Если заданное имя не найдено, но принтер в системе ровно один — используем его.
+    if printer_name not in available and len(available) == 1:
+        only = available[0]
+        r2 = _lp(only)
+        if r2.returncode == 0:
+            log(f"имя '{printer_name}' не найдено — использован единственный принтер '{only}'")
+            return
+
+    hint = ", ".join(available) if available else "нет ни одного"
+    raise RuntimeError(
+        f"Принтер '{printer_name}' не найден в CUPS. "
+        f"Доступные принтеры: {hint}. "
+        f"Укажите точное имя в Админ → Принтер → Название."
+        + (f" Ошибка CUPS: {stderr}" if stderr else "")
+    )
 
 
 # --------------------------------------------------------------------------
