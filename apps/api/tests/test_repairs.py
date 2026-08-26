@@ -60,6 +60,33 @@ def test_master_auto_assigned_on_intake(client, master_headers, city_id):
     assert r.json()["master_id"] is not None
 
 
+def test_consent_repair_recorded(client, operator_headers, city_id):
+    """Согласие на ремонт фиксируется в договоре (consent_repair_at)."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "consent-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Согласный", "phone": "+993 61 777777"},
+            "device_type": "ТВ",
+            "consent_repair": True,
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["consent_repair_at"] is not None
+
+    r2 = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "consent-2"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Без согласия", "phone": "+993 61 888888"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r2.json()["consent_repair_at"] is None
+
+
 def test_finalize_repair(client, admin_headers, created_repair):
     """Оператор оформляет починку: расходы + цена + оплата."""
     r = client.patch(

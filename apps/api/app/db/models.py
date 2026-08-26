@@ -171,6 +171,8 @@ class Repair(Base, TimestampMixin):
     fault_client: Mapped[str | None] = mapped_column(Text, nullable=True)
     fault_master: Mapped[str | None] = mapped_column(Text, nullable=True)
     condition_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Согласие клиента на диагностику/ремонт (фиксируем дату).
+    consent_repair_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     accepted_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     master_id: Mapped[uuid.UUID | None] = mapped_column(

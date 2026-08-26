@@ -380,6 +380,32 @@ export const api = {
   deactivateUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
 
+  // Printer config (admin)
+  getPrinter: () =>
+    request<{
+      printer: { ip: string; port: number; mode: string; name: string };
+      recent_jobs: Array<{
+        id: string;
+        status: string;
+        error?: string | null;
+        created_at: string;
+      }>;
+    }>("/api/admin/printer"),
+  savePrinter: (payload: {
+    ip: string;
+    port: number;
+    mode: string;
+    name: string;
+  }) =>
+    request<{ printer: Record<string, unknown> }>("/api/admin/printer", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  testPrint: () =>
+    request<{ job_id: string; status: string }>("/api/admin/printer/test", {
+      method: "POST",
+    }),
+
   // Print templates (admin)
   printTemplates: () =>
     request<

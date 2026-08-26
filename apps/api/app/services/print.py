@@ -118,6 +118,8 @@ def render_blank_pdf(
     storage_until: str,
     qr_url: str,
     currency_symbol: str = "ман.",
+    consent_repair_text: str = "",
+    consent_repair: bool = False,
 ) -> bytes:
     t = normalize_template(template)
     _register_fonts()
@@ -203,6 +205,19 @@ def render_blank_pdf(
             for chunk in simpleSplit(legal, FONT, 8, w - 2 * left):
                 draw(chunk, left, y, size=8)
                 y -= 4.5 * mm
+
+        # Согласие на диагностику и ремонт (юридический блок).
+        if consent_repair_text:
+            y -= 4 * mm
+            draw("СОГЛАСИЕ НА ДИАГНОСТИКУ И РЕМОНТ", left, y, size=9, bold=True)
+            y -= 5 * mm
+            for chunk in simpleSplit(consent_repair_text, FONT, 8, w - 2 * left):
+                draw(chunk, left, y, size=8)
+                y -= 4.5 * mm
+            y -= 4 * mm
+            marker = "[X] Согласен" if consent_repair else "[ ] Согласен"
+            draw(marker, left, y, size=9, bold=True)
+            y -= 6 * mm
 
         # QR in top-right area.
         try:

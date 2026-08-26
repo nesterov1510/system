@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
 from app.core.security import hash_password
-from app.db.models import Branch, City, PrintTemplate, Repair, Setting, User
+from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, Setting, User
 from app.schemas.admin import (
     BranchCreate,
     BranchOut,
@@ -157,6 +157,84 @@ async def upsert_setting(key: str, payload: SettingIn, db: DbSession):
         setting.description = payload.description
     await db.commit()
     return setting
+
+
+# --- Printer settings ---
+@router.get("/printer")
+async def get_printer_config(db: DbSession):
+    from app.services.settings import get_printer
+
+    printer = await get_printer(db)
+    row = await db.execute(
+        select(PrintJob).order_by(PrintJob.created_at.desc()).limit(10)
+    )
+    jobs = [
+        {
+            "id": j.id,
+            "status": j.status,
+            "error": j.error,
+            "created_at": j.created_at,
+        }
+        for j in row.scalars().all()
+    ]
+    return {"printer": printer, "recent_jobs": jobs}
+
+
+@router.put("/printer")
+async def set_printer_config(db: DbSession, body: dict):
+    from app.services.settings import set_setting
+
+    value = {
+        "ip": body.get("ip", ""),
+        "port": int(body.get("port", 631)),
+        "mode": body.get("mode", "agent"),  # agent | ipp
+        "name": body.get("name", "Epson L3250"),
+    }
+    await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати")
+    return {"printer": value}
+
+
+@router.post("/printer/test")
+async def test_print(db: DbSession):
+    """Создаёт тестовое задание печати (маленький PDF), чтобы проверить принтер."""
+    import base64
+
+    from app.services.print import render_blank_pdf
+    from app.services.settings import get_printer
+
+    printer = await get_printer(db)
+    pdf = render_blank_pdf(
+        template={"copies": 1, "signature": False},
+        number="ТЕСТ-ПЕЧАТЬ",
+        accepted_at="—",
+        city_name="—",
+        branch_name="—",
+        client_name="Тестовая печать",
+        client_phone="—",
+        device="Проверка принтера",
+        serial="—",
+        complectation="—",
+        fault="—",
+        accepted_by="—",
+        master="—",
+        eta_days="",
+        legal_text="",
+        storage_until="—",
+        qr_url="",
+    )
+    job = PrintJob(
+        repair_id=None,
+        template_id="test",
+        payload={
+            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "printer": printer,
+        },
+        status="queued",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return {"job_id": job.id, "status": job.status}
 
 
 # --- Print templates (бланк) ---

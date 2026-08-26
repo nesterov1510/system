@@ -15,7 +15,12 @@ from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, RepairEvent
 from app.services.print import body_to_template, render_blank_pdf
-from app.services.settings import get_currency, get_legal_text
+from app.services.settings import (
+    get_consent_repair_text,
+    get_currency,
+    get_legal_text,
+    get_printer,
+)
 
 router = APIRouter(tags=["print"])
 
@@ -38,6 +43,7 @@ async def build_context(db, repair: Repair) -> dict:
     city = await db.get(City, repair.city_id)
     branch = await db.get(Branch, repair.branch_id) if repair.branch_id else None
     legal_text = await get_legal_text(db)
+    consent_repair_text = await get_consent_repair_text(db)
     device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
     complectation = (
         ", ".join(repair.complectation.get("items", []))
@@ -63,6 +69,8 @@ async def build_context(db, repair: Repair) -> dict:
         "master": master,
         "eta_days": str(repair.eta_days) if repair.eta_days else "",
         "legal_text": legal_text,
+        "consent_repair_text": consent_repair_text,
+        "consent_repair": bool(repair.consent_repair_at),
         "storage_until": _fmt(repair.storage_until),
         "qr_url": qr_url,
     }
@@ -90,10 +98,17 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
         template=template, currency_symbol=currency.get("symbol", "ман."), **ctx
     )
 
+    # Конфигурация принтера попадает в payload, чтобы print-agent знал,
+    # куда и как печатать (IPP напрямую или через драйвер ОС).
+    printer = await get_printer(db)
+
     job = PrintJob(
         repair_id=repair.id,
         template_id="default",
-        payload={"pdf_base64": base64.b64encode(pdf).decode("ascii")},
+        payload={
+            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "printer": printer,
+        },
         status="queued",
         branch_id=repair.branch_id,
     )

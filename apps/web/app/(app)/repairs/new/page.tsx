@@ -25,6 +25,7 @@ export default function NewRepairPage() {
   const [masterId, setMasterId] = useState("");
   const [etaDays, setEtaDays] = useState("");
   const [consent, setConsent] = useState(true);
+  const [consentRepair, setConsentRepair] = useState(true);
   const [photos, setPhotos] = useState<File[]>([]);
 
   const [loading, setLoading] = useState(false);
@@ -93,6 +94,7 @@ export default function NewRepairPage() {
         master_id: masterId || null,
         eta_days: etaDays ? parseInt(etaDays, 10) : null,
         eta_source: etaDays ? "manual" : null,
+        consent_repair: consentRepair,
       });
 
       // Upload captured photos (best-effort, не блокирует выдачу номера).
@@ -195,6 +197,18 @@ export default function NewRepairPage() {
               className="mt-0.5 h-5 w-5"
             />
             Согласен с обработкой ПДн и хранением техники 3 месяца
+          </label>
+          <label className="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={consentRepair}
+              onChange={(e) => setConsentRepair(e.target.checked)}
+              className="mt-0.5 h-5 w-5"
+            />
+            <span>
+              <b>Клиент согласен на диагностику и ремонт</b> (включая разборку
+              устройства и замену компонентов). Согласие фиксируется в договоре.
+            </span>
           </label>
         </section>
 
@@ -368,7 +382,7 @@ export default function NewRepairPage() {
 
         <button
           onClick={submit}
-          disabled={loading || !clientName || !clientPhone || !cityId}
+          disabled={loading || !clientName || !clientPhone || !cityId || !consentRepair}
           className="w-full rounded-lg bg-slate-900 px-4 py-4 text-base font-bold text-white disabled:opacity-40"
         >
           {loading ? "Принимаем…" : "Принять и печатать"}

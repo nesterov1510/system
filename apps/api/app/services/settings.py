@@ -23,10 +23,23 @@ DEFAULT_SETTINGS: dict[str, dict] = {
                 "Техника хранится в сервисном центре бесплатно в течение 3 (трёх) "
                 "месяцев с момента уведомления о готовности. По истечении этого "
                 "срока сервисный центр вправе реализовать технику в порядке, "
-                "предусмотренном законодательством РФ."
+                "предусмотренном законодательством."
             )
         },
         "description": "Юридический текст про хранение 3 месяца",
+    },
+    "consent_repair_text": {
+        "value": {
+            "text": (
+                "Я, заказчик, даю согласие на проведение диагностики и ремонта "
+                "переданного устройства, включая его разборку, замену компонентов "
+                "и использование совместимых запасных частей. Я подтверждаю, что "
+                "предоставил достоверные сведения об устройстве и ознакомлен с "
+                "условиями хранения и оплаты. Согласие на обработку персональных "
+                "данных получено."
+            )
+        },
+        "description": "Юридический текст согласия на диагностику и ремонт",
     },
     "brand": {
         "value": {"name": "RemontFlow"},
@@ -61,6 +74,10 @@ DEFAULT_SETTINGS: dict[str, dict] = {
     "region": {
         "value": {"country": "Туркменистан", "timezone": "Asia/Ashgabat"},
         "description": "Регион развёртывания",
+    },
+    "printer": {
+        "value": {"ip": "", "port": 631, "mode": "agent", "name": "Epson L3250"},
+        "description": "Принтер: IP-адрес, порт, режим печати (agent|ipp)",
     },
 }
 
@@ -106,3 +123,17 @@ async def get_currency(db: AsyncSession) -> dict:
     if s:
         return s
     return DEFAULT_SETTINGS["currency"]["value"]
+
+
+async def get_consent_repair_text(db: AsyncSession) -> str:
+    s = await get_setting(db, "consent_repair_text")
+    if s and s.get("text"):
+        return s["text"]
+    return DEFAULT_SETTINGS["consent_repair_text"]["value"]["text"]
+
+
+async def get_printer(db: AsyncSession) -> dict:
+    s = await get_setting(db, "printer")
+    if s:
+        return s
+    return DEFAULT_SETTINGS["printer"]["value"]

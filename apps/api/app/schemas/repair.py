@@ -28,6 +28,7 @@ class RepairCreate(BaseModel):
     eta_days: int | None = None
     eta_source: str | None = None
     source: str = "walkin"
+    consent_repair: bool = False
 
 
 class RepairUpdate(BaseModel):
@@ -80,6 +81,7 @@ class RepairOut(BaseModel):
     fault_client: str | None = None
     fault_master: str | None = None
     condition_notes: str | None = None
+    consent_repair_at: datetime | None = None
     accepted_by: uuid.UUID
     master_id: uuid.UUID | None = None
     status: str

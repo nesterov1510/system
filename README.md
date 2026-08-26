@@ -169,6 +169,16 @@ python agent.py
 Термопринтер 58/80 мм (ESC/POS, CP866) — опция на будущее, включается
 feature flag `print_mode=escpos`.
 
+### Подключение принтера Epson L3250
+
+Настройка — в админке (`Админ → Принтер`): IP-адрес, порт, режим печати +
+кнопка «Тестовая печать». Два режима:
+
+- **`agent`** (рекомендуется) — печать через драйвер ОС (print-agent на машине с принтером).
+- **`ipp`** — прямая печать по IP через AirPrint/IPP (порт 631).
+
+Подробная инструкция и как узнать IP принтера — в [`RUN_LOCAL.md`](RUN_LOCAL.md).
+
 ## AI (Итерация 6)
 
 AI идёт за абстракцией `app/services/ai.py`: `predict_eta()` и
@@ -223,6 +233,8 @@ DELETE /api/admin/users/:id                        (отключение пол�
 GET/PUT /api/admin/settings
 GET/POST/PATCH /api/admin/print-templates        (редактор шаблона бланка)
 POST /api/admin/print-templates/preview          (PDF-превью бланка)
+GET/PUT /api/admin/printer                       (настройка принтера: IP/порт/режим)
+POST /api/admin/printer/test                     (тестовая печать)
 ```
 
 ---
