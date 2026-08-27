@@ -2,11 +2,11 @@ import os
 import pathlib
 
 # Must be set BEFORE importing app modules (settings is cached at import).
-_DB = pathlib.Path("./test_remontflow.db")
+_DB = pathlib.Path("./test_msb.db")
 if _DB.exists():
     _DB.unlink()
 
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_remontflow.db"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test_msb.db"
 os.environ["SECRET_KEY"] = "test_secret_key_" + "x" * 40
 os.environ["STORAGE_MODE"] = "local"
 os.environ["UPLOAD_DIR"] = "./test_uploads"
@@ -27,7 +27,7 @@ def client():
 def admin_headers(client):
     r = client.post(
         "/api/auth/login",
-        json={"email": "admin@remontflow.local", "password": "admin123"},
+        json={"email": "admin@msb.local", "password": "admin123"},
     )
     assert r.status_code == 200, r.text
     token = r.json()["access_token"]
@@ -38,7 +38,7 @@ def admin_headers(client):
 def operator_headers(client):
     r = client.post(
         "/api/auth/login",
-        json={"email": "operator@remontflow.local", "password": "operator123"},
+        json={"email": "operator@msb.local", "password": "operator123"},
     )
     token = r.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
@@ -48,7 +48,7 @@ def operator_headers(client):
 def master_headers(client):
     r = client.post(
         "/api/auth/login",
-        json={"email": "master@remontflow.local", "password": "master123"},
+        json={"email": "master@msb.local", "password": "master123"},
     )
     token = r.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}

@@ -1,4 +1,4 @@
-# Запуск RemontFlow локально (БЕЗ Docker)
+# Запуск MSB — Мастер Сервис Бюро (БЕЗ Docker)
 
 Инструкция для локального запуска на одной машине (Linux/macOS/Windows).
 Всё работает без Docker: backend (FastAPI + SQLite), frontend (Next.js),
@@ -66,7 +66,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Что произойдёт при первом запуске:
-- автоматически создастся файл БД `remontflow.db` (SQLite) рядом с `main.py`;
+- автоматически создастся файл БД `msb.db` (SQLite) рядом с `main.py`;
 - создадутся все таблицы;
 - запишутся демо-данные (пользователи, город, точка, прайс, запчасти, несколько
   завершённых ремонтов для статистики).
@@ -94,7 +94,7 @@ npm install
 npm run dev
 ```
 
-**Проверка:** откройте http://localhost:3000 — увидите экран входа RemontFlow.
+**Проверка:** откройте http://localhost:3000 — увидите экран входа MSB.
 
 Frontend проксирует запросы `/api/*` и `/media/*` на backend на `localhost:8000`
 автоматически (настроено в `next.config.mjs`), поэтому отдельно настраивать адреса
@@ -108,11 +108,11 @@ Frontend проксирует запросы `/api/*` и `/media/*` на backend
 
 | Роль | Email | Пароль |
 |---|---|---|
-| Админ | `admin@remontflow.local` | `admin123` |
-| Оператор | `operator@remontflow.local` | `operator123` |
-| Мастер | `master@remontflow.local` | `master123` |
-| Call-центр | `call@remontflow.local` | `call123` |
-| Менеджер | `manager@remontflow.local` | `manager123` |
+| Админ | `admin@msb.local` | `admin123` |
+| Оператор | `operator@msb.local` | `operator123` |
+| Мастер | `master@msb.local` | `master123` |
+| Call-центр | `call@msb.local` | `call123` |
+| Менеджер | `manager@msb.local` | `manager123` |
 
 > Это демо-пароли только для локального запуска. В бою обязательно смените
 > (админка → Пользователи, или переменные `SEED_ADMIN_*` перед первым запуском).
@@ -139,7 +139,7 @@ pip install -r requirements.txt
 
 # Запуск (укажите свою команду печати и логин оператора)
 REMONTFLOW_API_URL=http://localhost:8000 \
-REMONTFLOW_EMAIL=operator@remontflow.local \
+REMONTFLOW_EMAIL=operator@msb.local \
 REMONTFLOW_PASSWORD=operator123 \
 REMONTFLOW_PRINT_CMD='lp -d EPSON_L3250 {file}' \
 python agent.py
@@ -224,7 +224,7 @@ python -m pytest tests/ -q
 
 ## 7. Быстрая проверка, что всё работает
 
-1. Откройте http://localhost:3000 → войдите как `admin@remontflow.local` / `admin123`.
+1. Откройте http://localhost:3000 → войдите как `admin@msb.local` / `admin123`.
 2. Слева (или снизу на телефоне) меню: Доска / Приёмка / Call-центр / Чат / Курс / Склад.
 3. Зайдите в «Доска ремонтов» — увидите канбан со статусами.
 4. «Приёмка» → заполните клиента и технику → «Принять и печатать» → появится номер ремонта.
@@ -275,7 +275,7 @@ npm run dev
 http://192.168.1.10:3000
 ```
 
-Войдите как мастер (`master@remontflow.local` / `master123`) — и принимайте заявки.
+Войдите как мастер (`master@msb.local` / `master123`) — и принимайте заявки.
 
 ### Как это работает
 
@@ -315,7 +315,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev -- -p 3001
 ```
 
 **Хочу «с чистого листа» (удалить данные и демо)**
-→ остановите backend, удалите файл `system/apps/api/remontflow.db`, запустите
+→ остановите backend, удалите файл `system/apps/api/msb.db`, запустите
 снова — БД пересоздастся с демо-данными.
 
 **Печать не происходит**

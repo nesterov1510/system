@@ -1,5 +1,5 @@
-/* RemontFlow service worker — offline app-shell cache (PWA). */
-const CACHE = "remontflow-v1";
+/* MSB service worker — offline app-shell cache (PWA). */
+const CACHE = "msb-v1";
 const SHELL = ["/", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

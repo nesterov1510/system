@@ -1,4 +1,4 @@
-// Минимальный API-клиент. Токен хранится в localStorage (MVP);
+// MSB — минимальный API-клиент. Токен хранится в localStorage (MVP);
 // production-путь — httpOnly refresh cookie + тихий refresh.
 
 // Пустая строка => относительные пути, Next.js проксирует /api и /media на backend
@@ -161,8 +161,8 @@ export interface Repair {
   events: RepairEvent[];
 }
 
-const TOKEN_KEY = "remontflow_token";
-const USER_KEY = "remontflow_user";
+const TOKEN_KEY = "msb_token";
+const USER_KEY = "msb_user";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;

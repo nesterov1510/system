@@ -50,7 +50,7 @@ AVAILABLE_FIELDS = list(FIELD_LABELS.keys())
 DEFAULT_TEMPLATE = {
     "name": "Бланк приёма (A4, дефолт)",
     "paper": "A4",
-    "brand": "RemontFlow",
+    "brand": "MSB — Мастер Сервис Бюро",
     "title": "БЛАНК ПРИЁМА ТЕХНИКИ",
     "subtitle": "Сервисный центр · {city} · {branch}",
     "fields": [
@@ -137,7 +137,7 @@ def render_blank_pdf(
     copies = max(1, int(t.get("copies", 2) or 2))
     copy_labels = ["ЭКЗЕМПЛЯР КЛИЕНТА", "ЭКЗЕМПЛЯР СЕРВИСА"]
 
-    brand = t.get("brand") or "RemontFlow"
+    brand = t.get("brand") or "MSB — Мастер Сервис Бюро"
     title = t.get("title") or ""
     subtitle = t.get("subtitle") or ""
     footer = t.get("footer") or ""

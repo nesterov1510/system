@@ -5,7 +5,7 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
         headers=admin_headers,
         json={
             "name": "Новичок",
-            "email": "newbie@remontflow.local",
+            "email": "newbie@msb.local",
             "password": "newbie123",
             "role": "operator",
         },
@@ -17,7 +17,7 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
     r2 = client.post(
         "/api/admin/users",
         headers=admin_headers,
-        json={"name": "Дубль", "email": "newbie@remontflow.local", "password": "x12345", "role": "operator"},
+        json={"name": "Дубль", "email": "newbie@msb.local", "password": "x12345", "role": "operator"},
     )
     assert r2.status_code == 409
 
@@ -33,7 +33,7 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
     # New password works
     r4 = client.post(
         "/api/auth/login",
-        json={"email": "newbie@remontflow.local", "password": "newpass123"},
+        json={"email": "newbie@msb.local", "password": "newpass123"},
     )
     assert r4.status_code == 200
 
@@ -45,7 +45,7 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
     # Deactivated cannot login
     r6 = client.post(
         "/api/auth/login",
-        json={"email": "newbie@remontflow.local", "password": "newpass123"},
+        json={"email": "newbie@msb.local", "password": "newpass123"},
     )
     assert r6.status_code in (401, 403)
 

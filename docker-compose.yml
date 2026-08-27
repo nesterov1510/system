@@ -1,4 +1,4 @@
-# RemontFlow — Docker Compose (MVP).
+# MSB — Docker Compose (MVP).
 # `docker compose up -d` поднимает БД + API + web.
 # print-agent ставится на машине у стойки приёма (в LAN с принтером).
 
@@ -6,13 +6,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-remontflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-remontflow}
-      POSTGRES_DB: ${POSTGRES_DB:-remontflow}
+      POSTGRES_USER: ${POSTGRES_USER:-msb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-msb}
+      POSTGRES_DB: ${POSTGRES_DB:-msb}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-remontflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-msb}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -22,11 +22,11 @@ services:
   api:
     build: ./apps/api
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-remontflow}:${POSTGRES_PASSWORD:-remontflow}@postgres:5432/${POSTGRES_DB:-remontflow}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-msb}:${POSTGRES_PASSWORD:-msb}@postgres:5432/${POSTGRES_DB:-msb}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
       CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3000}"]'
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@remontflow.local}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@msb.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
     depends_on:
       postgres:

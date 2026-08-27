@@ -1,8 +1,13 @@
-# RemontFlow
+# MSB — Мастер Сервис Бюро
 
-Собственная система приёмки и ремонта техники для сервисного центра.
+Собственная система приёмки и ремонта техники для сервисного центра
+**(полный редизайн: новый интерфейс, бренд MSB)**.
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
+
+> ✨ **MSB** (Мастер Сервис Бюро) — современный дизайн: адаптивная доска
+> ремонтов, карточки со статусами, мастер приёмки в 3 шага, касса, склад,
+> статистика, чат и печать — всё в едином фирменном стиле.
 
 > 🌍 **Регион: Туркменистан** — город Ашхабад (Asia/Ashgabat), телефоны +993,
 > **валюта — туркменский манат (TMT, «ман.»)**. Цены, статистика и печать
@@ -64,7 +69,7 @@ cd apps/api
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
-# по умолчанию использует SQLite (файл remontflow.db), таблицы и сиды
+# по умолчанию использует SQLite (файл msb.db), таблицы и сиды
 # создаются автоматически при старте.
 ```
 
@@ -89,11 +94,11 @@ npm run dev   # http://localhost:3000
 
 | Роль | Email | Пароль |
 |---|---|---|
-| Админ | `admin@remontflow.local` | `admin123` |
-| Оператор | `operator@remontflow.local` | `operator123` |
-| Мастер | `master@remontflow.local` | `master123` |
-| Call-центр | `call@remontflow.local` | `call123` |
-| Менеджер | `manager@remontflow.local` | `manager123` |
+| Админ | `admin@msb.local` | `admin123` |
+| Оператор | `operator@msb.local` | `operator123` |
+| Мастер | `master@msb.local` | `master123` |
+| Call-центр | `call@msb.local` | `call123` |
+| Менеджер | `manager@msb.local` | `manager123` |
 
 > Пароли — только для локального/демо-запуска. В проде смените через админку
 > `/admin/users` (или переменные `SEED_ADMIN_*` перед первым запуском).
@@ -106,7 +111,7 @@ npm run dev   # http://localhost:3000
 # 1. Логин
 TOKEN=$(curl -s -X POST localhost:8000/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@remontflow.local","password":"admin123"}' \
+  -d '{"email":"admin@msb.local","password":"admin123"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # 2. Город (сидируется "Москва")
@@ -155,7 +160,7 @@ API рендерит PDF (кириллица) → print_jobs(queued) → print-a
 cd apps/print-agent
 pip install -r requirements.txt
 REMONTFLOW_API_URL=http://<api-host>:8000 \
-REMONTFLOW_EMAIL=operator@remontflow.local \
+REMONTFLOW_EMAIL=operator@msb.local \
 REMONTFLOW_PASSWORD=operator123 \
 REMONTFLOW_PRINT_CMD='lp -d EPSON_L3250 {file}' \
 python agent.py
@@ -284,4 +289,4 @@ POST /api/admin/printer/test                     (тестовая печать)
 - [x] **PWA-офлайн**: service worker (app-shell кеш) + manifest
 - [x] **Тесты**: 30 pytest-смоук-тестов (auth/чат/ремонты/прайс/склад/оплаты/админ/статистика/AI)
 
-Подробное ТЗ, ER-модель, wireframes и риски — в `docs/remontflow-kickoff.md`.
+Подробное ТЗ, ER-модель, wireframes и риски — в `docs/msb-kickoff.md`.

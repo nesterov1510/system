@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # --- App ---
-    APP_NAME: str = "RemontFlow"
+    APP_NAME: str = "MSB"
     ENV: str = "dev"  # dev | prod
     API_PREFIX: str = "/api"
     # Публичный адрес фронтенда, куда ведёт QR на бланке (/r/{token}).
@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = "http://localhost:3000"
 
     # --- Database ---
-    # prod: postgresql+asyncpg://user:pass@postgres:5432/remontflow
-    # dev/test (sandbox): sqlite+aiosqlite:///./remontflow.db
-    DATABASE_URL: str = "sqlite+aiosqlite:///./remontflow.db"
+    # prod: postgresql+asyncpg://user:pass@postgres:5432/msb
+    # dev/test (sandbox): sqlite+aiosqlite:///./msb.db
+    DATABASE_URL: str = "sqlite+aiosqlite:///./msb.db"
 
     # --- Auth / JWT ---
     SECRET_KEY: str = "CHANGE_ME_dev_only_0123456789abcdef0123456789abcdef"
@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     S3_ENDPOINT: str = "http://localhost:9000"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
-    S3_BUCKET: str = "remontflow"
+    S3_BUCKET: str = "msb"
 
     # --- AI ---
     AI_PROVIDER: str = "openai_compat"  # abstraction key
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     AI_MODEL: str = ""
 
     # --- Seed admin (first boot) ---
-    SEED_ADMIN_EMAIL: str = "admin@remontflow.local"
+    SEED_ADMIN_EMAIL: str = "admin@msb.local"
     SEED_ADMIN_PASSWORD: str = "admin123"
     SEED_ADMIN_PHONE: str = "+70000000000"
 

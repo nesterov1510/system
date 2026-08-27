@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RemontFlow print-agent — печать бланков из очереди на принтер.
+"""MSB print-agent — печать бланков из очереди на принтер.
 
 Режимы (настраиваются в админке «Принтер»):
   - mode=agent : печать через драйвер ОС (рекомендуется для Epson L3250).
@@ -9,16 +9,16 @@
   - для тихой печати PDF нужен SumatraPDF (бесплатный, portable):
     https://www.sumatrapdfreader.org/download-free-pdf-viewer
     Скачайте `SumatraPDF.exe` и положите рядом с agent.py (или укажите путь
-    в переменной REMONTFLOW_SUMATRA). Если Sumatra нет — агент сохранит PDF
+    в переменной MSB_SUMATRA). Если Sumatra нет — агент сохранит PDF
     в папку `printed/` и откроет его для печати вручную.
 
 Каждый бланк ВСЕГДА сохраняется в папку `printed/` (запасной вариант:
 можно распечатать вручную, даже если автоматическая печать не сработала).
 
 Запуск:
-    REMONTFLOW_API_URL=http://localhost:8000 \\
-    REMONTFLOW_EMAIL=operator@remontflow.local \\
-    REMONTFLOW_PASSWORD=operator123 \\
+    MSB_API_URL=http://localhost:8000 \\
+    MSB_EMAIL=operator@msb.local \\
+    MSB_PASSWORD=operator123 \\
     python agent.py
 """
 import base64
@@ -32,13 +32,13 @@ import time
 
 import requests
 
-API_URL = os.environ.get("REMONTFLOW_API_URL", "http://localhost:8000")
-EMAIL = os.environ.get("REMONTFLOW_EMAIL", "operator@remontflow.local")
-PASSWORD = os.environ.get("REMONTFLOW_PASSWORD", "operator123")
-PRINT_CMD = os.environ.get("REMONTFLOW_PRINT_CMD", "")  # переопределение для agent-режима
-POLL_SECONDS = float(os.environ.get("REMONTFLOW_POLL_SECONDS", "3"))
-SUMATRA = os.environ.get("REMONTFLOW_SUMATRA", "")
-SAVE_DIR = os.environ.get("REMONTFLOW_SAVE_DIR", "./printed")
+API_URL = os.environ.get("MSB_API_URL", "http://localhost:8000")
+EMAIL = os.environ.get("MSB_EMAIL", "operator@msb.local")
+PASSWORD = os.environ.get("MSB_PASSWORD", "operator123")
+PRINT_CMD = os.environ.get("MSB_PRINT_CMD", "")  # переопределение для agent-режима
+POLL_SECONDS = float(os.environ.get("MSB_POLL_SECONDS", "3"))
+SUMATRA = os.environ.get("MSB_SUMATRA", "")
+SAVE_DIR = os.environ.get("MSB_SAVE_DIR", "./printed")
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -234,7 +234,7 @@ def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
     attrs += _ipp_attribute(0x47, "attributes-charset", b"utf-8")
     attrs += _ipp_attribute(0x48, "attributes-natural-language", b"ru")
     attrs += _ipp_attribute(0x45, "printer-uri", printer_uri.encode("utf-8"))
-    attrs += _ipp_attribute(0x42, "requesting-user-name", b"remontflow")
+    attrs += _ipp_attribute(0x42, "requesting-user-name", b"msb")
     attrs += _ipp_attribute(0x49, "document-format", b"application/pdf")
 
     return version + op + request_id + attrs + b"\x03" + pdf_bytes

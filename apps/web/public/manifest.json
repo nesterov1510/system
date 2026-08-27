@@ -1,18 +1,18 @@
 {
-  "name": "RemontFlow",
-  "short_name": "RemontFlow",
-  "description": "Приёмка и ремонт техники",
+  "name": "MSB — Мастер Сервис Бюро",
+  "short_name": "MSB",
+  "description": "Профессиональная система приёмки, ремонта и сервисного обслуживания техники",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#0f172a",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
   "lang": "ru",
   "icons": [
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ]
 }
