@@ -1,0 +1,130 @@
+import uuid
+
+from fastapi import APIRouter, HTTPException, Query
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.core.deps import CurrentUser, DbSession
+from app.db.models import ChatChannel, ChatMessage, Repair
+from app.schemas.chat import ChannelOut, MessageCreate, MessageOut
+from app.services.chat import extract_repair_ref
+from app.ws.manager import manager
+
+router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+async def _repair_preview(db, number: str) -> dict | None:
+    row = await db.execute(select(Repair).where(Repair.number == number))
+    repair = row.scalar_one_or_none()
+    if repair is None:
+        # Short ref like "TV-MSK-00001" (no year) -> match prefix + seq.
+        parts = number.split("-")
+        if len(parts) == 3:
+            prefix, city, seq = parts
+            like = f"{prefix}-{city}-%-{seq}"
+            row = await db.execute(select(Repair).where(Repair.number.like(like)))
+            repairs = row.scalars().all()
+            repair = repairs[0] if len(repairs) == 1 else None
+    if repair is None:
+        return None
+    return {
+        "number": repair.number,
+        "status": repair.status,
+        "device_type": repair.device_type,
+        "brand": repair.brand,
+        "model": repair.model,
+    }
+
+
+@router.get("/channels", response_model=list[ChannelOut])
+async def list_channels(db: DbSession, user: CurrentUser):
+    # MVP: public channels are open to everyone; members table is seeded.
+    row = await db.execute(select(ChatChannel).order_by(ChatChannel.name))
+    return row.scalars().all()
+
+
+@router.get("/channels/{channel_id}/messages", response_model=list[MessageOut])
+async def list_messages(
+    channel_id: uuid.UUID,
+    db: DbSession,
+    user: CurrentUser,
+    limit: int = Query(50, le=200),
+    before: uuid.UUID | None = None,
+):
+    channel = await db.get(ChatChannel, channel_id)
+    if channel is None:
+        raise HTTPException(404, "Канал не найден")
+
+    q = (
+        select(ChatMessage)
+        .where(ChatMessage.channel_id == channel_id)
+        .options(selectinload(ChatMessage.author))
+        .order_by(ChatMessage.created_at.desc())
+        .limit(limit)
+    )
+    row = await db.execute(q)
+    messages = list(row.scalars().all())
+    messages.reverse()
+
+    out = []
+    for m in messages:
+        preview = await _repair_preview(db, m.repair_ref) if m.repair_ref else None
+        out.append(
+            MessageOut(
+                id=m.id,
+                channel_id=m.channel_id,
+                text=m.text,
+                repair_ref=m.repair_ref,
+                created_at=m.created_at,
+                author={"id": m.author.id, "name": m.author.name, "role": m.author.role},
+                repair_preview=preview,
+            )
+        )
+    return out
+
+
+@router.post("/channels/{channel_id}/messages", response_model=MessageOut)
+async def create_message(
+    channel_id: uuid.UUID,
+    payload: MessageCreate,
+    db: DbSession,
+    user: CurrentUser,
+):
+    channel = await db.get(ChatChannel, channel_id)
+    if channel is None:
+        raise HTTPException(404, "Канал не найден")
+
+    # Auto-detect repair mention if not explicitly provided.
+    repair_ref = payload.repair_ref or extract_repair_ref(payload.text)
+
+    message = ChatMessage(
+        channel_id=channel_id,
+        author_id=user.id,
+        text=payload.text,
+        repair_ref=repair_ref,
+    )
+    db.add(message)
+    await db.commit()
+    await db.refresh(message)
+
+    preview = await _repair_preview(db, repair_ref) if repair_ref else None
+
+    out = MessageOut(
+        id=message.id,
+        channel_id=message.channel_id,
+        text=message.text,
+        repair_ref=message.repair_ref,
+        created_at=message.created_at,
+        author={"id": user.id, "name": user.name, "role": user.role},
+        repair_preview=preview,
+    )
+
+    # Realtime fan-out to the channel.
+    await manager.broadcast(
+        {
+            "type": "chat.message",
+            "channel_id": str(channel_id),
+            "message": out.model_dump(mode="json"),
+        }
+    )
+    return out

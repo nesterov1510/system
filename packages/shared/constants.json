@@ -1,0 +1,33 @@
+{
+  "$comment": "Единый источник констант статусов и ролей. Backend (Python) держит зеркальные enum в apps/api/app/db/models.py; фронт читает этот файл (или генерирует типы из OpenAPI).",
+  "roles": ["admin", "manager", "operator", "master", "callcenter"],
+  "repair_statuses": [
+    "Принято",
+    "Диагностика",
+    "Согласование",
+    "Ожидание запчастей",
+    "В ремонте",
+    "Готово к выдаче",
+    "Выдано",
+    "Не забрано",
+    "Архив",
+    "Отказ"
+  ],
+  "device_types": ["ТВ", "Монитор", "Аудио", "Другое"],
+  "device_prefix": {
+    "ТВ": "TV",
+    "Монитор": "MN",
+    "Аудио": "AU",
+    "Другое": "OT"
+  },
+  "event_types": [
+    "status_change",
+    "comment",
+    "print",
+    "call",
+    "price",
+    "photo",
+    "assign",
+    "notify"
+  ]
+}

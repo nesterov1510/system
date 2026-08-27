@@ -1,0 +1,62 @@
+"""Application configuration.
+
+All values come from environment variables (see `.env.example`).
+Secrets live only in env — never hardcoded.
+"""
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # --- App ---
+    APP_NAME: str = "RemontFlow"
+    ENV: str = "dev"  # dev | prod
+    API_PREFIX: str = "/api"
+    # Публичный адрес фронтенда, куда ведёт QR на бланке (/r/{token}).
+    # Для локальной сети укажите IP машины, например http://192.168.1.10:3000
+    PUBLIC_BASE_URL: str = "http://localhost:3000"
+
+    # --- Database ---
+    # prod: postgresql+asyncpg://user:pass@postgres:5432/remontflow
+    # dev/test (sandbox): sqlite+aiosqlite:///./remontflow.db
+    DATABASE_URL: str = "sqlite+aiosqlite:///./remontflow.db"
+
+    # --- Auth / JWT ---
+    SECRET_KEY: str = "CHANGE_ME_dev_only_0123456789abcdef0123456789abcdef"
+    ACCESS_TOKEN_TTL_MIN: int = 30
+    REFRESH_TOKEN_TTL_DAYS: int = 7
+    ALGORITHM: str = "HS256"
+
+    # --- CORS ---
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    # --- Storage ---
+    # local = filesystem (dev/MVP), s3 = MinIO/S3-compatible (prod).
+    STORAGE_MODE: str = "local"
+    UPLOAD_DIR: str = "./uploads"
+    S3_ENDPOINT: str = "http://localhost:9000"
+    S3_ACCESS_KEY: str = "minioadmin"
+    S3_SECRET_KEY: str = "minioadmin"
+    S3_BUCKET: str = "remontflow"
+
+    # --- AI ---
+    AI_PROVIDER: str = "openai_compat"  # abstraction key
+    AI_API_KEY: str = ""
+    AI_BASE_URL: str = ""
+    AI_MODEL: str = ""
+
+    # --- Seed admin (first boot) ---
+    SEED_ADMIN_EMAIL: str = "admin@remontflow.local"
+    SEED_ADMIN_PASSWORD: str = "admin123"
+    SEED_ADMIN_PHONE: str = "+70000000000"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
