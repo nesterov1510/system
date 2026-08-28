@@ -252,6 +252,19 @@ async def test_print(db: DbSession):
     return {"job_id": job.id, "status": job.status}
 
 
+@router.post("/printer/cancel-all")
+async def cancel_all_print_jobs(db: DbSession):
+    """Cancel all queued/processing print jobs."""
+    from sqlalchemy import update as sa_update
+    await db.execute(
+        sa_update(PrintJob)
+        .where(PrintJob.status.in_(["queued", "processing"]))
+        .values(status="cancelled", error="Cancelled by user")
+    )
+    await db.commit()
+    return {"ok": True, "message": "Все задания отменены"}
+
+
 # --- Print templates (бланк) ---
 @router.get("/print-templates")
 async def list_print_templates(db: DbSession):

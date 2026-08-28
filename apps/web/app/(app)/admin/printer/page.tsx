@@ -48,6 +48,12 @@ export default function PrinterPage() {
 
   useEffect(load, [load]);
 
+  // Auto-refresh jobs every 5s
+  useEffect(() => {
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, [load]);
+
   async function scanPrinters() {
     setScanning(true);
     setScanError(null);
@@ -56,7 +62,7 @@ export default function PrinterPage() {
       const res = await api.discoverPrinters();
       setDiscovered((res.printers || []).map(p => ({...p, source: p.source as "cups" | "network"})));
       if ((res.printers || []).length === 0) {
-        setScanError("Принтеры не найдены. Убедитесь, что принтер включён и подключён к сети.");
+        setScanError("Принтеры не найдены. Убедитесь, что принтер включён и подключён к Wi-Fi/USB.");
       }
     } catch (e) {
       setScanError(e instanceof Error ? e.message : "Ошибка поиска");
@@ -66,7 +72,7 @@ export default function PrinterPage() {
   }
 
   function selectPrinter(p: DiscoveredPrinter) {
-    const mode = p.source === "cups" ? "cups" : "ipp";
+    const mode = p.source === "cups" ? "cups" : "cups"; // Always use CUPS
     setSelectedPrinter({
       name: p.name,
       mode,
@@ -97,7 +103,7 @@ export default function PrinterPage() {
     setError(null);
     try {
       const r = await api.testPrint();
-      setMsg(`✅ Тестовое задание #${String(r.job_id).slice(0, 8)} отправлено на печать`);
+      setMsg(`✅ Тест #${String(r.job_id).slice(0, 8)} отправлен`);
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка печати");
@@ -105,6 +111,21 @@ export default function PrinterPage() {
       setBusy(false);
     }
   }
+
+  async function cancelAll() {
+    setBusy(true);
+    try {
+      await api.cancelAllPrintJobs();
+      setMsg("✅ Все задания отменены");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const queuedCount = jobs.filter(j => j.status === "queued" || j.status === "processing").length;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -129,13 +150,13 @@ export default function PrinterPage() {
       {/* Scan Section */}
       <div className="msb-card-solid p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">🔍 Найти принтеры в сети</h2>
+          <h2 className="text-sm font-semibold text-slate-700">🔍 Найти принтеры</h2>
           <button onClick={scanPrinters} disabled={scanning}
             className="msb-btn-primary">
             {scanning ? (
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Сканирование…
+                Сканирование ~5с…
               </span>
             ) : (
               "Найти принтеры"
@@ -166,7 +187,7 @@ export default function PrinterPage() {
                         ? "bg-blue-100 text-blue-700"
                         : "bg-emerald-100 text-emerald-700"
                     }`}>
-                      {p.source === "cups" ? "CUPS" : "Сетевой"}
+                      {p.source === "cups" ? "USB/CUPS" : "Сетевой"}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -188,7 +209,7 @@ export default function PrinterPage() {
           <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-8 text-sm text-slate-400">
             <div className="text-center">
               <span className="text-2xl mb-2 block">🖨️</span>
-              Нажмите «Найти принтеры» для сканирования сети
+              Нажмите «Найти принтеры»
             </div>
           </div>
         )}
@@ -204,24 +225,19 @@ export default function PrinterPage() {
               <span className="text-sm font-semibold text-emerald-800">
                 {selectedPrinter.name}
               </span>
-              <span className="msb-badge-info text-[10px]">{selectedPrinter.mode}</span>
+              <span className="msb-badge-info text-[10px]">CUPS</span>
             </div>
-            {selectedPrinter.ip && (
-              <p className="mt-1 text-xs text-emerald-600">
-                IP: {selectedPrinter.ip}:{selectedPrinter.port}
-              </p>
-            )}
           </div>
         ) : (
-          <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500 ring-1 ring-slate-100">
-            Принтер не выбран. Найдите и выберите принтер выше.
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700 ring-1 ring-amber-100">
+            ⚠ Принтер не выбран. Найдите и выберите принтер выше.
           </div>
         )}
 
         <div className="flex gap-3">
           <button onClick={save} disabled={busy || !selectedPrinter.name}
             className="msb-btn-primary">
-            💾 Сохранить выбор
+            💾 Сохранить
           </button>
           <button onClick={test} disabled={busy || !selectedPrinter.name}
             className="msb-btn-secondary">
@@ -230,12 +246,29 @@ export default function PrinterPage() {
         </div>
       </div>
 
-      {/* Recent Jobs */}
+      {/* Print Queue */}
       <div className="msb-card-solid p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-700">Последние задания печати</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-slate-700">Очередь печати</h2>
+          <div className="flex items-center gap-3">
+            {queuedCount > 0 && (
+              <span className="msb-badge-warning">{queuedCount} в очереди</span>
+            )}
+            {queuedCount > 0 && (
+              <button onClick={cancelAll} disabled={busy}
+                className="text-xs font-medium text-red-500 hover:text-red-700 transition-colors">
+                ✕ Отменить все
+              </button>
+            )}
+            <button onClick={load} className="text-xs text-slate-400 hover:text-slate-600">
+              ↻ Обновить
+            </button>
+          </div>
+        </div>
+
         {jobs.length === 0 ? (
           <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-8 text-sm text-slate-400">
-            Заданий пока нет
+            Очередь пуста
           </div>
         ) : (
           <div className="space-y-2">
@@ -246,18 +279,27 @@ export default function PrinterPage() {
                   <span className="mx-2">·</span>
                   {new Date(j.created_at).toLocaleString("ru")}
                 </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  j.status === "done" ? "msb-badge-success"
-                  : j.status === "failed" ? "msb-badge-danger"
-                  : j.status === "processing" ? "msb-badge-info"
-                  : "msb-badge-gray"
-                }`}>
-                  {j.status === "done" ? "✓ Готово"
-                   : j.status === "failed" ? `✗ ${j.error || "Ошибка"}`
-                   : j.status === "processing" ? "⏳ Обработка"
-                   : j.status === "queued" ? "📋 В очереди"
-                   : j.status}
-                </span>
+                <div className="flex items-center gap-2">
+                  {j.error && (
+                    <span className="max-w-[200px] truncate text-xs text-red-500" title={j.error}>
+                      {j.error}
+                    </span>
+                  )}
+                  <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                    j.status === "done" ? "msb-badge-success"
+                    : j.status === "failed" ? "msb-badge-danger"
+                    : j.status === "processing" ? "msb-badge-info"
+                    : j.status === "cancelled" ? "msb-badge-gray"
+                    : "msb-badge-warning"
+                  }`}>
+                    {j.status === "done" ? "✓ Готово"
+                     : j.status === "failed" ? "✗ Ошибка"
+                     : j.status === "processing" ? "⏳ Печатается…"
+                     : j.status === "queued" ? "📋 В очереди"
+                     : j.status === "cancelled" ? "Отменено"
+                     : j.status}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

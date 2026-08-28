@@ -415,6 +415,10 @@ export const api = {
       status: string;
       label: string;
     }> }>("/api/admin/printer/discover"),
+  cancelAllPrintJobs: () =>
+    request<{ ok: boolean; message: string }>("/api/admin/printer/cancel-all", {
+      method: "POST",
+    }),
 
   // Print templates (admin)
   printTemplates: () =>
