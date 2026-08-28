@@ -193,30 +193,39 @@ def _quick_network_discover(existing_ips: set[str]) -> list[dict]:
 
     def _probe(ip: str) -> dict | None:
         """Try to connect to common printer ports."""
-        for port in [631, 9100]:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(0.3)
-                result = sock.connect_ex((ip, port))
+        # Check port 9100 first (raw JetDirect — very common)
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.3)
+            if sock.connect_ex((ip, 9100)) == 0:
                 sock.close()
-                if result == 0:
-                    # Port open — try IPP probe on 631
-                    if port == 631:
-                        info = _probe_ipp_printer(ip)
-                        if info:
-                            return info
-                    # Port 9100 open — likely a printer (raw jetdirect)
-                    return {
-                        "name": f"Printer @ {ip}",
-                        "source": "network",
-                        "ip": ip,
-                        "port": 9100,
-                        "uri": f"socket://{ip}:9100",
-                        "status": "idle",
-                        "label": f"Сетевой принтер ({ip}:9100 — raw/JetDirect)",
-                    }
-            except Exception:
-                pass
+                # Port 9100 open — raw printer, send PDF directly
+                return {
+                    "name": f"Printer @ {ip}",
+                    "source": "network",
+                    "ip": ip,
+                    "port": 9100,
+                    "uri": f"socket://{ip}:9100",
+                    "status": "idle",
+                    "label": f"Сетевой принтер ({ip}:9100 — raw)",
+                }
+            sock.close()
+        except Exception:
+            pass
+
+        # Check port 631 (IPP)
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.3)
+            if sock.connect_ex((ip, 631)) == 0:
+                sock.close()
+                # Port 631 open — try IPP probe
+                info = _probe_ipp_printer(ip, 631)
+                if info:
+                    return info
+        except Exception:
+            pass
+
         return None
 
     # Scan in parallel with thread pool
@@ -381,20 +390,42 @@ def print_pdf(pdf_bytes: bytes, printer_config: dict) -> str:
     printer_config: {"mode": "cups"|"ipp", "name": "...", "ip": "...", "port": 631}
     Returns the mode used.
     """
-    mode = printer_config.get("mode", "cups")
+    name = printer_config.get("name", "")
+    ip = printer_config.get("ip", "")
+    port = int(printer_config.get("port", 631))
 
-    if mode == "ipp":
-        _print_via_ipp(pdf_bytes, printer_config)
+    # If printer has an IP and is on port 9100 (JetDirect/raw) — send PDF directly
+    if ip and port == 9100:
+        _print_raw_pdf(pdf_bytes, ip, port)
+        return "raw"
+
+    # If printer has an IP and port 631 — use IPP protocol
+    if ip and port == 631:
+        _print_via_ipp(pdf_bytes, ip, port)
         return "ipp"
-    else:
-        _print_via_cups(pdf_bytes, printer_config)
-        return "cups"
+
+    # Otherwise use CUPS (local driver)
+    _print_via_cups(pdf_bytes, name)
+    return "cups"
 
 
-def _print_via_cups(pdf_bytes: bytes, printer_config: dict) -> None:
+def _print_raw_pdf(pdf_bytes: bytes, ip: str, port: int) -> None:
+    """Send raw PDF bytes to a JetDirect/raw printer (port 9100)."""
+    log.info(f"Raw PDF печать: {ip}:{port}")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(30)
+    sock.connect((ip, port))
+    try:
+        sock.sendall(pdf_bytes)
+        # Give printer time to process
+        import time
+        time.sleep(1)
+    finally:
+        sock.close()
+
+
+def _print_via_cups(pdf_bytes: bytes, printer_name: str) -> None:
     """Print via CUPS `lp` command."""
-    printer_name = printer_config.get("name", "")
-
     if not printer_name:
         printer_name = _cups_default() or ""
 
@@ -412,7 +443,7 @@ def _print_via_cups(pdf_bytes: bytes, printer_config: dict) -> None:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if r.returncode != 0:
             available = _cups_printer_names()
-            hint = ", ".join(available) if available else "нет принтеров"
+            hint = ", ".join(available) if available else "нет принтеров в CUPS"
             raise RuntimeError(
                 f"CUPS ошибка: {(r.stderr or '').strip()}. "
                 f"Доступные: {hint}. Выберите принтер в Админ → Принтер."
@@ -424,12 +455,8 @@ def _print_via_cups(pdf_bytes: bytes, printer_config: dict) -> None:
             pass
 
 
-def _print_via_ipp(pdf_bytes: bytes, printer_config: dict) -> None:
-    """Print via IPP protocol (AirPrint)."""
-    ip = printer_config.get("ip", "")
-    port = int(printer_config.get("port", 631))
-    if not ip:
-        raise RuntimeError("Не задан IP принтера")
+def _print_via_ipp(pdf_bytes: bytes, ip: str, port: int) -> None:
+    """Print via IPP protocol (AirPrint on port 631)."""
     uri = f"ipp://{ip}:{port}/ipp/print"
     body = _build_ipp_print_job(uri, pdf_bytes)
     log.info(f"IPP печать: {uri}")
@@ -437,20 +464,22 @@ def _print_via_ipp(pdf_bytes: bytes, printer_config: dict) -> None:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(30)
     sock.connect((ip, port))
-    sock.sendall(body)
+    try:
+        sock.sendall(body)
 
-    data = b""
-    while True:
-        try:
-            chunk = sock.recv(4096)
-            if not chunk:
+        data = b""
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > 8:
+                    break
+            except socket.timeout:
                 break
-            data += chunk
-            if len(data) > 8:
-                break
-        except socket.timeout:
-            break
-    sock.close()
+    finally:
+        sock.close()
 
     if len(data) >= 8:
         status = struct.unpack(">h", data[2:4])[0]
