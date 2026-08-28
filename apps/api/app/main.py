@@ -31,6 +31,7 @@ from app.routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     # MVP: create tables + seed. Replace with Alembic migrations later.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -39,7 +40,11 @@ async def lifespan(app: FastAPI):
     # Local file storage for photos (MVP).
     if settings.STORAGE_MODE == "local":
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    # Start background print worker
+    from app.services.print_worker import print_worker_loop
+    task = asyncio.create_task(print_worker_loop())
     yield
+    task.cancel()
 
 
 app = FastAPI(

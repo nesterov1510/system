@@ -187,11 +187,22 @@ async def set_printer_config(db: DbSession, body: dict):
     value = {
         "ip": body.get("ip", ""),
         "port": int(body.get("port", 631)),
-        "mode": body.get("mode", "agent"),  # agent | ipp
-        "name": body.get("name", "Epson L3250"),
+        "mode": body.get("mode", "cups"),  # cups | ipp
+        "name": body.get("name", ""),
     }
-    await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати")
+    await set_setting(db, "printer", value, "Принтер: имя, режим печати")
     return {"printer": value}
+
+
+@router.get("/printer/discover")
+async def discover_printers():
+    """Scan local network for available printers (CUPS + IPP)."""
+    import asyncio
+    from app.services.printer import discover_printers as _discover
+
+    loop = asyncio.get_running_loop()
+    printers = await loop.run_in_executor(None, _discover)
+    return {"printers": printers}
 
 
 @router.post("/printer/test")

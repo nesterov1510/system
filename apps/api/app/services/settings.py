@@ -76,8 +76,8 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Регион развёртывания",
     },
     "printer": {
-        "value": {"ip": "", "port": 631, "mode": "agent", "name": "Epson L3250"},
-        "description": "Принтер: IP-адрес, порт, режим печати (agent|ipp)",
+        "value": {"ip": "", "port": 631, "mode": "cups", "name": ""},
+        "description": "Принтер: имя, режим печати (cups|ipp)",
     },
 }
 

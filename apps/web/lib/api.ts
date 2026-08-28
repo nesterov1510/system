@@ -405,6 +405,16 @@ export const api = {
     request<{ job_id: string; status: string }>("/api/admin/printer/test", {
       method: "POST",
     }),
+  discoverPrinters: () =>
+    request<{ printers: Array<{
+      name: string;
+      source: string;
+      ip: string;
+      port: number;
+      uri: string;
+      status: string;
+      label: string;
+    }> }>("/api/admin/printer/discover"),
 
   // Print templates (admin)
   printTemplates: () =>
