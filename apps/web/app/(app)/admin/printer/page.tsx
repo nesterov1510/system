@@ -21,17 +21,24 @@ interface Job {
 }
 
 export default function PrinterPage() {
-  const [printerName, setPrinterName] = useState("");
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [config, setConfig] = useState<{
+    name: string;
+    mode: string; // cups | ipp | agent
+    ip: string;
+    port: number;
+  }>({ name: "", mode: "agent", ip: "", port: 631 });
+
   const [discovered, setDiscovered] = useState<DiscoveredPrinter[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     api.getPrinter().then((r) => {
-      setPrinterName(r.printer?.name || "");
+      setConfig(r.printer);
       setJobs(r.recent_jobs);
     }).catch((e) => setError(e.message));
   }, []);
@@ -44,19 +51,24 @@ export default function PrinterPage() {
 
   async function scanPrinters() {
     setScanning(true);
+    setScanError(null);
     setDiscovered([]);
     try {
       const res = await api.discoverPrinters();
       setDiscovered((res.printers || []).map(p => ({...p, source: p.source as "cups" | "network"})));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Ошибка");
+      setScanError(e instanceof Error ? e.message : "Ошибка");
     } finally {
       setScanning(false);
     }
   }
 
   function selectPrinter(p: DiscoveredPrinter) {
-    setPrinterName(p.name);
+    if (p.source === "cups") {
+      setConfig({ name: p.name, mode: "cups", ip: "", port: 631 });
+    } else {
+      setConfig({ name: "", mode: p.uri.startsWith("ipp") ? "ipp" : "raw", ip: p.ip, port: p.port });
+    }
     setMsg(`Выбран: ${p.label}`);
   }
 
@@ -65,8 +77,8 @@ export default function PrinterPage() {
     setMsg(null);
     setError(null);
     try {
-      await api.savePrinter({ name: printerName, mode: "cups", ip: "", port: 631 });
-      setMsg("✅ Принтер сохранён");
+      await api.savePrinter(config);
+      setMsg("✅ Настройки принтера сохранены");
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -109,7 +121,9 @@ export default function PrinterPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Принтер</h1>
-        <p className="mt-1 text-sm text-slate-500">Настройка печати бланков</p>
+        <p className="mt-1 text-sm text-slate-500">
+          Настройка печати бланков
+        </p>
       </div>
 
       {msg && (
@@ -123,49 +137,76 @@ export default function PrinterPage() {
         </div>
       )}
 
-      {/* Current printer name */}
+      {/* Printer Config */}
       <div className="msb-card-solid p-6 space-y-4">
-        <h2 className="text-sm font-semibold text-slate-700">Имя принтера в CUPS</h2>
-        <div>
-          <label className="msb-label">Имя очереди (lpstat -p покажет)</label>
-          <input className="msb-input font-mono"
-            value={printerName}
-            onChange={(e) => setPrinterName(e.target.value)}
-            placeholder="EPSON_L3250_Series@EPSON858161.local"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            Точное имя из CUPS. Узнать: <code className="bg-slate-100 px-1 rounded">lpstat -p</code>
-          </p>
+        <h2 className="text-sm font-semibold text-slate-700">Настройки принтера</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="msb-label">Режим печати</label>
+            <select className="msb-input" value={config.mode}
+              onChange={(e) => setConfig({ ...config, mode: e.target.value, name: "", ip: "", port: 631 })}>
+              <option value="cups">CUPS (локальный драйвер)</option>
+              <option value="ipp">IPP (сетевой, порт 631)</option>
+              <option value="raw">Raw (сетевой, порт 9100)</option>
+            </select>
+          </div>
+
+          {config.mode === "cups" && (
+            <div>
+              <label className="msb-label">Имя очереди CUPS *</label>
+              <input className="msb-input font-mono" value={config.name}
+                onChange={(e) => setConfig({ ...config, name: e.target.value })}
+                placeholder="EPSON_L3250_Series@EPSON858161.local" required />
+              <p className="mt-1 text-xs text-slate-400">
+                Точное имя из `lpstat -p`
+              </p>
+            </div>
+          )}
+          {(config.mode === "ipp" || config.mode === "raw") && (
+            <>
+              <div>
+                <label className="msb-label">IP-адрес *</label>
+                <input className="msb-input" value={config.ip} placeholder="192.168.1.50"
+                  onChange={(e) => setConfig({ ...config, ip: e.target.value })} required />
+              </div>
+              <div>
+                <label className="msb-label">Порт *</label>
+                <input className="msb-input" type="number" value={config.port} placeholder="631"
+                  onChange={(e) => setConfig({ ...config, port: Number(e.target.value) })} required />
+              </div>
+            </>
+          )}
         </div>
 
         <div className="flex gap-3">
-          <button onClick={save} disabled={busy || !printerName.trim()}
+          <button onClick={save} disabled={busy || (!config.name && config.mode === "cups") || (!config.ip && (config.mode === "ipp" || config.mode === "raw"))}
             className="msb-btn-primary">
             💾 Сохранить
           </button>
-          <button onClick={test} disabled={busy || !printerName.trim()}
+          <button onClick={test} disabled={busy || !config.name && config.mode === "cups" || (!config.ip && (config.mode === "ipp" || config.mode === "raw"))}
             className="msb-btn-secondary">
             🖨️ Тестовая печать
           </button>
         </div>
       </div>
 
-      {/* Discover */}
+      {/* Discover Section */}
       <div className="msb-card-solid p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Найти принтеры в CUPS</h2>
-          <button onClick={scanPrinters} disabled={scanning}
-            className="msb-btn-primary">
+          <h2 className="text-sm font-semibold text-slate-700">Найти принтеры</h2>
+          <button onClick={scanPrinters} disabled={scanning} className="msb-btn-primary">
             {scanning ? "Сканирование…" : "Найти"}
           </button>
         </div>
         <p className="text-xs text-slate-400">
-          Показывает все принтеры, установленные в CUPS на этой машине
+          Сканирует CUPS-очереди и сетевые IP (IPP/Raw)
         </p>
+
+        {scanError && <p className="text-sm text-amber-600">{scanError}</p>}
 
         {discovered.length > 0 && (
           <div className="space-y-2">
-            {discovered.filter(p => p.source === "cups").map((p, i) => (
+            {discovered.map((p, i) => (
               <button key={i} onClick={() => selectPrinter(p)}
                 className={`w-full text-left rounded-xl border-2 px-4 py-3 transition-all ${
                   printerName === p.name
@@ -180,15 +221,19 @@ export default function PrinterPage() {
                     p.status === "idle" ? "bg-emerald-500" : "bg-amber-500"
                   }`} />
                 </div>
+                <p className="mt-0.5 text-xs text-slate-500">{p.label}</p>
               </button>
             ))}
           </div>
         )}
 
-        {!scanning && discovered.length === 0 && (
-          <p className="text-xs text-slate-400 text-center py-4">
-            Нажмите «Найти» для сканирования CUPS
-          </p>
+        {!scanning && discovered.length === 0 && !scanError && (
+          <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-8 text-sm text-slate-400">
+            <div className="text-center">
+              <span className="text-2xl mb-2 block">🖨️</span>
+              Нажмите «Найти принтеры»
+            </div>
+          </div>
         )}
       </div>
 
@@ -202,10 +247,13 @@ export default function PrinterPage() {
                 <span className="msb-badge-warning">{queuedCount} в очереди</span>
                 <button onClick={cancelAll} disabled={busy}
                   className="text-xs font-medium text-red-500 hover:text-red-700">
-                  ✕ Очистить
+                  ✕ Отменить все
                 </button>
               </>
             )}
+            <button onClick={load} className="text-xs text-slate-400 hover:text-slate-600">
+              ↻ Обновить
+            </button>
           </div>
         </div>
         {jobs.length === 0 ? (
@@ -221,7 +269,9 @@ export default function PrinterPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {j.error && (
-                    <span className="max-w-[200px] truncate text-xs text-red-500" title={j.error}>{j.error}</span>
+                    <span className="max-w-[200px] truncate text-xs text-red-500" title={j.error}>
+                      {j.error}
+                    </span>
                   )}
                   <span className={`rounded-full px-3 py-1 text-xs font-medium ${
                     j.status === "done" ? "msb-badge-success"
@@ -230,7 +280,12 @@ export default function PrinterPage() {
                     : j.status === "cancelled" ? "msb-badge-gray"
                     : "msb-badge-warning"
                   }`}>
-                    {j.status === "done" ? "✓" : j.status === "failed" ? "✗" : j.status}
+                    {j.status === "done" ? "✓ Готово"
+                     : j.status === "failed" ? "✗ Ошибка"
+                     : j.status === "processing" ? "⏳ Печатается…"
+                     : j.status === "queued" ? "📋 В очереди"
+                     : j.status === "cancelled" ? "Отменено"
+                     : j.status}
                   </span>
                 </div>
               </div>
