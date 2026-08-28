@@ -387,26 +387,38 @@ def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
 def print_pdf(pdf_bytes: bytes, printer_config: dict) -> str:
     """Print PDF using the configured printer.
 
-    printer_config: {"mode": "cups"|"ipp", "name": "...", "ip": "...", "port": 631}
-    Returns the mode used.
+    Strategy:
+    1. If name exists in CUPS → print via lp (always preferred).
+    2. If has IP but not in CUPS → auto-add to CUPS, then print.
+    3. Fallback: raw to port 9100.
     """
     name = printer_config.get("name", "")
     ip = printer_config.get("ip", "")
     port = int(printer_config.get("port", 631))
 
-    # If printer has an IP and is on port 9100 (JetDirect/raw) — send PDF directly
+    # Check if printer exists in CUPS
+    cups_names = _cups_printer_names()
+
+    if name and name in cups_names:
+        _print_via_cups(pdf_bytes, name)
+        return "cups"
+
+    # If has IP — auto-add to CUPS and print
+    if ip:
+        cups_name = _ensure_cups_printer(name, ip, port)
+        if cups_name:
+            _print_via_cups(pdf_bytes, cups_name)
+            return "cups"
+
+    # Last resort: raw to port 9100 (works for HP, but NOT Epson)
     if ip and port == 9100:
         _print_raw_pdf(pdf_bytes, ip, port)
         return "raw"
 
-    # If printer has an IP and port 631 — use IPP protocol
-    if ip and port == 631:
-        _print_via_ipp(pdf_bytes, ip, port)
-        return "ipp"
-
-    # Otherwise use CUPS (local driver)
-    _print_via_cups(pdf_bytes, name)
-    return "cups"
+    raise RuntimeError(
+        f"Принтер '{name}' не настроен. "
+        f"Установите его в CUPS или выберите заново в Админ → Принтер → Найти."
+    )
 
 
 def _print_raw_pdf(pdf_bytes: bytes, ip: str, port: int) -> None:
@@ -511,4 +523,47 @@ def _cups_default() -> str | None:
         return None
     if ":" in out:
         return out.rsplit(":", 1)[-1].strip()
+    return None
+
+
+def _ensure_cups_printer(name: str, ip: str, port: int) -> str | None:
+    """Add a network printer to CUPS if not already there.
+
+    Tries IPP (port 631) first, then raw socket (port 9100).
+    Returns the CUPS queue name on success.
+    """
+    # Sanitize name for CUPS (no spaces, special chars)
+    safe_name = "msb-" + "".join(c if c.isalnum() else "-" for c in name).strip("-")[:20]
+
+    # Check if already in CUPS
+    cups_names = _cups_printer_names()
+    if safe_name in cups_names:
+        return safe_name
+
+    # Try to add via IPP first (port 631)
+    uri = f"ipp://{ip}:{port}/ipp/print"
+    log.info(f"CUPS: добавляю принтер {safe_name} → {uri}")
+    r = subprocess.run(
+        ["lpadmin", "-p", safe_name, "-v", uri, "-E",
+         "-o", "printer-is-shared=false"],
+        capture_output=True, text=True, timeout=15
+    )
+    if r.returncode == 0:
+        log.info(f"CUPS: принтер {safe_name} добавлен через IPP")
+        return safe_name
+
+    # Try raw socket (port 9100) if IPP failed
+    if port != 9100:
+        uri_raw = f"socket://{ip}:9100"
+        log.info(f"CUPS: пробую raw socket → {uri_raw}")
+        r = subprocess.run(
+            ["lpadmin", "-p", safe_name, "-v", uri_raw, "-E",
+             "-o", "printer-is-shared=false"],
+            capture_output=True, text=True, timeout=15
+        )
+        if r.returncode == 0:
+            log.info(f"CUPS: принтер {safe_name} добавлен через raw socket")
+            return safe_name
+
+    log.error(f"CUPS: не удалось добавить принтер {safe_name}: {r.stderr}")
     return None
