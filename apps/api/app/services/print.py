@@ -5,9 +5,9 @@ an editable template (stored in the `print_templates` table, JSON) selects which
 fields to show, the brand/title/footer, paper size, legal text, and layout.
 
 Layout modes (template field `layout`):
-  - "one-per-page" : каждый экземпляр на отдельной странице (по умолчанию).
+  - "one-per-page" : каждый экземпляр на отдельной странице.
   - "two-per-page" : 2 экземпляра (клиент + сервис) на ОДНОМ листе A4,
-                     вертикально, с линией разреза между ними (потом порезать).
+                     вертикально, с линией разреза между ними.
   - "turkmen"      : туркменская форма приёмки (1 экземпляр, A4).
 """
 import io
@@ -19,7 +19,7 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import simpleSplit
 from reportlab.pdfgen import canvas
 
-# Cyrillic-capable font. On Debian/Ubuntu this ships with fonts-dejavu-core.
+# Cyrillic-capable font.
 FONT_PATH = os.environ.get(
     "MSB_FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 )
@@ -30,7 +30,6 @@ FONT_PATH_BOLD = os.environ.get(
 FONT = "DejaVu"
 FONT_BOLD = "DejaVu-Bold"
 
-# Field keys available in a template, mapped to human labels.
 FIELD_LABELS = {
     "client": "Клиент",
     "phone": "Телефон",
@@ -47,7 +46,6 @@ FIELD_LABELS = {
 
 AVAILABLE_FIELDS = list(FIELD_LABELS.keys())
 
-# Default template. `legal_text: null` => use the DB setting `legal_text`.
 DEFAULT_TEMPLATE = {
     "name": "Бланк приёма (Turkmen)",
     "paper": "A4",
@@ -55,17 +53,9 @@ DEFAULT_TEMPLATE = {
     "title": "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy",
     "subtitle": "Сервисный центр · {city} · {branch}",
     "fields": [
-        "client",
-        "phone",
-        "device",
-        "serial",
-        "complect",
-        "condition",
-        "fault",
-        "accepted_by",
-        "master",
-        "storage_until",
-        "eta",
+        "client", "phone", "device", "serial", "complect",
+        "condition", "fault", "accepted_by", "master",
+        "storage_until", "eta",
     ],
     "legal_text": None,
     "footer": "MSB — Мастер Сервис Бюро",
@@ -76,11 +66,9 @@ DEFAULT_TEMPLATE = {
 
 
 def normalize_template(body: dict) -> dict:
-    """Fill missing keys from the default template."""
     t = dict(DEFAULT_TEMPLATE)
     if body:
         t.update(body)
-    # guard fields list
     t["fields"] = [f for f in t.get("fields", []) if f in AVAILABLE_FIELDS]
     return t
 
@@ -103,11 +91,6 @@ def _qr_png(data: str) -> io.BytesIO:
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
-
-
-# ---------------------------------------------------------------------------
-# Turkmen acceptance form — "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy"
-# ---------------------------------------------------------------------------
 
 
 def _render_turkmen_form(
@@ -134,19 +117,16 @@ def _render_turkmen_form(
     consent_repair_text: str,
     consent_repair: bool,
 ) -> bytes:
-    """Render the Turkmen acceptance form PDF (1 copy, A4)."""
     _register_fonts()
     page = A4
     w, h = page
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=page)
 
-    # Margins
     left_margin = 15 * mm
     right_margin = w - 15 * mm
     content_w = right_margin - left_margin
 
-    # Helper: draw text
     def draw(text, x, y, size=8, bold=False, color=None, align=None):
         c.setFont(FONT_BOLD if bold else FONT, size)
         if color:
@@ -160,45 +140,31 @@ def _render_turkmen_form(
         else:
             c.drawString(x, y, text)
 
-    # Helper: draw underline
     def draw_line(x, y, length):
         c.setStrokeColorRGB(0.3, 0.3, 0.3)
         c.setLineWidth(0.4)
         c.line(x, y, x + length, y)
 
-    # Helper: draw a field with label and underlined blank
     def draw_field(label, value, x, y, label_size=7, value_size=7, blank_width=60*mm):
         draw(label, x, y, label_size, bold=True)
         label_w = c.stringWidth(label, FONT_BOLD, label_size)
         val_x = x + label_w + 1.5 * mm
-        val_end = val_x + blank_width
         draw(str(value) if value else "", val_x, y, value_size)
         draw_line(val_x, y - 0.5 * mm, blank_width)
 
-    # Helper: draw a row with two columns
-    def draw_row_two_col(left_label, left_value, right_label, right_value,
-                         y, left_label_x=None, right_label_x=None):
-        if left_label_x is None:
-            left_label_x = left_margin
-        if right_label_x is None:
-            right_label_x = left_margin + content_w / 2 + 5 * mm
-        draw_field(left_label, left_value, left_label_x, y)
-        draw_field(right_label, right_value, right_label_x, y)
+    def draw_row_two_col(left_label, left_value, right_label, right_value, y):
+        draw_field(left_label, left_value, left_margin, y)
+        draw_field(right_label, right_value, left_margin + content_w / 2 + 5 * mm, y)
 
-    # --- Header area ---
     y = h - 15 * mm
-
-    # Brand / MSB logo area
     draw("MSB", left_margin, y, 14, bold=True)
     draw("Мастер Сервис Бюро", left_margin + 22 * mm, y + 1 * mm, 7, bold=True)
     y -= 6 * mm
 
-    # Title
     title = t.get("title") or "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy"
     draw(title, left_margin, y, 9, bold=True)
     y -= 6 * mm
 
-    # Subtitle with city/branch
     subtitle = t.get("subtitle") or ""
     if subtitle:
         try:
@@ -208,13 +174,11 @@ def _render_turkmen_form(
         draw(sub_text, left_margin, y, 7)
         y -= 5 * mm
 
-    # Divider line
     c.setStrokeColorRGB(0.2, 0.2, 0.2)
     c.setLineWidth(0.8)
     c.line(left_margin, y, right_margin, y)
     y -= 6 * mm
 
-    # QR code in top-right
     try:
         qr_buf = _qr_png(qr_url)
         qr_size = 20 * mm
@@ -225,77 +189,39 @@ def _render_turkmen_form(
     except Exception:
         pass
 
-    # Number
     draw(f"№ {number}", left_margin, y, 10, bold=True)
     y -= 5 * mm
 
-    # --- Row 1: Gelen wagty / REG / Paýdar (AKS) / Kassa ---
-    row_y = y
-    draw("Gelen wagty:", left_margin, row_y, 7, bold=True)
-    draw(accepted_at, left_margin + 25 * mm, row_y, 7)
-    draw_line(left_margin + 25 * mm, row_y - 0.5 * mm, 35 * mm)
-
-    draw("REG:", left_margin + 65 * mm, row_y, 7, bold=True)
-    draw(number, left_margin + 72 * mm, row_y, 7)
-    draw_line(left_margin + 72 * mm, row_y - 0.5 * mm, 20 * mm)
-
-    draw("Paýdar (AKS):", left_margin + 100 * mm, row_y, 7, bold=True)
-    draw_line(left_margin + 100 * mm, row_y - 0.5 * mm, 15 * mm)
-
-    draw("Kassa", left_margin + 120 * mm, row_y, 7, bold=True)
-    draw_line(left_margin + 120 * mm, row_y - 0.5 * mm, 18 * mm)
+    draw("Gelen wagty:", left_margin, y, 7, bold=True)
+    draw(accepted_at, left_margin + 25 * mm, y, 7)
+    draw_line(left_margin + 25 * mm, y - 0.5 * mm, 35 * mm)
+    draw("REG:", left_margin + 65 * mm, y, 7, bold=True)
+    draw(number, left_margin + 72 * mm, y, 7)
+    draw_line(left_margin + 72 * mm, y - 0.5 * mm, 20 * mm)
+    draw("Paýdar (AKS):", left_margin + 100 * mm, y, 7, bold=True)
+    draw_line(left_margin + 100 * mm, y - 0.5 * mm, 15 * mm)
+    draw("Kassa", left_margin + 120 * mm, y, 7, bold=True)
+    draw_line(left_margin + 120 * mm, y - 0.5 * mm, 18 * mm)
     y -= 6 * mm
 
-    # --- Row 2: Telefon belgisi / 1. Inžiner ---
-    draw_row_two_col(
-        "Telefon belgisi:", client_phone,
-        "1. Inžiner:", "",
-        y
-    )
+    draw_row_two_col("Telefon belgisi:", client_phone, "1. Inžiner:", "", y)
     y -= 5.5 * mm
-
-    # --- Row 3: Eýesiniň ady / 2. Inžiner ---
-    draw_row_two_col(
-        "Eýesiniň ady:", client_name,
-        "2. Inžiner:", "",
-        y
-    )
+    draw_row_two_col("Eýesiniň ady:", client_name, "2. Inžiner:", "", y)
     y -= 5.5 * mm
-
-    # --- Row 4: M_Model / 3. Inžiner ---
-    draw_row_two_col(
-        "M_Model:", device,
-        "3. Inžiner:", "",
-        y
-    )
+    draw_row_two_col("M_Model:", device, "3. Inžiner:", "", y)
     y -= 5.5 * mm
-
-    # --- Row 5: Gürleşilen baha / 4. Inžiner ---
-    draw_row_two_col(
-        "Gürleşilen baha:", "",
-        "4. Inžiner:", "",
-        y
-    )
+    draw_row_two_col("Gürleşilen baha:", "", "4. Inžiner:", "", y)
     y -= 5.5 * mm
-
-    # --- Row 6: Aýdylan wagty / Ammar (Склад) ---
-    draw_row_two_col(
-        "Aýdylan wagty:", "",
-        "Ammar (Склад):", "",
-        y
-    )
+    draw_row_two_col("Aýdylan wagty:", "", "Ammar (Склад):", "", y)
     y -= 7 * mm
 
-    # --- Görkezme (description) ---
     draw("Görkezme:", left_margin, y, 7, bold=True)
     y -= 5 * mm
-    for i in range(3):
+    for _ in range(3):
         draw_line(left_margin, y, content_w)
         y -= 5 * mm
 
     y -= 2 * mm
-
-    # --- Kemçilik (defects) — 3 rows ---
     for i in range(1, 4):
         draw(f"{i}. Kemçilik:", left_margin, y, 7, bold=True)
         draw_line(left_margin + 23 * mm, y - 0.5 * mm, 45 * mm)
@@ -306,23 +232,19 @@ def _render_turkmen_form(
         y -= 5.5 * mm
 
     y -= 3 * mm
-
-    # --- Dakylan ätiýaçlyk şaýlary (attached spare parts) ---
     draw("Dakylan ätiýaçlyk şaýlary:", left_margin, y, 7, bold=True)
     draw("//_______//_______//_______//_______//_______//____", left_margin + 55 * mm, y, 7)
     y -= 5 * mm
-    for i in range(5):
+    for _ in range(5):
         draw("Ady:", left_margin, y, 7, bold=True)
         draw_line(left_margin + 10 * mm, y - 0.5 * mm, content_w - 10 * mm)
         y -= 5 * mm
 
     y -= 2 * mm
-
-    # --- Sargalan gerek bolan ätiýaçlyk şaýlary (ordered spare parts) ---
     draw("Sargalan gerek bolan ätiýaçlyk şaýlary:", left_margin, y, 7, bold=True)
     draw("________//________//________//________//________//", left_margin + 75 * mm, y, 7)
     y -= 5 * mm
-    for i in range(6):
+    for _ in range(6):
         draw("Ady:", left_margin, y, 7, bold=True)
         draw_line(left_margin + 10 * mm, y - 0.5 * mm, 100 * mm)
         draw("wagty", left_margin + 115 * mm, y, 7, bold=True)
@@ -330,8 +252,6 @@ def _render_turkmen_form(
         y -= 5 * mm
 
     y -= 2 * mm
-
-    # --- Düzedilen (Düzedilmedik) enjamyn görkezmesi ---
     draw("Düzedilen (Düzedilmedik) enjamyn görkezmesi:", left_margin, y, 7, bold=True)
     y -= 5 * mm
     draw_line(left_margin, y, content_w)
@@ -340,15 +260,12 @@ def _render_turkmen_form(
     y -= 5 * mm
 
     y -= 2 * mm
-
-    # --- Test / Kepillik ---
     draw("Test:", left_margin, y, 7, bold=True)
     draw_line(left_margin + 12 * mm, y - 0.5 * mm, 25 * mm)
     draw("//Kepillik", left_margin + 42 * mm, y, 7, bold=True)
     draw_line(left_margin + 65 * mm, y - 0.5 * mm, 40 * mm)
     y -= 6 * mm
 
-    # --- Enjam tabşyryldy / Tölegi / kabul eden ---
     draw("Enjam tabşyryldy:", left_margin, y, 7, bold=True)
     draw_line(left_margin + 35 * mm, y - 0.5 * mm, 25 * mm)
     draw("Tölegi:", left_margin + 65 * mm, y, 7, bold=True)
@@ -357,7 +274,6 @@ def _render_turkmen_form(
     draw_line(left_margin + 125 * mm, y - 0.5 * mm, 30 * mm)
     y -= 8 * mm
 
-    # --- Footer ---
     draw_line(left_margin, y, content_w)
     y -= 5 * mm
     footer = t.get("footer") or "MSB — Мастер Сервис Бюро"
@@ -365,11 +281,6 @@ def _render_turkmen_form(
 
     c.save()
     return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# Original render_blank_pdf (one-per-page / two-per-page)
-# ---------------------------------------------------------------------------
 
 
 def render_blank_pdf(
@@ -401,7 +312,6 @@ def render_blank_pdf(
 
     layout = t.get("layout", "one-per-page")
 
-    # Dispatch to Turkmen form
     if layout == "turkmen":
         return _render_turkmen_form(
             t=t, number=number, accepted_at=accepted_at, city_name=city_name,
@@ -424,22 +334,15 @@ def render_blank_pdf(
     footer = t.get("footer") or ""
 
     values = {
-        "client": client_name,
-        "phone": client_phone,
-        "device": device,
-        "serial": serial,
-        "complect": complectation,
-        "fault": fault,
-        "condition": condition,
-        "accepted_by": accepted_by,
-        "master": master,
+        "client": client_name, "phone": client_phone, "device": device,
+        "serial": serial, "complect": complectation, "fault": fault,
+        "condition": condition, "accepted_by": accepted_by, "master": master,
         "storage_until": storage_until,
         "eta": f"{eta_days} дн" if eta_days else "—",
     }
     legal = t.get("legal_text") or legal_text or ""
 
-    def draw_copy(c, w, top, bottom, label: str, s: float) -> None:
-        """Рисует один экземпляр в вертикальной полосе [bottom, top]. s — масштаб."""
+    def draw_copy(c, w, top, bottom, label, s):
         left = 12 * mm * s
         content_w = w - 2 * left
 
@@ -454,8 +357,6 @@ def render_blank_pdf(
                 c.drawString(x, y, text)
 
         y = top - 6 * mm * s
-
-        # Метка экземпляра.
         if label:
             draw(label, w - left, y, 8 * s, bold=True, align="right")
             y -= 7 * mm * s
@@ -482,7 +383,6 @@ def render_blank_pdf(
         draw(f"Дата приёма: {accepted_at}", left, y, 8 * s)
         y -= 5 * mm * s
 
-        # Поля.
         value_x = left + 38 * mm * s
         for field in t.get("fields", []):
             label_ = FIELD_LABELS.get(field, field)
@@ -491,7 +391,6 @@ def render_blank_pdf(
             draw(value, value_x, y, 8 * s, bold=True)
             y -= 4.5 * mm * s
 
-        # Условия хранения.
         if legal:
             y -= 3.5 * mm * s
             draw("УСЛОВИЯ ХРАНЕНИЯ", left, y, 8 * s, bold=True)
@@ -500,7 +399,6 @@ def render_blank_pdf(
                 draw(chunk, left, y, 7 * s)
                 y -= 4 * mm * s
 
-        # Согласие на диагностику и ремонт.
         if consent_repair_text:
             y -= 3.5 * mm * s
             draw("СОГЛАСИЕ НА ДИАГНОСТИКУ И РЕМОНТ", left, y, 8 * s, bold=True)
@@ -512,7 +410,6 @@ def render_blank_pdf(
             marker = "[X] Согласен" if consent_repair else "[ ] Согласен"
             draw(marker, left, y, 8 * s, bold=True)
 
-        # QR в правом верхнем углу копии.
         try:
             qr_buf = _qr_png(qr_url)
             qr_size = 26 * mm * s
@@ -523,11 +420,9 @@ def render_blank_pdf(
         except Exception:
             pass
 
-        # Footer (внизу копии).
         if footer:
             draw(footer, w / 2, bottom + 6 * mm * s, 7 * s, color=(0.35, 0.35, 0.35), align="center")
 
-        # Подписи (внизу копии).
         if t.get("signature", True):
             sig_y = bottom + 13 * mm * s
             c.setFillColorRGB(0, 0, 0)
@@ -538,27 +433,21 @@ def render_blank_pdf(
             draw("Подпись сервиса", w - 62 * mm * s - left, sig_y - 4 * mm * s, 7 * s)
 
     buf = io.BytesIO()
-
     if layout == "two-per-page":
-        # 2 экземпляра на одном листе A4 (вертикально) + линия разреза.
         page = A4
         c = canvas.Canvas(buf, pagesize=page)
         w, h = page
         margin = 7 * mm
         gutter = 10 * mm
         half = (h - 2 * margin - gutter) / 2
-
         regions = [
-            (h - margin, h - margin - half),                                  # верх
-            (h - margin - half - gutter, h - margin - half - gutter - half),  # низ
+            (h - margin, h - margin - half),
+            (h - margin - half - gutter, h - margin - half - gutter - half),
         ]
-
         for i in range(min(copies, 2)):
             top, bottom = regions[i]
             label = copy_labels[i] if i < len(copy_labels) else f"ЭКЗЕМПЛЯР {i + 1}"
             draw_copy(c, w, top, bottom, label, s=0.66)
-
-        # Линия разреза между экземплярами.
         cut_y = (regions[0][1] + regions[1][0]) / 2
         c.setDash(3, 3)
         c.setStrokeColorRGB(0.4, 0.4, 0.4)
@@ -570,7 +459,6 @@ def render_blank_pdf(
         c.drawCentredString(w / 2, cut_y - 3.2 * mm, "— ✂ разрез ✂ —")
         c.save()
     else:
-        # Каждый экземпляр на отдельной странице.
         paper = t.get("paper", "A4").upper()
         page = A4 if paper == "A4" else A5
         c = canvas.Canvas(buf, pagesize=page)

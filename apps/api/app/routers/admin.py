@@ -187,26 +187,11 @@ async def set_printer_config(db: DbSession, body: dict):
     value = {
         "ip": body.get("ip", ""),
         "port": int(body.get("port", 631)),
-        "mode": body.get("mode", "cups"),  # cups | ipp
-        "name": body.get("name", ""),
+        "mode": body.get("mode", "agent"),  # agent | ipp
+        "name": body.get("name", "Epson L3250"),
     }
-    await set_setting(db, "printer", value, "Принтер: имя, режим печати")
+    await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати (agent|ipp)")
     return {"printer": value}
-
-
-@router.get("/printer/discover")
-async def discover_printers_endpoint():
-    """Scan local network for available printers (CUPS + avahi + network).
-
-    Runs the scan in a thread pool so it doesn't block the event loop.
-    Typical scan takes 2-10 seconds.
-    """
-    import asyncio
-    from app.services.printer import discover_printers as _discover
-
-    loop = asyncio.get_running_loop()
-    printers = await loop.run_in_executor(None, _discover)
-    return {"printers": printers, "count": len(printers)}
 
 
 @router.post("/printer/test")
@@ -250,19 +235,6 @@ async def test_print(db: DbSession):
     await db.commit()
     await db.refresh(job)
     return {"job_id": job.id, "status": job.status}
-
-
-@router.post("/printer/cancel-all")
-async def cancel_all_print_jobs(db: DbSession):
-    """Cancel all queued/processing print jobs."""
-    from sqlalchemy import update as sa_update
-    await db.execute(
-        sa_update(PrintJob)
-        .where(PrintJob.status.in_(["queued", "processing"]))
-        .values(status="cancelled", error="Cancelled by user")
-    )
-    await db.commit()
-    return {"ok": True, "message": "Все задания отменены"}
 
 
 # --- Print templates (бланк) ---
