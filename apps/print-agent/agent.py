@@ -24,6 +24,7 @@
 import base64
 import os
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -241,26 +242,79 @@ def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
 
 
 def print_via_ipp(pdf_bytes: bytes, printer: dict) -> None:
+    """Отправка IPP Print-Job напрямую через TCP-сокет на порт 631.
+
+    Epson-принтеры (L3250 и др.) отвечают HTTP 426 «Upgrade Required» на
+    POST из requests (HTTP/1.0). Сырой IPP бинарный запрос по socket-протоколу
+    (как делает CUPS/ipptool) — работает со всеми принтерами.
+    """
     ip = printer.get("ip")
     if not ip:
         raise RuntimeError("Не задан IP-адрес принтера (админка → Принтер)")
     port = int(printer.get("port", 631))
-    printer_uri = f"ipp://{ip}:{port}/ipp/print"
-    body = _build_ipp_print_job(printer_uri, pdf_bytes)
 
-    log(f"печать по IPP: http://{ip}:{port}/ipp/print")
-    r = requests.post(
-        f"http://{ip}:{port}/ipp/print",
-        data=body,
-        headers={"Content-Type": "application/ipp"},
-        timeout=60,
+    # Пробуем разные пути IPP: /ipp/print (обычный), /ipp (AirPrint), / (старый)
+    paths = ["/ipp/print", "/ipp", "/printers/EPSON_L3250", "/"]
+    last_err: Exception | None = None
+
+    for path in paths:
+        printer_uri = f"ipp://{ip}:{port}{path}"
+        body = _build_ipp_print_job(printer_uri, pdf_bytes)
+
+        request = (
+            f"POST {path} HTTP/1.1\r\n"
+            f"Host: {ip}:{port}\r\n"
+            "Content-Type: application/ipp\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8") + body
+
+        log(f"печать по IPP: {printer_uri} ({path})")
+        try:
+            with socket.create_connection((ip, port), timeout=15) as s:
+                s.sendall(request)
+                resp = b""
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    resp += chunk
+                    if len(resp) > 1024 * 1024:  # защита от бесконечного ответа
+                        break
+        except OSError as e:
+            last_err = e
+            log(f"  {path}: socket error: {e}")
+            continue
+
+        # Проверяем HTTP-статус из ответа
+        try:
+            head, _, rest = resp.partition(b"\r\n\r\n")
+            status_line = head.split(b"\r\n")[0]
+            # "HTTP/1.1 200 OK" → 200
+            status = int(status_line.split(b" ")[1])
+        except (IndexError, ValueError):
+            last_err = RuntimeError(f"неожиданный ответ: {resp[:200]!r}")
+            continue
+
+        if status != 200:
+            last_err = RuntimeError(f"HTTP {status} from {path}")
+            log(f"  {path}: HTTP {status}")
+            continue
+
+        # Разбираем IPP binary response: статус в байтах 2-4
+        if rest and len(rest) >= 8:
+            ipp_status = struct.unpack(">h", rest[2:4])[0]
+            if ipp_status != 0x0000:
+                raise RuntimeError(
+                    f"IPP status code: 0x{ipp_status:04x} (путь {path})"
+                )
+        log(f"  {path}: напечатано (IPP status 0x0000)")
+        return
+
+    raise RuntimeError(
+        f"Не удалось отправить IPP: {last_err}"
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"IPP error: HTTP {r.status_code}")
-    if len(r.content) >= 8:
-        status_code = struct.unpack(">h", r.content[2:4])[0]
-        if status_code != 0x0000:
-            raise RuntimeError(f"IPP status code: 0x{status_code:04x}")
 
 
 def print_pdf(pdf_bytes: bytes, printer: dict | None) -> str:
