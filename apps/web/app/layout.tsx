@@ -3,7 +3,7 @@ import "./globals.css";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 export const metadata: Metadata = {
-  title: "MSB — Мастер Сервис Бюро",
+  title: "MSB",
   description: "Профессиональная система приёмки, ремонта и сервисного обслуживания техники",
   manifest: "/manifest.json",
   icons: {

@@ -95,7 +95,7 @@ export default function PublicRepairView({ token }: { token: string }) {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
               <span className="text-xs font-extrabold">MSB</span>
             </div>
-            <span className="text-sm font-medium opacity-80">Мастер Сервис Бюро</span>
+            <span className="text-sm font-medium opacity-80"></span>
           </div>
           <p className="text-sm font-medium text-msb-200">Статус вашего ремонта</p>
           <h1 className="mt-1 font-mono text-2xl font-extrabold tracking-tight">{data.number}</h1>
@@ -198,7 +198,7 @@ export default function PublicRepairView({ token }: { token: string }) {
             <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-msb-600 to-msb-800">
               <span className="text-[8px] font-bold text-white">MSB</span>
             </div>
-            <span>Мастер Сервис Бюро</span>
+            <span></span>
           </div>
         </div>
       </div>

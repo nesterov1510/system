@@ -146,6 +146,8 @@ class Client(Base, TimestampMixin):
     consent_storage_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    repairs: Mapped[list["Repair"]] = relationship(back_populates="client")
+
 
 class Repair(Base, TimestampMixin):
     __tablename__ = "repairs"
@@ -202,7 +204,7 @@ class Repair(Base, TimestampMixin):
         String(128), nullable=True, unique=True
     )
 
-    client: Mapped["Client"] = relationship()
+    client: Mapped["Client"] = relationship(back_populates="repairs")
     accepted_by_user: Mapped["User"] = relationship(foreign_keys=[accepted_by])
     master: Mapped["User | None"] = relationship(foreign_keys=[master_id])
     events: Mapped[list["RepairEvent"]] = relationship(

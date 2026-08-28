@@ -49,7 +49,7 @@ AVAILABLE_FIELDS = list(FIELD_LABELS.keys())
 DEFAULT_TEMPLATE = {
     "name": "Бланк приёма (Turkmen)",
     "paper": "A4",
-    "brand": "MSB — Мастер Сервис Бюро",
+    "brand": "MSB",
     "title": "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy",
     "subtitle": "Сервисный центр · {city} · {branch}",
     "fields": [
@@ -58,7 +58,7 @@ DEFAULT_TEMPLATE = {
         "storage_until", "eta",
     ],
     "legal_text": None,
-    "footer": "MSB — Мастер Сервис Бюро",
+    "footer": "MSB",
     "signature": True,
     "copies": 1,
     "layout": "turkmen",
@@ -158,7 +158,7 @@ def _render_turkmen_form(
 
     y = h - 15 * mm
     draw("MSB", left_margin, y, 14, bold=True)
-    draw("Мастер Сервис Бюро", left_margin + 22 * mm, y + 1 * mm, 7, bold=True)
+    draw("", left_margin + 22 * mm, y + 1 * mm, 7, bold=True)
     y -= 6 * mm
 
     title = t.get("title") or "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy"
@@ -276,7 +276,7 @@ def _render_turkmen_form(
 
     draw_line(left_margin, y, content_w)
     y -= 5 * mm
-    footer = t.get("footer") or "MSB — Мастер Сервис Бюро"
+    footer = t.get("footer") or "MSB"
     draw(footer, w / 2, y, 6, color=(0.35, 0.35, 0.35), align="center")
 
     c.save()
@@ -328,7 +328,7 @@ def render_blank_pdf(
     copies = max(1, int(t.get("copies", 2) or 2))
     copy_labels = ["ЭКЗЕМПЛЯР КЛИЕНТА", "ЭКЗЕМПЛЯР СЕРВИСА"]
 
-    brand = t.get("brand") or "MSB — Мастер Сервис Бюро"
+    brand = t.get("brand") or "MSB"
     title = t.get("title") or ""
     subtitle = t.get("subtitle") or ""
     footer = t.get("footer") or ""

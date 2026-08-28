@@ -42,7 +42,7 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Юридический текст согласия на диагностику и ремонт",
     },
     "brand": {
-        "value": {"name": "MSB — Мастер Сервис Бюро"},
+        "value": {"name": "MSB"},
         "description": "Название сервисного центра",
     },
     "repair_statuses": {

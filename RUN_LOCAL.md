@@ -1,4 +1,4 @@
-# Запуск MSB — Мастер Сервис Бюро (БЕЗ Docker)
+# Запуск MSB (БЕЗ Docker)
 
 Инструкция для локального запуска на одной машине (Linux/macOS/Windows).
 Всё работает без Docker: backend (FastAPI + SQLite), frontend (Next.js),

@@ -4,7 +4,7 @@ const nextConfig = {
   output: "standalone",
   async rewrites() {
     // Proxy API/WS to the backend so the browser never calls localhost directly.
-    const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8085";
     return [
       {
         source: "/api/:path*",

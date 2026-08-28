@@ -35,7 +35,7 @@ export default function LoginPage() {
             <span className="text-2xl font-extrabold text-white">MSB</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900">MSB</h1>
-          <p className="mt-1 text-sm text-slate-500">Мастер Сервис Бюро</p>
+          <p className="mt-1 text-sm text-slate-500"></p>
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-lg shadow-slate-200/60 ring-1 ring-slate-200">

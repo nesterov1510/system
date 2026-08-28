@@ -24,25 +24,25 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-msb}:${POSTGRES_PASSWORD:-msb}@postgres:5432/${POSTGRES_DB:-msb}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
-      CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3000}"]'
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3030}
+      CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3030}"]'
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@msb.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8085:8085"
 
   web:
     build: ./apps/web
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8085}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8085}
     depends_on:
       - api
     ports:
-      - "3000:3000"
+      - "3030:3030"
 
   # Опционально: S3-совместимое хранилище фото (итерация 4+).
   # minio:

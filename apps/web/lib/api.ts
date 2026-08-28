@@ -243,6 +243,33 @@ export const api = {
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
   byNumber: (number: string) =>
     request<Repair>(`/api/repairs/by-number/${encodeURIComponent(number)}`),
+
+  // Clients
+  lookupClient: (phone: string) =>
+    request<{
+      found: boolean;
+      phone?: string;
+      phone_norm?: string;
+      multiple?: boolean;
+      candidates?: Array<{ id: string; full_name: string; phone: string; repairs_count: number }>;
+      client?: { id: string; full_name: string; phone: string };
+      repairs?: Array<{
+        id: string; number: string; status: string;
+        device_type: string; brand?: string | null; model?: string | null;
+        accepted_at: string | null;
+        price_final?: number | null;
+        paid: boolean;
+      }>;
+      repairs_count?: number;
+    }>(`/api/repairs/clients/lookup?phone=${encodeURIComponent(phone)}`),
+  listClients: (q?: string) => {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+    return request<Array<{
+      id: string; full_name: string; phone: string; repairs_count: number;
+    }>>(`/api/repairs/clients/list${qs}`);
+  },
+  clientRepairs: (clientId: string) =>
+    request<Repair[]>(`/api/repairs/clients/${clientId}/repairs`),
   createRepair: (payload: Record<string, unknown>) =>
     request<Repair>("/api/repairs", {
       method: "POST",
@@ -405,21 +432,6 @@ export const api = {
     request<{ job_id: string; status: string }>("/api/admin/printer/test", {
       method: "POST",
     }),
-  discoverPrinters: () =>
-    request<{ printers: Array<{
-      name: string;
-      source: string;
-      ip: string;
-      port: number;
-      uri: string;
-      status: string;
-      label: string;
-    }> }>("/api/admin/printer/discover"),
-  cancelAllPrintJobs: () =>
-    request<{ ok: boolean; message: string }>("/api/admin/printer/cancel-all", {
-      method: "POST",
-    }),
-
   // Print templates (admin)
   printTemplates: () =>
     request<

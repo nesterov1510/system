@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { api, getStoredUser, money, type Lookup, type PriceHint, type Repair } from "@/lib/api";
 
 const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
@@ -14,6 +15,21 @@ const SECTION_STEPS = [
   { id: "service", label: "Сервис", icon: "🔧" },
 ];
 
+interface ClientLookup {
+  found: boolean;
+  multiple?: boolean;
+  candidates?: Array<{ id: string; full_name: string; phone: string; repairs_count: number }>;
+  client?: { id: string; full_name: string; phone: string };
+  repairs?: Array<{
+    id: string; number: string; status: string;
+    device_type: string; brand?: string | null; model?: string | null;
+    accepted_at: string | null;
+    price_final?: number | null;
+    paid: boolean;
+  }>;
+  repairs_count?: number;
+}
+
 export default function NewRepairPage() {
   const router = useRouter();
   const [cities, setCities] = useState<Lookup[]>([]);
@@ -23,6 +39,8 @@ export default function NewRepairPage() {
   const [cityId, setCityId] = useState("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
+  const [existingClient, setExistingClient] = useState<ClientLookup | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
   const [deviceType, setDeviceType] = useState("ТВ");
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
@@ -61,6 +79,30 @@ export default function NewRepairPage() {
       }
     });
   }, []);
+
+  // Поиск существующего клиента по телефону
+  useEffect(() => {
+    const phone = clientPhone.trim();
+    if (phone.length < 5) {
+      setExistingClient(null);
+      return;
+    }
+    setLookingUp(true);
+    const t = setTimeout(() => {
+      api.lookupClient(phone)
+        .then((r) => {
+          setExistingClient(r);
+          // Если нашли ровно одного — подставим имя, если оно пустое
+          if (r.found && !r.multiple && r.client && !clientName.trim()) {
+            setClientName(r.client.full_name);
+          }
+        })
+        .catch(() => setExistingClient(null))
+        .finally(() => setLookingUp(false));
+    }, 400);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientPhone]);
 
   useEffect(() => {
     if (!deviceType) return;
@@ -174,6 +216,7 @@ export default function NewRepairPage() {
                 setDone(null);
                 setClientName("");
                 setClientPhone("");
+                setExistingClient(null);
                 setComplect([]);
                 setConditions([]);
                 setConditionOther("");
@@ -231,17 +274,88 @@ export default function NewRepairPage() {
             </h2>
             <div className="mt-4 space-y-4">
               <div>
+                <label className="msb-label">Телефон *</label>
+                <div className="relative">
+                  <input className="msb-input pr-10" value={clientPhone}
+                    onChange={(e) => setClientPhone(e.target.value)}
+                    inputMode="tel" placeholder="+993 61 000000" />
+                  {lookingUp && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-msb-500 border-t-transparent" />
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-slate-400">
+                  Введите телефон — если клиент уже обращался, мы покажем его историю
+                </p>
+              </div>
+
+              {/* Подсказка по существующему клиенту */}
+              {existingClient?.found && !existingClient.multiple && existingClient.client && (
+                <div className="rounded-xl bg-emerald-50 px-4 py-3 ring-1 ring-emerald-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-emerald-700">
+                        ✅ Клиент найден
+                      </p>
+                      <p className="text-sm font-medium text-emerald-900">
+                        {existingClient.client.full_name}
+                      </p>
+                    </div>
+                    <span className="msb-badge-success">
+                      {existingClient.repairs_count || 0} ремонт(ов)
+                    </span>
+                  </div>
+                  {existingClient.repairs && existingClient.repairs.length > 0 && (
+                    <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto custom-scroll">
+                      {existingClient.repairs.slice(0, 5).map((r) => (
+                        <Link key={r.id} href={`/repairs/${r.id}`}
+                          className="flex items-center justify-between rounded-lg bg-white/60 px-3 py-2 text-xs hover:bg-white transition-colors">
+                          <span className="font-mono font-semibold text-slate-700">
+                            {r.number}
+                          </span>
+                          <span className="text-slate-600 truncate flex-1 mx-2">
+                            {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
+                          </span>
+                          <span className="text-slate-400">
+                            {r.accepted_at ? new Date(r.accepted_at).toLocaleDateString("ru") : ""}
+                          </span>
+                        </Link>
+                      ))}
+                      {existingClient.repairs.length > 5 && (
+                        <p className="text-xs text-emerald-700 text-center pt-1">
+                          и ещё {existingClient.repairs.length - 5}...
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {existingClient?.found && existingClient.multiple && (
+                <div className="rounded-xl bg-amber-50 px-4 py-3 ring-1 ring-amber-200">
+                  <p className="text-xs font-semibold text-amber-700">
+                    Найдено несколько клиентов с похожим номером
+                  </p>
+                  <div className="mt-2 space-y-1.5">
+                    {existingClient.candidates?.map((c) => (
+                      <button key={c.id} type="button"
+                        onClick={() => setClientName(c.full_name)}
+                        className="flex items-center justify-between w-full rounded-lg bg-white/60 px-3 py-2 text-xs hover:bg-white transition-colors text-left">
+                        <span className="font-medium text-slate-800">{c.full_name}</span>
+                        <span className="text-slate-400 font-mono">{c.phone}</span>
+                        <span className="msb-badge-warning">{c.repairs_count} ремонт.</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
                 <label className="msb-label">ФИО клиента *</label>
                 <input className="msb-input" value={clientName}
                   onChange={(e) => setClientName(e.target.value)}
                   placeholder="Иванов Иван Иванович" />
               </div>
-              <div>
-                <label className="msb-label">Телефон *</label>
-                <input className="msb-input" value={clientPhone}
-                  onChange={(e) => setClientPhone(e.target.value)}
-                  inputMode="tel" placeholder="+993 61 000000" />
-              </div>
+
               <div className="rounded-xl bg-blue-50/50 p-4 ring-1 ring-blue-100 space-y-3">
                 <label className="flex items-start gap-3 text-sm text-slate-700">
                   <input type="checkbox" checked={consent}

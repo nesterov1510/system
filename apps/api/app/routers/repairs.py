@@ -89,6 +89,146 @@ async def _get_repair_or_404(db, repair_id: uuid.UUID) -> Repair:
     return repair
 
 
+@router.get("/clients/lookup")
+async def lookup_client(
+    db: DbSession,
+    user: CurrentUser,
+    phone: str = Query(..., description="Телефон для поиска клиента"),
+):
+    """Найти клиента по телефону + вернуть список его ремонтов."""
+    from app.services.numbering import normalize_phone
+    phone_norm = normalize_phone(phone)
+
+    # Сначала ищем по нормализованному номеру
+    row = await db.execute(
+        select(Client)
+        .where(Client.phone_norm == phone_norm)
+        .options(selectinload(Client.repairs))
+    )
+    client = row.scalar_one_or_none()
+
+    # Если не нашли — попробуем поиск по подстроке
+    if client is None:
+        from sqlalchemy import func
+        like = f"%{phone.strip()}%"
+        row = await db.execute(
+            select(
+                Client.id,
+                Client.full_name,
+                Client.phone,
+                func.count(Repair.id).label("repairs_count"),
+            )
+            .outerjoin(Repair, Repair.client_id == Client.id)
+            .where(Client.phone.ilike(like))
+            .group_by(Client.id, Client.full_name, Client.phone)
+            .limit(5)
+        )
+        candidates = row.all()
+        if candidates:
+            return {
+                "found": True,
+                "multiple": True,
+                "candidates": [
+                    {
+                        "id": str(cid),
+                        "full_name": cname,
+                        "phone": cphone,
+                        "repairs_count": rcnt,
+                    }
+                    for cid, cname, cphone, rcnt in candidates
+                ],
+            }
+        return {"found": False, "phone": phone, "phone_norm": phone_norm}
+
+    # Клиент найден — возвращаем его ремонты
+    repairs = []
+    for r in sorted(client.repairs, key=lambda x: x.accepted_at, reverse=True):
+        repairs.append({
+            "id": str(r.id),
+            "number": r.number,
+            "status": r.status,
+            "device_type": r.device_type,
+            "brand": r.brand,
+            "model": r.model,
+            "accepted_at": r.accepted_at.isoformat() if r.accepted_at else None,
+            "price_final": r.price_final,
+            "paid": r.paid,
+        })
+
+    return {
+        "found": True,
+        "multiple": False,
+        "client": {
+            "id": str(client.id),
+            "full_name": client.full_name,
+            "phone": client.phone,
+        },
+        "repairs": repairs,
+        "repairs_count": len(repairs),
+    }
+
+
+@router.get("/clients/list")
+async def list_clients(
+    db: DbSession,
+    user: CurrentUser,
+    q: str | None = Query(None, description="Поиск по имени или телефону"),
+    limit: int = Query(100, le=500),
+):
+    """Список всех клиентов с количеством ремонтов."""
+    from sqlalchemy import func
+    q_stmt = (
+        select(
+            Client.id,
+            Client.full_name,
+            Client.phone,
+            Client.phone_norm,
+            func.count(Repair.id).label("repairs_count"),
+        )
+        .outerjoin(Repair, Repair.client_id == Client.id)
+        .group_by(Client.id, Client.full_name, Client.phone, Client.phone_norm)
+        .order_by(func.count(Repair.id).desc(), Client.full_name)
+    )
+    if q:
+        like = f"%{q.strip()}%"
+        q_stmt = q_stmt.where(
+            (Client.full_name.ilike(like)) | (Client.phone.ilike(like))
+        )
+    q_stmt = q_stmt.limit(limit)
+    row = await db.execute(q_stmt)
+    return [
+        {
+            "id": str(cid),
+            "full_name": cname,
+            "phone": cphone,
+            "repairs_count": rcnt,
+        }
+        for cid, cname, cphone, _pnorm, rcnt in row.all()
+    ]
+
+
+@router.get("/clients/{client_id}/repairs", response_model=list[RepairOut])
+async def client_repairs(
+    client_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    """Все ремонты конкретного клиента."""
+    row = await db.execute(select(Client).where(Client.id == client_id))
+    client = row.scalar_one_or_none()
+    if client is None:
+        raise HTTPException(404, "Клиент не найден")
+    repairs_q = (
+        select(Repair)
+        .where(Repair.client_id == client_id)
+        .options(selectinload(Repair.client), selectinload(Repair.events))
+        .order_by(Repair.accepted_at.desc())
+    )
+    if user.role == UserRole.MASTER.value:
+        repairs_q = repairs_q.where(Repair.master_id == user.id)
+    r = await db.execute(repairs_q)
+    return [_serialize(x) for x in r.scalars().all()]
+
+
+
 @router.post("", response_model=RepairOut, status_code=201)
 async def create_repair(
     payload: RepairCreate,

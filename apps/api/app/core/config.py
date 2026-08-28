@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     ENV: str = "dev"  # dev | prod
     API_PREFIX: str = "/api"
     # Публичный адрес фронтенда, куда ведёт QR на бланке (/r/{token}).
-    # Для локальной сети укажите IP машины, например http://192.168.1.10:3000
-    PUBLIC_BASE_URL: str = "http://localhost:3000"
+    # Для локальной сети укажите IP машины, например http://192.168.8.81:3030
+    PUBLIC_BASE_URL: str = "http://localhost:3030"
 
     # --- Database ---
     # prod: postgresql+asyncpg://user:pass@postgres:5432/msb
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
 
     # --- CORS ---
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3030", "http://localhost:8085"]
 
     # --- Storage ---
     # local = filesystem (dev/MVP), s3 = MinIO/S3-compatible (prod).

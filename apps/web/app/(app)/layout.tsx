@@ -11,6 +11,7 @@ const NAV_ITEMS = [
     items: [
       { href: "/repairs", label: "Доска", icon: "📋" },
       { href: "/repairs/new", label: "Приёмка", icon: "➕" },
+      { href: "/clients", label: "Клиенты", icon: "👥" },
       { href: "/callcenter", label: "Call-центр", icon: "📞" },
       { href: "/chat", label: "Чат", icon: "💬" },
       { href: "/dashboard", label: "Курс", icon: "📊" },
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
 const MOBILE_NAV = [
   { href: "/repairs", label: "Доска", icon: "📋" },
   { href: "/repairs/new", label: "Приёмка", icon: "➕" },
+  { href: "/clients", label: "Клиенты", icon: "👥" },
   { href: "/callcenter", label: "Центр", icon: "📞" },
   { href: "/chat", label: "Чат", icon: "💬" },
   { href: "/dashboard", label: "Курс", icon: "📊" },
@@ -114,7 +116,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </div>
               <div className="hidden sm:block">
                 <span className="text-base font-bold text-slate-900">MSB</span>
-                <span className="ml-2 text-xs text-slate-500">Мастер Сервис Бюро</span>
+                <span className="ml-2 text-xs text-slate-500"></span>
               </div>
             </Link>
           </div>
