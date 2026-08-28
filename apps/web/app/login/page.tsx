@@ -84,13 +84,6 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          <div className="mt-6 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200/50">
-            <p className="text-xs text-slate-500">
-              <span className="font-medium text-slate-700">Демо-доступ:</span>{" "}
-              admin@msb.local / admin123
-            </p>
-          </div>
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
