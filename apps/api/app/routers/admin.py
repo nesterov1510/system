@@ -195,14 +195,18 @@ async def set_printer_config(db: DbSession, body: dict):
 
 
 @router.get("/printer/discover")
-async def discover_printers():
-    """Scan local network for available printers (CUPS + IPP)."""
+async def discover_printers_endpoint():
+    """Scan local network for available printers (CUPS + avahi + network).
+
+    Runs the scan in a thread pool so it doesn't block the event loop.
+    Typical scan takes 2-10 seconds.
+    """
     import asyncio
     from app.services.printer import discover_printers as _discover
 
     loop = asyncio.get_running_loop()
     printers = await loop.run_in_executor(None, _discover)
-    return {"printers": printers}
+    return {"printers": printers, "count": len(printers)}
 
 
 @router.post("/printer/test")

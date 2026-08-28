@@ -1,10 +1,11 @@
 """Printer discovery and direct printing — integrated into the backend.
 
 No separate print-agent needed. The backend:
-1. Scans for printers via CUPS (`lpstat -p`) and network (IPP broadcast).
+1. Scans for printers via CUPS, mDNS (avahi), and network scan.
 2. Shows discovered printers in admin UI for one-click selection.
 3. Processes print jobs in a background worker started on app boot.
 """
+import asyncio
 import os
 import platform
 import shutil
@@ -12,8 +13,8 @@ import struct
 import subprocess
 import tempfile
 import logging
-
-import requests as http_requests
+import socket
+from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("msb.printer")
 
@@ -26,116 +27,217 @@ IS_MAC = platform.system() == "Darwin"
 # ---------------------------------------------------------------------------
 
 def discover_printers() -> list[dict]:
-    """Scan for available printers: CUPS local + network scan.
+    """Scan for available printers using multiple methods.
 
     Returns list of dicts:
-      [{"name": "...", "source": "cups"|"network", "ip": "...", "port": 631, "uri": "..."}]
+      [{"name": "...", "source": "cups"|"avahi"|"network",
+        "ip": "...", "port": 631, "uri": "...", "status": "...", "label": "..."}]
     """
     printers: list[dict] = []
 
-    # 1) CUPS printers (installed on this machine via driver)
-    for p in _cups_discover():
-        printers.append(p)
+    # 1) CUPS printers (installed locally via driver)
+    printers.extend(_cups_discover())
 
-    # 2) Network scan — try common printer IPs on the local subnet
-    for p in _network_discover():
-        # Avoid duplicates by name
-        if not any(ep["name"] == p["name"] for ep in printers):
-            printers.append(p)
+    # 2) avahi / mDNS (AirPrint printers on the network)
+    printers.extend(_avahi_discover())
+
+    # 3) Quick network scan — only top candidates
+    existing_ips = {p.get("ip") for p in printers if p.get("ip")}
+    printers.extend(_quick_network_discover(existing_ips))
 
     return printers
 
 
 def _cups_discover() -> list[dict]:
-    """List printers installed in CUPS."""
+    """List printers installed in CUPS (via lpstat and lpinfo)."""
     printers = []
+
+    # Method 1: lpstat -p (currently installed queues)
     try:
         out = subprocess.run(
-            ["lpstat", "-p"], capture_output=True, text=True, timeout=10
-        ).stdout
-    except Exception:
-        return printers
-
-    for line in out.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] == "printer":
-            name = parts[1]
-            status = "idle" if "idle" in line.lower() else "active"
-            printers.append({
-                "name": name,
-                "source": "cups",
-                "ip": "",
-                "port": 631,
-                "uri": "",
-                "status": status,
-                "label": f"{name} (CUPS — локальный драйвер)",
-            })
-
-    # Also try to get the URI for each CUPS printer
-    try:
-        out = subprocess.run(
-            ["lpstat", "-v"], capture_output=True, text=True, timeout=10
+            ["lpstat", "-p"], capture_output=True, text=True, timeout=5
         ).stdout
         for line in out.splitlines():
-            # "device for PRINTER_NAME: ipp://..."
-            if "device for" in line.lower():
-                parts = line.split(":", 1)
-                if len(parts) == 2:
-                    name_part = parts[0].replace("device for", "").strip()
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "printer":
+                name = parts[1]
+                status = "idle" if "idle" in line.lower() else "active"
+                printers.append({
+                    "name": name,
+                    "source": "cups",
+                    "ip": "",
+                    "port": 631,
+                    "uri": "",
+                    "status": status,
+                    "label": f"{name} (CUPS — локальный драйвер)",
+                })
+    except Exception:
+        pass
+
+    # Method 2: lpinfo -v (find available backends/device URIs)
+    try:
+        out = subprocess.run(
+            ["lpinfo", "-v"], capture_output=True, text=True, timeout=5
+        ).stdout
+        for line in out.splitlines():
+            # Lines like: "direct usb://EPSON/..."
+            # or "network ipp://..."
+            if "://" in line:
+                parts = line.split(None, 1)
+                if len(parts) >= 2:
                     uri = parts[1].strip()
+                    # Extract name from URI
+                    name = _name_from_uri(uri)
+                    if name and not any(p["name"] == name for p in printers):
+                        source = "cups" if "usb" in uri else "network"
+                        ip = _ip_from_uri(uri)
+                        printers.append({
+                            "name": name,
+                            "source": source,
+                            "ip": ip,
+                            "port": 631,
+                            "uri": uri,
+                            "status": "idle",
+                            "label": f"{name} ({uri[:60]})",
+                        })
+    except Exception:
+        pass
+
+    # Enrich CUPS printers with URI if missing
+    try:
+        out = subprocess.run(
+            ["lpstat", "-v"], capture_output=True, text=True, timeout=5
+        ).stdout
+        for line in out.splitlines():
+            if "device for" in line.lower():
+                colon_parts = line.split(":", 1)
+                if len(colon_parts) == 2:
+                    dev_name = colon_parts[0].replace("device for", "").strip()
+                    uri = colon_parts[1].strip()
                     for p in printers:
-                        if p["name"] == name_part:
+                        if p["name"] == dev_name and not p["uri"]:
                             p["uri"] = uri
-                            # Extract IP from IPP URI
-                            if "ipp://" in uri or "http://" in uri:
-                                try:
-                                    from urllib.parse import urlparse
-                                    parsed = urlparse(uri)
-                                    if parsed.hostname:
-                                        p["ip"] = parsed.hostname
-                                except Exception:
-                                    pass
+                            ip = _ip_from_uri(uri)
+                            if ip:
+                                p["ip"] = ip
     except Exception:
         pass
 
     return printers
 
 
-def _network_discover() -> list[dict]:
-    """Scan local subnet for IPP-capable printers."""
+def _avahi_discover() -> list[dict]:
+    """Discover AirPrint printers via avahi-browse (mDNS)."""
     printers = []
+    if not shutil.which("avahi-browse"):
+        return printers
+    try:
+        out = subprocess.run(
+            ["avahi-browse", "-t", "-r", "-p", "_ipp._tcp"],
+            capture_output=True, text=True, timeout=8
+        ).stdout
+        # Parse avahi output — each printer block has address, port, name
+        current = {}
+        for line in out.splitlines():
+            if line.startswith("="):
+                if current.get("name"):
+                    printers.append(current)
+                current = {}
+            elif "=;IPv4;" in line or "=;IPv6;" in line:
+                parts = line.split(";")
+                if len(parts) >= 8:
+                    current = {
+                        "name": parts[3] if len(parts) > 3 else "",
+                        "source": "avahi",
+                        "ip": parts[7] if len(parts) > 7 else "",
+                        "port": int(parts[8]) if len(parts) > 8 and parts[8].isdigit() else 631,
+                        "uri": f"ipp://{parts[7]}:{parts[8] if len(parts) > 8 else 631}/ipp/print",
+                        "status": "idle",
+                        "label": f"{parts[3] if len(parts) > 3 else ''} (AirPrint — обнаружен в сети)",
+                    }
+            elif "addr=" in line.lower():
+                # Alternative format
+                for part in line.split(";"):
+                    part = part.strip()
+                    if part.startswith("address="):
+                        addr = part.split("=", 1)[1].strip()
+                        if not current.get("ip"):
+                            current["ip"] = addr
+                            current.setdefault("port", 631)
+        if current.get("name"):
+            printers.append(current)
+    except Exception as e:
+        log.debug(f"avahi-browse failed: {e}")
+    return printers
 
-    # Get local IP to determine subnet
+
+def _quick_network_discover(existing_ips: set[str]) -> list[dict]:
+    """Fast parallel scan of local subnet for IPP printers.
+
+    Only checks IPs not already found. Uses short timeouts.
+    """
+    printers = []
     local_ip = _get_local_ip()
     if not local_ip:
         return printers
 
     subnet = ".".join(local_ip.split(".")[:3])
 
-    # Scan common printer ports on the subnet
+    # Generate candidate IPs — skip .0, .255, and already-found IPs
+    candidates = []
     for i in range(1, 255):
         ip = f"{subnet}.{i}"
-        if ip == local_ip:
+        if ip == local_ip or ip in existing_ips:
             continue
-        try:
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.15)
-            result = sock.connect_ex((ip, 631))
-            sock.close()
-            if result == 0:
-                # Port 631 open — likely a printer, try to get info
-                info = _probe_ipp_printer(ip)
-                if info:
-                    printers.append(info)
-        except Exception:
-            pass
+        candidates.append(ip)
+
+    def _probe(ip: str) -> dict | None:
+        """Try to connect to common printer ports."""
+        for port in [631, 9100]:
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.3)
+                result = sock.connect_ex((ip, port))
+                sock.close()
+                if result == 0:
+                    # Port open — try IPP probe on 631
+                    if port == 631:
+                        info = _probe_ipp_printer(ip)
+                        if info:
+                            return info
+                    # Port 9100 open — likely a printer (raw jetdirect)
+                    return {
+                        "name": f"Printer @ {ip}",
+                        "source": "network",
+                        "ip": ip,
+                        "port": 9100,
+                        "uri": f"socket://{ip}:9100",
+                        "status": "idle",
+                        "label": f"Сетевой принтер ({ip}:9100 — raw/JetDirect)",
+                    }
+            except Exception:
+                pass
+        return None
+
+    # Scan in parallel with thread pool
+    with ThreadPoolExecutor(max_workers=30) as pool:
+        futures = {pool.submit(_probe, ip): ip for ip in candidates}
+        for future in futures:
+            try:
+                result = future.result(timeout=2)
+                if result:
+                    printers.append(result)
+            except Exception:
+                pass
 
     return printers
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def _get_local_ip() -> str:
-    """Get the local IP address of this machine."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.settimeout(0.5)
@@ -147,24 +249,56 @@ def _get_local_ip() -> str:
         return ""
 
 
-import socket
+def _name_from_uri(uri: str) -> str:
+    """Extract a human-readable name from a device URI."""
+    # usb://EPSON/SL-D500/...
+    # ipp://192.168.1.50/ipp/print
+    if "://" in uri:
+        path = uri.split("://", 1)[1]
+        parts = path.split("/")
+        # First meaningful segment
+        for p in parts:
+            if p and p not in ["ipp", "print", ""]:
+                return p
+    return uri[:30]
+
+
+def _ip_from_uri(uri: str) -> str:
+    """Extract IP from an IPP/HTTP URI."""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(uri)
+        return parsed.hostname or ""
+    except Exception:
+        return ""
 
 
 def _probe_ipp_printer(ip: str, port: int = 631) -> dict | None:
     """Try to query an IPP printer for its make/model."""
     try:
-        # Send a Get-Printer-Attributes request
         uri = f"ipp://{ip}:{port}/ipp/print"
         body = _build_ipp_get_attributes(uri)
-        r = http_requests.post(
-            f"http://{ip}:{port}/ipp/print",
-            data=body,
-            headers={"Content-Type": "application/ipp"},
-            timeout=1.5,
-        )
-        if r.status_code == 200 and len(r.content) >= 8:
-            # Parse printer info from response
-            model = _parse_ipp_printer_name(r.content)
+        # Use a short timeout
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1.0)
+        sock.connect((ip, port))
+        sock.sendall(body)
+        # Read response
+        data = b""
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+                if len(data) > 8192:
+                    break
+            except socket.timeout:
+                break
+        sock.close()
+
+        if len(data) >= 8:
+            model = _parse_ipp_printer_name(data)
             return {
                 "name": model or f"Printer @ {ip}",
                 "source": "network",
@@ -193,18 +327,26 @@ def _build_ipp_get_attributes(printer_uri: str) -> bytes:
     return version + op + request_id + attrs + b"\x03"
 
 
+def _ipp_attribute(tag: int, name: str, value: bytes) -> bytes:
+    return (
+        bytes([tag])
+        + struct.pack(">H", len(name.encode("utf-8")))
+        + name.encode("utf-8")
+        + struct.pack(">H", len(value))
+        + value
+    )
+
+
 def _parse_ipp_printer_name(data: bytes) -> str | None:
     """Try to extract printer make/model from IPP response."""
     try:
         text = data.decode("utf-8", errors="ignore")
-        # Look for common printer names
         for brand in ["Epson", "HP", "Canon", "Brother", "Samsung", "Xerox",
-                       "Lexmark", "Kyocera", "Ricoh", "OKI", "Pantum"]:
+                       "Lexmark", "Kyocera", "Ricoh", "OKI", "Pantum",
+                       "Epson", "SNP", "L3250", "L3210", "L3252"]:
             idx = text.lower().find(brand.lower())
             if idx >= 0:
-                # Extract a reasonable substring
-                snippet = text[idx:idx+50].strip()
-                # Clean up control characters
+                snippet = text[idx:idx + 50].strip()
                 snippet = "".join(c for c in snippet if c.isprintable())
                 return snippet[:40]
     except Exception:
@@ -215,16 +357,6 @@ def _parse_ipp_printer_name(data: bytes) -> str | None:
 # ---------------------------------------------------------------------------
 # IPP print job builder (for network printers)
 # ---------------------------------------------------------------------------
-
-def _ipp_attribute(tag: int, name: str, value: bytes) -> bytes:
-    return (
-        bytes([tag])
-        + struct.pack(">H", len(name.encode("utf-8")))
-        + name.encode("utf-8")
-        + struct.pack(">H", len(value))
-        + value
-    )
-
 
 def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
     version = b"\x02\x00"
@@ -246,7 +378,7 @@ def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
 def print_pdf(pdf_bytes: bytes, printer_config: dict) -> str:
     """Print PDF using the configured printer.
 
-    printer_config: {"mode": "cups"|"ipp", "name": "...", "ip": "...", "port": 631, ...}
+    printer_config: {"mode": "cups"|"ipp", "name": "...", "ip": "...", "port": 631}
     Returns the mode used.
     """
     mode = printer_config.get("mode", "cups")
@@ -263,7 +395,6 @@ def _print_via_cups(pdf_bytes: bytes, printer_config: dict) -> None:
     """Print via CUPS `lp` command."""
     printer_name = printer_config.get("name", "")
 
-    # If no name specified, use CUPS default
     if not printer_name:
         printer_name = _cups_default() or ""
 
@@ -302,16 +433,27 @@ def _print_via_ipp(pdf_bytes: bytes, printer_config: dict) -> None:
     uri = f"ipp://{ip}:{port}/ipp/print"
     body = _build_ipp_print_job(uri, pdf_bytes)
     log.info(f"IPP печать: {uri}")
-    r = http_requests.post(
-        f"http://{ip}:{port}/ipp/print",
-        data=body,
-        headers={"Content-Type": "application/ipp"},
-        timeout=60,
-    )
-    if r.status_code != 200:
-        raise RuntimeError(f"IPP HTTP {r.status_code}")
-    if len(r.content) >= 8:
-        status = struct.unpack(">h", r.content[2:4])[0]
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(30)
+    sock.connect((ip, port))
+    sock.sendall(body)
+
+    data = b""
+    while True:
+        try:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > 8:
+                break
+        except socket.timeout:
+            break
+    sock.close()
+
+    if len(data) >= 8:
+        status = struct.unpack(">h", data[2:4])[0]
         if status != 0x0000:
             raise RuntimeError(f"IPP status: 0x{status:04x}")
 
@@ -319,7 +461,7 @@ def _print_via_ipp(pdf_bytes: bytes, printer_config: dict) -> None:
 def _cups_printer_names() -> list[str]:
     try:
         out = subprocess.run(
-            ["lpstat", "-p"], capture_output=True, text=True, timeout=10
+            ["lpstat", "-p"], capture_output=True, text=True, timeout=5
         ).stdout
     except Exception:
         return []
@@ -334,7 +476,7 @@ def _cups_printer_names() -> list[str]:
 def _cups_default() -> str | None:
     try:
         out = subprocess.run(
-            ["lpstat", "-d"], capture_output=True, text=True, timeout=10
+            ["lpstat", "-d"], capture_output=True, text=True, timeout=5
         ).stdout.strip()
     except Exception:
         return None
