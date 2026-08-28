@@ -179,11 +179,19 @@ export default function PrinterPage() {
         </div>
 
         <div className="flex gap-3">
-          <button onClick={save} disabled={busy || (!config.name && config.mode === "cups") || (!config.ip && (config.mode === "ipp" || config.mode === "raw"))}
+          <button onClick={save}
+            disabled={busy || (
+              (config.mode === "cups" && !config.name) ||
+              ((config.mode === "ipp" || config.mode === "raw") && !config.ip)
+            )}
             className="msb-btn-primary">
             💾 Сохранить
           </button>
-          <button onClick={test} disabled={busy || !config.name && config.mode === "cups" || (!config.ip && (config.mode === "ipp" || config.mode === "raw"))}
+          <button onClick={test}
+            disabled={busy || (
+              (config.mode === "cups" && !config.name) ||
+              ((config.mode === "ipp" || config.mode === "raw") && !config.ip)
+            )}
             className="msb-btn-secondary">
             🖨️ Тестовая печать
           </button>
@@ -209,7 +217,7 @@ export default function PrinterPage() {
             {discovered.map((p, i) => (
               <button key={i} onClick={() => selectPrinter(p)}
                 className={`w-full text-left rounded-xl border-2 px-4 py-3 transition-all ${
-                  printerName === p.name
+                  config.name === p.name
                     ? "border-msb-500 bg-msb-50"
                     : "border-slate-200 hover:border-msb-300 hover:bg-slate-50"
                 }`}>
