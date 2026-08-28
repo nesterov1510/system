@@ -1,13 +1,14 @@
 """Idempotent seed: default admin, org structure, roles, channels, settings."""
 import random
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.db.base import utcnow
 from app.db.models import (
     Branch,
     ChatChannel,
@@ -230,7 +231,7 @@ async def _seed_demo_repairs(db, city, branch) -> None:
         ("ТВ", "LG", "не включается", 610, 350, 6),
     ]
 
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     for i, (dt, brand, fault, price, cost, days) in enumerate(demo):
         accepted = now - timedelta(days=rng.randint(30, 120))
         ready = accepted + timedelta(days=days)
