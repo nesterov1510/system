@@ -158,6 +158,7 @@ export interface Repair {
   cost_amount?: number | null;
   paid: boolean;
   print_count: number;
+  master_name?: string | null;
   events: RepairEvent[];
 }
 

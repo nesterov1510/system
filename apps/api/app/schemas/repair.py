@@ -103,6 +103,8 @@ class RepairOut(BaseModel):
     # denormalized client info for list/card rendering
     client_name: str | None = None
     client_phone: str | None = None
+    # denormalized master info
+    master_name: str | None = None
 
 
 class PublicRepairOut(BaseModel):

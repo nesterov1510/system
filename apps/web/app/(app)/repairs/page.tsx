@@ -243,7 +243,7 @@ export default function RepairsBoardPage() {
                   {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
                 </td>
                 <td className="px-5 py-4 text-xs text-slate-600">
-                  {r.master?.name || "—"}
+                  {r.master_name || "—"}
                 </td>
                 <td className="px-5 py-4">
                   <span className={`msb-badge ${STATUS_COLORS[r.status] ?? "msb-badge-gray"}`}>

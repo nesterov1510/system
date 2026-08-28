@@ -71,6 +71,7 @@ def _serialize(repair: Repair) -> RepairOut:
         events=events,
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
+        master_name=repair.master.name if repair.master else None,
     )
 
 
@@ -80,6 +81,7 @@ async def _get_repair_or_404(db, repair_id: uuid.UUID) -> Repair:
         .where(Repair.id == repair_id)
         .options(
             selectinload(Repair.client),
+            selectinload(Repair.master),
             selectinload(Repair.events),
         )
     )
@@ -337,7 +339,7 @@ async def list_repairs(
 ):
     q_stmt = (
         select(Repair)
-        .options(selectinload(Repair.client), selectinload(Repair.events))
+        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
         .order_by(Repair.accepted_at.desc())
     )
     if status:
@@ -362,7 +364,7 @@ async def get_by_number(number: str, db: DbSession, user: CurrentUser):
     row = await db.execute(
         select(Repair)
         .where(Repair.number == number)
-        .options(selectinload(Repair.client), selectinload(Repair.events))
+        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
     )
     repair = row.scalar_one_or_none()
     if repair is None:
