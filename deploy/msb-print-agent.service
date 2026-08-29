@@ -23,8 +23,6 @@ WorkingDirectory=/home/windowrepair-ae/msb/apps/print-agent
 
 EnvironmentFile=/home/windowrepair-ae/msb/.env
 Environment=MSB_API_URL=http://192.168.8.81:8085
-Environment=MSB_EMAIL=admin@msb.local
-Environment=MSB_PASSWORD=admin123
 Environment=MSB_PRINT_CMD=lp -d EPSON_L3250 {file}
 Environment=MSB_POLL_SECONDS=3
 Environment=MSB_SAVE_DIR=./printed
