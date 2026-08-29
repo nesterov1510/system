@@ -81,9 +81,9 @@ export default function PrinterPage() {
         </div>
       )}
 
-      <div className="msb-card-solid p-6 space-y-5">
+      <div className="msb-card-solid p-4 sm:p-6 space-y-5">
         <h2 className="text-sm font-semibold text-slate-700">Настройки</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="msb-label">Название</label>
             <input className="msb-input" value={printer.name}
@@ -130,7 +130,7 @@ export default function PrinterPage() {
         </div>
       </div>
 
-      <div className="msb-card-solid p-6">
+      <div className="msb-card-solid p-4 sm:p-6">
         <h2 className="mb-4 text-sm font-semibold text-slate-700">Последние задания</h2>
         {jobs.length === 0 ? (
           <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-8 text-sm text-slate-400">

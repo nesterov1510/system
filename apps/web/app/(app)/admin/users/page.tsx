@@ -138,7 +138,7 @@ export default function AdminUsersPage() {
           <h3 className="text-sm font-semibold text-slate-700">
             {editing ? "Редактирование" : "Новый сотрудник"}
           </h3>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             <div>
               <label className="msb-label">ФИО *</label>
               <input className="msb-input" value={form.name}

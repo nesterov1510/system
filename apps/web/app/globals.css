@@ -15,6 +15,32 @@
 body {
   @apply bg-gradient-to-br from-slate-50 via-white to-blue-50 text-slate-800 font-sans antialiased;
   min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Safe areas for phones with a notch / home indicator. */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Prevent accidental horizontal scroll on narrow screens. */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Do not zoom the page when focusing form controls on iOS. */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+/* Native mobile scrolling feels better in tables and channel strips. */
+.overflow-x-auto, .overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Крупные hit-areas под стойку приёма (mobile-first, ≥44px) */
@@ -27,7 +53,7 @@ button, a, input, select, textarea {
   .msb-card {
     @apply rounded-2xl bg-white/80 backdrop-blur-sm shadow-sm ring-1 ring-slate-200/50 transition-all duration-200 hover:shadow-md hover:ring-slate-300/70;
   }
-  
+
   .msb-card-solid {
     @apply rounded-2xl bg-white shadow-lg shadow-slate-200/50 ring-1 ring-slate-200;
   }

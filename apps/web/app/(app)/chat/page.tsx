@@ -88,27 +88,29 @@ export default function ChatPage() {
   const me = getStoredUser();
 
   return (
-    <div className="flex h-[calc(100vh-10rem)] gap-4">
+    <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-3 lg:h-[calc(100vh-10rem)] lg:flex-row lg:gap-4">
       {/* Sidebar */}
-      <aside className="w-40 shrink-0 space-y-1.5 sm:w-48">
-        <h2 className="msb-section-title mb-3 px-2">Каналы</h2>
-        {channels.map((c) => (
-          <button key={c.id} onClick={() => setActive(c.id)}
-            className={`w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all ${
-              active === c.id
-                ? "bg-msb-600 text-white shadow-sm"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-msb-200"
-            }`}>
-            <div className="flex items-center gap-2">
-              <span className="text-base">💬</span>
-              <span className="truncate">{c.name}</span>
-            </div>
-          </button>
-        ))}
+      <aside className="shrink-0 lg:w-48">
+        <h2 className="msb-section-title mb-2 px-1">Каналы</h2>
+        <div className="flex gap-2 overflow-x-auto pb-1 custom-scroll lg:block lg:space-y-1.5">
+          {channels.map((c) => (
+            <button key={c.id} onClick={() => setActive(c.id)}
+              className={`shrink-0 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all lg:w-full lg:px-4 ${
+                active === c.id
+                  ? "bg-msb-600 text-white shadow-sm"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-msb-200"
+              }`}>
+              <div className="flex items-center gap-2">
+                <span className="text-base">💬</span>
+                <span className="max-w-32 truncate">{c.name}</span>
+              </div>
+            </button>
+          ))}
+        </div>
       </aside>
 
       {/* Chat area */}
-      <section className="flex flex-1 flex-col rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
+      <section className="flex min-h-[28rem] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
         {/* Messages */}
         <div className="flex-1 space-y-4 overflow-y-auto p-5 custom-scroll">
           {messages.length === 0 && (

@@ -71,8 +71,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - запишутся демо-данные (пользователи, город, точка, прайс, запчасти, несколько
   завершённых ремонтов для статистики).
 
-**Проверка:** откройте в браузере http://localhost:8000/health — должно вернуться
-`{"status":"ok",...}`. Swagger (документация API): http://localhost:8000/docs
+**Проверка:** откройте в браузере http://localhost:8085/health — должно вернуться
+`{"status":"ok",...}`. Swagger (документация API): http://localhost:8085/docs
 
 > Примечание: по умолчанию используется **SQLite** (ничего настраивать не нужно).
 > PostgreSQL подключается только через `DATABASE_URL` (см. `.env.example`).
@@ -94,28 +94,24 @@ npm install
 npm run dev
 ```
 
-**Проверка:** откройте http://localhost:3000 — увидите экран входа MSB.
+**Проверка:** откройте http://localhost:3030 — увидите экран входа MSB.
 
-Frontend проксирует запросы `/api/*` и `/media/*` на backend на `localhost:8000`
+Frontend проксирует запросы `/api/*` и `/media/*` на backend на `localhost:8085`
 автоматически (настроено в `next.config.mjs`), поэтому отдельно настраивать адреса
 не нужно.
 
 ---
 
-## 4. Тестовые логины
+## 4. Доступ администратора
 
-При первом запуске создаются пользователи:
+При первом запуске создаётся только один администратор. Значения задаются в `.env`:
 
-| Роль | Email | Пароль |
-|---|---|---|
-| Админ | `admin@msb.local` | `admin123` |
-| Оператор | `operator@msb.local` | `operator123` |
-| Мастер | `master@msb.local` | `master123` |
-| Call-центр | `call@msb.local` | `call123` |
-| Менеджер | `manager@msb.local` | `manager123` |
+```ini
+SEED_ADMIN_EMAIL=admin@msb.local
+SEED_ADMIN_PASSWORD=измените-до-продакшена
+```
 
-> Это демо-пароли только для локального запуска. В бою обязательно смените
-> (админка → Пользователи, или переменные `SEED_ADMIN_*` перед первым запуском).
+После первого входа смените пароль в разделе «Сотрудники». Новые роли создаются администратором.
 
 ---
 
@@ -138,14 +134,14 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 # Запуск (укажите свою команду печати и логин оператора)
-REMONTFLOW_API_URL=http://localhost:8000 \
-REMONTFLOW_EMAIL=operator@msb.local \
-REMONTFLOW_PASSWORD=operator123 \
-REMONTFLOW_PRINT_CMD='lp -d EPSON_L3250 {file}' \
+MSB_API_URL=http://localhost:8085 \
+MSB_EMAIL=admin@msb.local \
+MSB_PASSWORD=admin123 \
+MSB_PRINT_CMD='lp -d EPSON_L3250 {file}' \
 python agent.py
 ```
 
-Команда печати `REMONTFLOW_PRINT_CMD` зависит от ОС:
+Команда печати `MSB_PRINT_CMD` зависит от ОС:
 - **Linux/macOS (CUPS):** `lp -d ИМЯ_ПРИНТЕРА {file}`
 - **Windows:** `powershell -Command "Start-Process -FilePath '{file}' -Verb Print"`
 
@@ -203,7 +199,7 @@ Epson L3250 поддерживает AirPrint (IPP). Принтер должен
    - `failed` — агент забрал, но печать упала (смотрите текст ошибки там же).
    - `done` — агент отправил на печать; проверьте принтер (нет бумаги/чернил?).
 3. **Проверьте доступность API** из машины, где крутится агент:
-   `curl http://localhost:8000/health` (или откройте в браузере).
+   `curl http://localhost:8085/health` (или откройте в браузере).
 4. **Режим печати** в админке: для Epson L3250 надёжнее `agent` + SumatraPDF.
    Режим `ipp` требует, чтобы принтер был в Wi-Fi и поддерживал AirPrint.
 5. **Запасной вариант:** в карточке ремонта после нажатия «Печать» появится
@@ -224,7 +220,7 @@ python -m pytest tests/ -q
 
 ## 7. Быстрая проверка, что всё работает
 
-1. Откройте http://localhost:3000 → войдите как `admin@msb.local` / `admin123`.
+1. Откройте http://localhost:3030 → войдите как `admin@msb.local` / `admin123`.
 2. Слева (или снизу на телефоне) меню: Доска / Приёмка / Call-центр / Чат / Курс / Склад.
 3. Зайдите в «Доска ремонтов» — увидите канбан со статусами.
 4. «Приёмка» → заполните клиента и технику → «Принять и печатать» → появится номер ремонта.
@@ -249,7 +245,7 @@ python -m pytest tests/ -q
 В `.env` (или в переменных окружения перед запуском backend) укажите:
 
 ```
-PUBLIC_BASE_URL=http://192.168.1.10:3000
+PUBLIC_BASE_URL=http://192.168.8.81:3030
 ```
 
 > Это адрес, куда ведёт **QR-код на бланке** (страница статуса `/r/{token}`
@@ -272,14 +268,14 @@ npm run dev
 В браузере телефона (в той же Wi-Fi сети) откройте:
 
 ```
-http://192.168.1.10:3000
+http://192.168.8.81:3030
 ```
 
-Войдите как мастер (`master@msb.local` / `master123`) — и принимайте заявки.
+Войдите как мастер (`созданного администратора`) — и принимайте заявки.
 
 ### Как это работает
 
-- Телефон обращается к фронтенду по `http://192.168.1.10:3000`.
+- Телефон обращается к фронтенду по `http://192.168.8.81:3030`.
 - Фронтенд сам проксирует `/api` и `/ws` на backend на этой же машине
   (`NEXT_PUBLIC_API_URL` и `NEXT_PUBLIC_WS_URL` оставлены пустыми).
 - Чат (WebSocket) автоматически использует адрес, по которому открыта страница,
@@ -291,7 +287,7 @@ http://192.168.1.10:3000
 backend:
 
 ```bash
-REMONTFLOW_API_URL=http://192.168.1.10:8000 python agent.py
+MSB_API_URL=http://192.168.8.81:8085 python agent.py
 ```
 
 ### Важно про брандмауэр
@@ -311,7 +307,7 @@ REMONTFLOW_API_URL=http://192.168.1.10:8000 python agent.py
 # backend
 uvicorn app.main:app --reload --port 8001
 # frontend (тогда задайте адрес backend):
-NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev -- -p 3001
+NEXT_PUBLIC_API_URL=http://localhost:8085 npm run dev -- -p 3031
 ```
 
 **Хочу «с чистого листа» (удалить данные и демо)**
@@ -319,7 +315,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev -- -p 3001
 снова — БД пересоздастся с демо-данными.
 
 **Печать не происходит**
-→ проверьте, что print-agent запущен и команда печати (`REMONTFLOW_PRINT_CMD`)
+→ проверьте, что print-agent запущен и команда печати (`MSB_PRINT_CMD`)
 указывает на существующий принтер. Логи agent выводит в консоль.
 
 **«мало данных» на дашборде**
@@ -332,7 +328,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8001 npm run dev -- -p 3001
 
 | Сервис | Локально | В локальной сети |
 |---|---|---|
-| Frontend | http://localhost:3000 | http://IP-машины:3000 |
-| Backend API | http://localhost:8000 | http://IP-машины:8000 |
-| Swagger | http://localhost:8000/docs | http://IP-машины:8000/docs |
-| Health | http://localhost:8000/health | http://IP-машины:8000/health |
+| Frontend | http://localhost:3030 | http://IP-машины:3030 |
+| Backend API | http://localhost:8085 | http://IP-машины:8085 |
+| Swagger | http://localhost:8085/docs | http://IP-машины:8085/docs |
+| Health | http://localhost:8085/health | http://IP-машины:8085/health |

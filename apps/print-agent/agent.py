@@ -16,9 +16,9 @@
 можно распечатать вручную, даже если автоматическая печать не сработала).
 
 Запуск:
-    MSB_API_URL=http://localhost:8000 \\
-    MSB_EMAIL=operator@msb.local \\
-    MSB_PASSWORD=operator123 \\
+    MSB_API_URL=http://localhost:8085 \\
+    MSB_EMAIL=admin@msb.local \\
+    MSB_PASSWORD=admin123 \\
     python agent.py
 """
 import base64
@@ -33,9 +33,9 @@ import time
 
 import requests
 
-API_URL = os.environ.get("MSB_API_URL", "http://localhost:8000")
-EMAIL = os.environ.get("MSB_EMAIL", "operator@msb.local")
-PASSWORD = os.environ.get("MSB_PASSWORD", "operator123")
+API_URL = os.environ.get("MSB_API_URL", "http://localhost:8085")
+EMAIL = os.environ.get("MSB_EMAIL", "admin@msb.local")
+PASSWORD = os.environ.get("MSB_PASSWORD", "admin123")
 PRINT_CMD = os.environ.get("MSB_PRINT_CMD", "")  # переопределение для agent-режима
 POLL_SECONDS = float(os.environ.get("MSB_POLL_SECONDS", "3"))
 SUMATRA = os.environ.get("MSB_SUMATRA", "")

@@ -145,11 +145,11 @@ export default function DashboardPage() {
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <span>🤖</span> AI-прогноз срока ремонта
         </h2>
-        <div className="mt-4 flex flex-wrap gap-3">
+        <div className="mt-4 grid gap-3 sm:flex sm:flex-wrap">
           <input value={etaType} onChange={(e) => setEtaType(e.target.value)}
-            placeholder="Тип (ТВ)" className="msb-input flex-1 min-w-[120px]" />
+            placeholder="Тип (ТВ)" className="msb-input min-w-0 flex-1" />
           <input value={etaBrand} onChange={(e) => setEtaBrand(e.target.value)}
-            placeholder="Бренд" className="msb-input flex-1 min-w-[120px]" />
+            placeholder="Бренд" className="msb-input min-w-0 flex-1" />
           <button onClick={runEta} className="msb-btn-primary">
             Получить прогноз
           </button>

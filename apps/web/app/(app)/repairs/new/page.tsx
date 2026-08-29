@@ -241,7 +241,7 @@ export default function NewRepairPage() {
       {/* Progress Steps */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-slate-900">Новая приёмка</h1>
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-4 flex max-w-full items-center gap-1 overflow-x-auto pb-1 custom-scroll">
           {SECTION_STEPS.map((s, i) => (
             <div key={s.id} className="flex items-center gap-2">
               <button
@@ -420,7 +420,7 @@ export default function NewRepairPage() {
                 value={brand} onChange={(e) => setBrand(e.target.value)} />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="msb-label">Модель</label>
                 <input className="msb-input" placeholder="UE55" value={model}
@@ -450,7 +450,7 @@ export default function NewRepairPage() {
 
             <div className="mt-4">
               <label className="msb-label">Комплектация</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {(items.length ? items.map((i) => i.name) : []).map((item) => (
                   <label key={item}
                     className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all cursor-pointer ${
@@ -468,7 +468,7 @@ export default function NewRepairPage() {
 
             <div className="mt-4">
               <label className="msb-label">Внешний вид / дефекты</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {CONDITION_ITEMS.map((item) => (
                   <label key={item}
                     className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-sm font-medium transition-all cursor-pointer ${
@@ -511,7 +511,7 @@ export default function NewRepairPage() {
                 placeholder="Опишите неисправность: не включается, не видит Wi-Fi, разбит экран…" />
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="msb-label">Мастер</label>
                 {currentUser?.role === "master" ? (

@@ -3,7 +3,7 @@
 
 // Пустая строка => относительные пути, Next.js проксирует /api и /media на backend
 // (см. rewrites в next.config.mjs). Для прямого подключения задайте
-// NEXT_PUBLIC_API_URL=http://host:8000.
+// NEXT_PUBLIC_API_URL=http://host:8085.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface User {
@@ -483,7 +483,7 @@ export function mediaUrl(path: string): string {
 }
 
 // UUID для Idempotency-Key. `crypto.randomUUID()` доступен только в HTTPS/localhost,
-// а на http://192.168.x.x:3000 его нет — поэтому свой генератор (работает везде).
+// а на http://192.168.x.x:3030 его нет — поэтому свой генератор (работает везде).
 export function uuid(): string {
   if (
     typeof crypto !== "undefined" &&

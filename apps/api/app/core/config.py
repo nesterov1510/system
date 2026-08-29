@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"
-    SEED_ADMIN_PASSWORD: str = "admin123"
+    SEED_ADMIN_PASSWORD: str = "admin123"  # только dev; в ENV=prod обязательно заменить
     SEED_ADMIN_PHONE: str = "+70000000000"
 
 

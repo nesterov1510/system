@@ -6,12 +6,13 @@ statistics-based estimator and clearly flag the source + confidence. Every run
 is logged to `ai_runs` for audit.
 """
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.db.base import utcnow
 from app.db.models import AIRun, Repair
 
 
@@ -152,7 +153,7 @@ async def weekly_summary(db: AsyncSession) -> dict:
     start = time.monotonic()
     from sqlalchemy import func
 
-    week_ago = datetime.now(timezone.utc) - __import__("datetime").timedelta(days=7)
+    week_ago = utcnow() - timedelta(days=7)
 
     accepted_week = (
         await db.execute(

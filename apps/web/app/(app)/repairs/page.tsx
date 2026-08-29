@@ -121,8 +121,8 @@ export default function RepairsBoardPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
+      <div className="mb-6 grid gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+        <div className="relative min-w-0 sm:flex-1">
           <svg className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
@@ -136,7 +136,7 @@ export default function RepairsBoardPage() {
         <select
           value={masterFilter}
           onChange={(e) => setMasterFilter(e.target.value)}
-          className="msb-input w-auto min-w-[140px]"
+          className="msb-input w-full sm:w-auto sm:min-w-[140px]"
         >
           <option value="">Все мастера</option>
           {masters.map((m) => (
@@ -148,7 +148,7 @@ export default function RepairsBoardPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="msb-input w-auto min-w-[140px]"
+          className="msb-input w-full sm:w-auto sm:min-w-[140px]"
         >
           <option value="">Все статусы</option>
           {STATUSES.map((s) => (
@@ -175,8 +175,8 @@ export default function RepairsBoardPage() {
       )}
 
       {/* Repairs List */}
-      <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
-        <table className="w-full text-left">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <table className="w-full min-w-[820px] text-left">
           <thead className="bg-slate-50/50">
             <tr>
               <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">

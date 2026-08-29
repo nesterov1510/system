@@ -127,8 +127,8 @@ export default function PrintTemplatesPage() {
         </aside>
 
         {/* Editor */}
-        <section className="msb-card-solid p-6 space-y-5">
-          <div className="grid grid-cols-2 gap-4">
+        <section className="msb-card-solid p-4 sm:p-6 space-y-5">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="msb-label">Название</label>
               <input className="msb-input" value={current.name}
@@ -144,7 +144,7 @@ export default function PrintTemplatesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="msb-label">Раскладка</label>
               <select className="msb-input" value={current.body.layout ?? "one-per-page"}
@@ -163,7 +163,7 @@ export default function PrintTemplatesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="msb-label">Название сервиса</label>
               <input className="msb-input" value={current.body.brand ?? ""}

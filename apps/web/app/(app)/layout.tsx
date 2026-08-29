@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getStoredUser, type User } from "@/lib/api";
+import MobileNav from "@/components/MobileNav";
 
 const NAV_ITEMS = [
   {
@@ -27,15 +28,6 @@ const NAV_ITEMS = [
       { href: "/admin/printer", label: "Принтер", icon: "🖨️" },
     ],
   },
-];
-
-const MOBILE_NAV = [
-  { href: "/repairs", label: "Доска", icon: "📋" },
-  { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-  { href: "/clients", label: "Клиенты", icon: "👥" },
-  { href: "/callcenter", label: "Центр", icon: "📞" },
-  { href: "/chat", label: "Чат", icon: "💬" },
-  { href: "/dashboard", label: "Курс", icon: "📊" },
 ];
 
 const STATUS_BADGES: Record<string, string> = {
@@ -151,7 +143,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-7xl">
+      <div className="mx-auto flex min-w-0 max-w-7xl">
         {/* Desktop Sidebar */}
         <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64">
           <nav className="sticky top-16 space-y-6 overflow-y-auto px-4 py-6 lg:px-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
@@ -272,33 +264,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* Main Content */}
-        <main className="min-h-[calc(100vh-4rem)] flex-1 px-4 pb-24 pt-6 lg:px-8 lg:pb-6">
-          <div className="mx-auto max-w-5xl animate-fade-in">
+        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-8 lg:pb-6">
+          <div className="mx-auto min-w-0 max-w-5xl animate-fade-in">
             {children}
           </div>
         </main>
       </div>
 
-      {/* Mobile Bottom Nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/70 bg-white/95 backdrop-blur-xl lg:hidden">
-        <div className="flex items-center justify-around px-2 py-1">
-          {MOBILE_NAV.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex flex-col items-center gap-0.5 rounded-xl px-3 py-2 transition-colors duration-200 ${
-                isActive(item.href) ? "text-msb-600" : "text-slate-500"
-              }`}
-            >
-              <span className="text-xl leading-none">{item.icon}</span>
-              <span className="text-[10px] font-medium leading-tight">{item.label}</span>
-              {isActive(item.href) && (
-                <span className="h-0.5 w-4 rounded-full bg-msb-600" />
-              )}
-            </Link>
-          ))}
-        </div>
-      </nav>
+      <MobileNav />
     </div>
   );
 }

@@ -28,6 +28,7 @@ export default function ClientsPage() {
     repairs: Repair[];
     summary: ClientRepairSummary;
   } | null>(null);
+  const [loadingClientId, setLoadingClientId] = useState<string | null>(null);
 
   function load() {
     api.listClients().then(setClients).catch((e) => setError(e.message));
@@ -35,6 +36,8 @@ export default function ClientsPage() {
   useEffect(load, []);
 
   async function openClient(c: ClientRow) {
+    setLoadingClientId(c.id);
+    setError(null);
     try {
       const repairs = await api.clientRepairs(c.id);
       const completed = repairs.filter(r => ["Выдано", "Архив"].includes(r.status));
@@ -60,6 +63,8 @@ export default function ClientsPage() {
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setLoadingClientId(null);
     }
   }
 
@@ -114,7 +119,7 @@ export default function ClientsPage() {
       )}
 
       {/* Client list */}
-      <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 overflow-hidden">
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-slate-400">
             <span className="text-3xl mb-2">👥</span>
@@ -126,7 +131,7 @@ export default function ClientsPage() {
             </Link>
           </div>
         ) : (
-          <table className="w-full text-left">
+          <table className="w-full min-w-[620px] text-left">
             <thead className="bg-slate-50/50">
               <tr>
                 <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Клиент</th>
@@ -155,9 +160,9 @@ export default function ClientsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <button onClick={() => openClient(c)}
-                      className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors">
-                      Открыть →
+                    <button onClick={() => openClient(c)} disabled={loadingClientId === c.id}
+                      className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors disabled:opacity-50">
+                      {loadingClientId === c.id ? "Загрузка…" : "Открыть →"}
                     </button>
                   </td>
                 </tr>
@@ -200,13 +205,13 @@ function ClientDetail({
 
       {/* Client header */}
       <div className="msb-card-solid overflow-hidden">
-        <div className="bg-gradient-to-r from-msb-600 to-msb-800 px-6 py-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/20 backdrop-blur-sm text-2xl font-extrabold text-white">
+        <div className="bg-gradient-to-r from-msb-600 to-msb-800 px-4 py-5 sm:px-6 sm:py-6">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-xl font-extrabold text-white sm:h-16 sm:w-16 sm:text-2xl">
               {client.full_name.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-white">{client.full_name}</h1>
+              <h1 className="break-words text-xl font-extrabold text-white sm:text-2xl">{client.full_name}</h1>
               <p className="mt-0.5 text-msb-100 font-mono">{client.phone}</p>
             </div>
           </div>
@@ -238,8 +243,8 @@ function ClientDetail({
       </div>
 
       {/* Actions */}
-      <div className="flex gap-3">
-        <Link href={`/repairs/new`} className="msb-btn-primary">
+      <div className="grid grid-cols-1 gap-2.5 sm:flex sm:gap-3">
+        <Link href="/repairs/new" className="msb-btn-primary">
           + Новая приёмка
         </Link>
         <a href={`tel:${client.phone}`} className="msb-btn-secondary">
@@ -248,7 +253,7 @@ function ClientDetail({
       </div>
 
       {/* Repairs history */}
-      <div className="msb-card-solid p-6">
+      <div className="msb-card-solid p-4 sm:p-6">
         <h2 className="msb-section-title mb-4 flex items-center gap-2">
           <span>📋</span> История ремонтов
         </h2>

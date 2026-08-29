@@ -10,8 +10,6 @@
 
 Без демо-данных: ремонтов, клиентов, запчастей, прайса, лишних пользователей.
 """
-import uuid
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -65,6 +63,15 @@ async def seed(db: AsyncSession) -> None:
     # --- Admin user (только один) ---
     row = await db.execute(select(User).where(User.role == UserRole.ADMIN.value))
     if row.scalar_one_or_none() is None:
+        if settings.ENV == "prod" and (
+            not settings.SEED_ADMIN_PASSWORD
+            or settings.SEED_ADMIN_PASSWORD.startswith("CHANGE_ME")
+            or settings.SEED_ADMIN_PASSWORD == "admin123"
+        ):
+            raise RuntimeError(
+                "В продакшене задайте уникальный SEED_ADMIN_PASSWORD в .env "
+                "до первого запуска базы данных."
+            )
         db.add(
             User(
                 name="Администратор",

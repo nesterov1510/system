@@ -76,7 +76,7 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Регион развёртывания",
     },
     "printer": {
-        "value": {"ip": "", "port": 631, "mode": "cups", "name": ""},
+        "value": {"ip": "", "port": 631, "mode": "agent", "name": ""},
         "description": "Принтер: имя, режим печати (cups|ipp)",
     },
 }

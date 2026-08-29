@@ -308,7 +308,7 @@ export default function RepairCardPage() {
           </div>
         </div>
         <div className="p-6">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+          <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
             <Detail label="Клиент" value={repair.client_name} icon="👤" />
             <Detail label="Телефон" value={repair.client_phone} icon="📞" />
             <Detail label="Техника" value={[repair.device_type, repair.brand, repair.model].filter(Boolean).join(" · ")} icon="📺" />
@@ -384,7 +384,7 @@ export default function RepairCardPage() {
 
             {/* Оформление починки */}
             <h2 className="msb-section-title mt-8 mb-4">📋 Оформление починки</h2>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className="msb-label">Расходы (себестоимость), ман.</label>
                 <input type="number" value={finalCost}

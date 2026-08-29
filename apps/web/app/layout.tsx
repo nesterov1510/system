@@ -1,13 +1,22 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import InstallPrompt from "@/components/InstallPrompt";
 
 export const metadata: Metadata = {
+  applicationName: "MSB",
   title: "MSB",
-  description: "Профессиональная система приёмки, ремонта и сервисного обслуживания техники",
+  description: "Система управления ремонтом и приёмкой техники",
+  formatDetection: {
+    telephone: true,
+  },
   manifest: "/manifest.json",
   icons: {
-    icon: "/icon.svg",
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -16,6 +25,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#4f46e5",
+  colorScheme: "light",
 };
 
 export default function RootLayout({
@@ -28,6 +38,7 @@ export default function RootLayout({
       <body className="min-h-screen">
         {children}
         <ServiceWorkerRegister />
+        <InstallPrompt />
       </body>
     </html>
   );

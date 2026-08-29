@@ -221,7 +221,7 @@ async def client_repairs(
     repairs_q = (
         select(Repair)
         .where(Repair.client_id == client_id)
-        .options(selectinload(Repair.client), selectinload(Repair.events))
+        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
         .order_by(Repair.accepted_at.desc())
     )
     if user.role == UserRole.MASTER.value:
