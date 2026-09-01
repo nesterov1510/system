@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.core.deps import AdminOnly, CurrentUser, DbSession
+from app.core.deps import CurrentUser, DbSession, OperatorOrAdmin
 from app.core.security import hash_password
 from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, Setting, User
 from app.schemas.admin import (
@@ -25,7 +25,9 @@ from app.services.print import (
     template_to_body,
 )
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminOnly])
+# Оператор имеет всё, кроме аналитики, поэтому управление (сотрудники, склад,
+# принтер, шаблоны, настройки) доступно и ему.
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[OperatorOrAdmin])
 
 
 # --- Cities ---

@@ -15,8 +15,8 @@ from app.schemas.prices import PriceItemCreate, PriceItemOut
 
 router = APIRouter(prefix="/prices", tags=["prices"])
 
-# Admin/manager can mutate prices; everyone can read.
-CanEditPrices = require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value)
+# Admin/operator can mutate prices; everyone can read.
+CanEditPrices = require_roles(UserRole.ADMIN.value, UserRole.OPERATOR.value)
 
 
 def _to_out(p: PriceItem) -> PriceItemOut:
@@ -152,7 +152,7 @@ async def delete_price(
     price_id: uuid.UUID,
     db: DbSession,
     user: CurrentUser,
-    _: bool = Depends(require_roles(UserRole.ADMIN.value)),
+    _: bool = Depends(require_roles(UserRole.ADMIN.value, UserRole.OPERATOR.value)),
 ):
     p = await db.get(PriceItem, price_id)
     if p is None:

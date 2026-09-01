@@ -38,13 +38,14 @@ def test_add_part_to_repair_debits_stock(client, admin_headers, created_repair):
     assert new_stock == max(before - 1, 0)
 
 
-def test_operator_cannot_edit_parts(client, operator_headers):
+def test_operator_can_edit_parts(client, operator_headers):
+    # Оператор имеет всё, кроме аналитики — редактирование склада разрешено.
     r = client.post(
         "/api/parts",
         headers=operator_headers,
-        json={"name": "Запрещено", "stock_qty": 1},
+        json={"name": "Часть оператора", "category": "Компоненты", "stock_qty": 1},
     )
-    assert r.status_code == 403
+    assert r.status_code == 201
 
 
 def test_price_search_and_hint(client, admin_headers):

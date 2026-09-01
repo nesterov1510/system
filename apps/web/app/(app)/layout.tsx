@@ -6,44 +6,44 @@ import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getStoredUser, type User } from "@/lib/api";
 import MobileNav from "@/components/MobileNav";
 
-const NAV_ITEMS = [
+type Role = "admin" | "operator" | "master";
+
+const NAV_ITEMS: Array<{
+  group: string;
+  items: Array<{ href: string; label: string; icon: string; roles: Role[] }>;
+}> = [
   {
     group: "Основное",
     items: [
-      { href: "/repairs", label: "Доска", icon: "📋" },
-      { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-      { href: "/clients", label: "Клиенты", icon: "👥" },
-      { href: "/callcenter", label: "Call-центр", icon: "📞" },
-      { href: "/chat", label: "Чат", icon: "💬" },
-      { href: "/dashboard", label: "Курс", icon: "📊" },
+      { href: "/repairs", label: "Все ремонты", icon: "📋", roles: ["admin", "operator", "master"] },
+      { href: "/repairs/new", label: "Приёмка", icon: "➕", roles: ["admin", "operator", "master"] },
+      { href: "/clients", label: "Клиенты", icon: "👥", roles: ["admin", "operator"] },
+      { href: "/callcenter", label: "Call-центр", icon: "📞", roles: ["admin", "operator"] },
+      { href: "/chat", label: "Чат", icon: "💬", roles: ["admin", "operator", "master"] },
+      { href: "/dashboard", label: "Аналитика", icon: "📊", roles: ["admin"] },
     ],
   },
   {
-    group: "Админ",
-    adminOnly: true,
+    group: "Управление",
     items: [
-      { href: "/parts", label: "Склад", icon: "📦" },
-      { href: "/admin/users", label: "Сотрудники", icon: "👥" },
-      { href: "/admin/print-templates", label: "Шаблоны", icon: "🖨️" },
-      { href: "/admin/printer", label: "Принтер", icon: "🖨️" },
+      { href: "/parts", label: "Склад", icon: "📦", roles: ["admin", "operator"] },
+      { href: "/admin/users", label: "Сотрудники", icon: "👥", roles: ["admin", "operator"] },
+      { href: "/admin/print-templates", label: "Шаблоны", icon: "🖨️", roles: ["admin", "operator"] },
+      { href: "/admin/printer", label: "Принтер", icon: "🖨️", roles: ["admin", "operator"] },
     ],
   },
 ];
 
 const STATUS_BADGES: Record<string, string> = {
   admin: "bg-msb-600 text-white",
-  manager: "bg-emerald-600 text-white",
   operator: "bg-cyan-600 text-white",
   master: "bg-amber-600 text-white",
-  callcenter: "bg-purple-600 text-white",
 };
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Админ",
-  manager: "Менеджер",
   operator: "Оператор",
   master: "Мастер",
-  callcenter: "Call-центр",
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -148,14 +148,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64">
           <nav className="sticky top-16 space-y-6 overflow-y-auto px-4 py-6 lg:px-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              const items = group.items.filter((i) =>
+                i.roles.includes(user.role as Role),
+              );
+              if (items.length === 0) return null;
               return (
                 <div key={group.group}>
                   <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {items.map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -211,14 +214,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <nav className="space-y-6 overflow-y-auto px-4 py-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              const items = group.items.filter((i) =>
+                i.roles.includes(user.role as Role),
+              );
+              if (items.length === 0) return null;
               return (
                 <div key={group.group}>
                   <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {items.map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}

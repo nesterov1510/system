@@ -50,15 +50,16 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
     assert r6.status_code in (401, 403)
 
 
-def test_operator_cannot_manage_users(client, operator_headers):
+def test_operator_can_manage_users(client, operator_headers):
+    # Оператор имеет всё, кроме аналитики — управление сотрудниками разрешено.
     r = client.get("/api/admin/users", headers=operator_headers)
-    assert r.status_code == 403
+    assert r.status_code == 200
     r2 = client.post(
         "/api/admin/users",
         headers=operator_headers,
         json={"name": "X", "email": "x@x.x", "password": "x12345", "role": "operator"},
     )
-    assert r2.status_code == 403
+    assert r2.status_code in (201, 409)
 
 
 def test_cannot_deactivate_self(client, admin_headers):

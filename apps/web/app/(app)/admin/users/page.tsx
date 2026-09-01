@@ -5,18 +5,14 @@ import { api, type User } from "@/lib/api";
 
 const ROLES: Array<{ value: string; label: string }> = [
   { value: "admin", label: "Админ" },
-  { value: "manager", label: "Менеджер" },
   { value: "operator", label: "Оператор" },
   { value: "master", label: "Мастер" },
-  { value: "callcenter", label: "Call-центр" },
 ];
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-red-100 text-red-700 ring-red-200",
-  manager: "bg-blue-100 text-blue-700 ring-blue-200",
   operator: "bg-emerald-100 text-emerald-700 ring-emerald-200",
   master: "bg-amber-100 text-amber-700 ring-amber-200",
-  callcenter: "bg-purple-100 text-purple-700 ring-purple-200",
 };
 
 const EMPTY_FORM = { name: "", email: "", phone: "", password: "", role: "operator" };

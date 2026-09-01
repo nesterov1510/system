@@ -21,10 +21,8 @@ interface Message {
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-red-100 text-red-700",
-  manager: "bg-blue-100 text-blue-700",
   operator: "bg-green-100 text-green-700",
   master: "bg-amber-100 text-amber-700",
-  callcenter: "bg-purple-100 text-purple-700",
 };
 
 export default function ChatPage() {
@@ -132,7 +130,6 @@ export default function ChatPage() {
                     {m.author?.role && (
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${ROLE_COLORS[m.author.role] ?? "bg-slate-100 text-slate-600"}`}>
                         {m.author.role === "admin" ? "Админ" :
-                         m.author.role === "manager" ? "Менеджер" :
                          m.author.role === "master" ? "Мастер" :
                          m.author.role === "operator" ? "Оператор" :
                          m.author.role}

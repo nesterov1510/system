@@ -37,10 +37,8 @@ JSONType = JSON().with_variant(JSONB(), "postgresql")
 # --------------------------------------------------------------------------
 class UserRole(str, enum.Enum):
     ADMIN = "admin"
-    MANAGER = "manager"
     OPERATOR = "operator"
     MASTER = "master"
-    CALLCENTER = "callcenter"
 
 
 class RepairSource(str, enum.Enum):

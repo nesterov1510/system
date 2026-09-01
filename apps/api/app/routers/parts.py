@@ -21,7 +21,7 @@ from app.schemas.parts import (
 
 router = APIRouter(tags=["parts"])
 
-CanEditParts = require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value)
+CanEditParts = require_roles(UserRole.ADMIN.value, UserRole.OPERATOR.value)
 
 
 def _to_part_out(p: Part) -> PartOut:

@@ -66,4 +66,8 @@ def require_roles(*roles: str):
 
 # Convenience guards
 AdminOnly = Depends(require_roles(UserRole.ADMIN))
-ManagerOrAdmin = Depends(require_roles(UserRole.ADMIN, UserRole.MANAGER))
+OperatorOrAdmin = Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR))
+
+# Annotated types for use as endpoint parameter annotations.
+AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
+OperatorUser = Annotated[User, Depends(require_roles(UserRole.ADMIN, UserRole.OPERATOR))]

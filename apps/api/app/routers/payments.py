@@ -10,7 +10,7 @@ from app.schemas.payments import PaymentCreate, PaymentOut
 
 router = APIRouter(tags=["payments"])
 
-CanRefund = require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value)
+CanRefund = require_roles(UserRole.ADMIN.value, UserRole.OPERATOR.value)
 
 
 @router.get("/repairs/{repair_id}/payments", response_model=list[PaymentOut])

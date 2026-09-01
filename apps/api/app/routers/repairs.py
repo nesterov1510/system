@@ -5,7 +5,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import CurrentUser, DbSession, OperatorUser
 from app.db.models import Client, City, Repair, RepairEvent, RepairPhoto, UserRole
 from app.schemas.repair import (
     PhotoOut,
@@ -94,7 +94,7 @@ async def _get_repair_or_404(db, repair_id: uuid.UUID) -> Repair:
 @router.get("/clients/lookup")
 async def lookup_client(
     db: DbSession,
-    user: CurrentUser,
+    user: OperatorUser,
     phone: str = Query(..., description="Телефон для поиска клиента"),
 ):
     """Найти клиента по телефону + вернуть список его ремонтов."""
@@ -173,7 +173,7 @@ async def lookup_client(
 @router.get("/clients/list")
 async def list_clients(
     db: DbSession,
-    user: CurrentUser,
+    user: OperatorUser,
     q: str | None = Query(None, description="Поиск по имени или телефону"),
     limit: int = Query(100, le=500),
 ):
@@ -211,7 +211,7 @@ async def list_clients(
 
 @router.get("/clients/{client_id}/repairs", response_model=list[RepairOut])
 async def client_repairs(
-    client_id: uuid.UUID, db: DbSession, user: CurrentUser
+    client_id: uuid.UUID, db: DbSession, user: OperatorUser
 ):
     """Все ремонты конкретного клиента."""
     row = await db.execute(select(Client).where(Client.id == client_id))

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.core.deps import CurrentUser, DbSession
+from app.core.deps import AdminUser, DbSession
 from app.services import ai as ai_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -15,7 +15,7 @@ class PredictETABody(BaseModel):
 
 
 @router.post("/predict-eta")
-async def predict_eta(payload: PredictETABody, db: DbSession, user: CurrentUser):
+async def predict_eta(payload: PredictETABody, db: DbSession, user: AdminUser):
     return await ai_service.predict_eta(
         db,
         device_type=payload.device_type,
@@ -26,5 +26,5 @@ async def predict_eta(payload: PredictETABody, db: DbSession, user: CurrentUser)
 
 
 @router.post("/weekly-summary")
-async def weekly_summary(db: DbSession, user: CurrentUser):
+async def weekly_summary(db: DbSession, user: AdminUser):
     return await ai_service.weekly_summary(db)

@@ -1,9 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, money, type EtaPrediction, type StatTile } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { api, getStoredUser, money, type EtaPrediction, type StatTile } from "@/lib/api";
 
 export default function DashboardPage() {
+  const router = useRouter();
+
+  // Аналитика — только для админа. Оператор и мастер не имеют доступа.
+  useEffect(() => {
+    const u = getStoredUser();
+    if (u && u.role !== "admin") router.replace("/repairs");
+  }, [router]);
+
   const [tiles, setTiles] = useState<StatTile[]>([]);
   const [overview, setOverview] = useState<{
     total: number;

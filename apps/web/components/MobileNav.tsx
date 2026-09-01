@@ -1,28 +1,40 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getStoredUser } from "@/lib/api";
 
-const ITEMS = [
-  { href: "/repairs", label: "Ремонты", icon: "📋" },
-  { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-  { href: "/clients", label: "Клиенты", icon: "👥" },
-  { href: "/chat", label: "Чат", icon: "💬" },
+const ALL_ITEMS = [
+  { href: "/repairs", label: "Ремонты", icon: "📋", roles: ["admin", "operator", "master"] },
+  { href: "/repairs/new", label: "Приёмка", icon: "➕", roles: ["admin", "operator", "master"] },
+  { href: "/clients", label: "Клиенты", icon: "👥", roles: ["admin", "operator"] },
+  { href: "/chat", label: "Чат", icon: "💬", roles: ["admin", "operator", "master"] },
 ];
 
 export default function MobileNav() {
   const pathname = usePathname();
-  const active = (href: string) => href === "/repairs"
-    ? pathname === "/repairs"
-    : pathname.startsWith(href);
+  const [allowed, setAllowed] = useState<string[]>(ALL_ITEMS.map((i) => i.href));
+
+  useEffect(() => {
+    const u = getStoredUser();
+    const role = u?.role;
+    if (role) {
+      setAllowed(ALL_ITEMS.filter((i) => i.roles.includes(role)).map((i) => i.href));
+    }
+  }, [pathname]);
+
+  const items = ALL_ITEMS.filter((i) => allowed.includes(i.href));
+  const active = (href: string) =>
+    href === "/repairs" ? pathname === "/repairs" : pathname.startsWith(href);
 
   return (
     <nav
       className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200/80 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden"
       aria-label="Основная навигация"
     >
-      <div className="grid grid-cols-4 px-1 py-1">
-        {ITEMS.map((item) => (
+      <div className="grid px-1 py-1" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+        {items.map((item) => (
           <Link
             key={item.href}
             href={item.href}

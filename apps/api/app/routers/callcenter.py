@@ -48,8 +48,9 @@ async def callcenter_queue(
     kind: str = Query("all", pattern="^(agree|ready|overdue|all)$"),
     limit: int = Query(100, le=200),
 ):
-    # callcenter + admin + manager can view the queue.
-    if user.role not in (UserRole.CALLCENTER.value, UserRole.ADMIN.value, UserRole.MANAGER.value):
+    # admin + operator can view the queue (callcenter role removed; operator
+    # takes over everything except analytics).
+    if user.role not in (UserRole.ADMIN.value, UserRole.OPERATOR.value):
         # Masters/operators still can list their repairs via /repairs.
         from fastapi import HTTPException
 

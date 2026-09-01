@@ -15,7 +15,7 @@ def test_list_payments(client, admin_headers, created_repair):
     assert len(r.json()) >= 1
 
 
-def test_refund_requires_admin(client, operator_headers, created_repair):
+def test_refund_allowed_for_operator(client, operator_headers, created_repair):
     # operator adds payment
     r = client.post(
         f"/api/repairs/{created_repair['id']}/payments",
@@ -23,9 +23,9 @@ def test_refund_requires_admin(client, operator_headers, created_repair):
         json={"amount": 500, "method": "cash"},
     )
     pid = r.json()["id"]
-    # operator cannot delete (refund) — needs admin/manager
+    # Оператор имеет всё, кроме аналитики — возврат (удаление платежа) разрешён.
     r2 = client.delete(f"/api/payments/{pid}", headers=operator_headers)
-    assert r2.status_code == 403
+    assert r2.status_code == 200
 
 
 def test_revenue_in_overview(client, admin_headers):

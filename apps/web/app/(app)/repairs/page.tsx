@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, type Lookup, type Repair } from "@/lib/api";
+import { api, type Lookup, type Repair } from "@//lib/api";
 
 const STATUSES = [
   "Принято",
@@ -51,8 +51,48 @@ const DEVICE_ICON_MAP: Record<string, string> = {
   Другое: "⚙️",
 };
 
+// Типы техники — ТВ вынесен на первую позицию.
+const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
+
+// Группировка доски по этапам ремонта.
+const BOARD_GROUPS: Array<{
+  key: string;
+  label: string;
+  accent: string;
+  statuses: string[];
+}> = [
+  {
+    key: "new",
+    label: "Новый ремонт",
+    accent: "border-t-sky-400",
+    statuses: ["Принято"],
+  },
+  {
+    key: "diag",
+    label: "Диагностика в ремонте",
+    accent: "border-t-amber-400",
+    statuses: ["Диагностика", "Согласование", "Ожидание запчастей", "В ремонте"],
+  },
+  {
+    key: "done",
+    label: "Закончен",
+    accent: "border-t-emerald-400",
+    statuses: ["Готово к выдаче", "Выдано", "Не забрано", "Архив", "Отказ"],
+  },
+];
+
 function fmt(dt: string | null | undefined) {
   return dt ? new Date(dt).toLocaleString("ru") : "—";
+}
+
+// ТВ-ремонты всегда в начале списка, затем по дате приёмки (свежие выше).
+function sortTvFirst(list: Repair[]): Repair[] {
+  return [...list].sort((a, b) => {
+    const at = a.device_type === "ТВ" ? 0 : 1;
+    const bt = b.device_type === "ТВ" ? 0 : 1;
+    if (at !== bt) return at - bt;
+    return (b.accepted_at ?? "").localeCompare(a.accepted_at ?? "");
+  });
 }
 
 export default function RepairsBoardPage() {
@@ -60,7 +100,7 @@ export default function RepairsBoardPage() {
   const [masters, setMasters] = useState<Lookup[]>([]);
   const [q, setQ] = useState("");
   const [masterFilter, setMasterFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [deviceFilter, setDeviceFilter] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function load() {
@@ -86,18 +126,27 @@ export default function RepairsBoardPage() {
   const filtered = useMemo(() => {
     return repairs.filter((r) => {
       if (masterFilter && r.master_id !== masterFilter) return false;
-      if (statusFilter && r.status !== statusFilter) return false;
+      if (deviceFilter && r.device_type !== deviceFilter) return false;
       if (q) {
-        const hay = `${r.number} ${r.client_name ?? ""} ${r.client_phone ?? ""} ${r.brand ?? ""} ${r.model ?? ""}`.toLowerCase();
+        const hay = `${r.client_name ?? ""} ${r.client_phone ?? ""} ${r.brand ?? ""} ${r.model ?? ""} ${r.master_name ?? ""} ${r.device_type ?? ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
     });
-  }, [repairs, masterFilter, statusFilter, q]);
+  }, [repairs, masterFilter, deviceFilter, q]);
+
+  const groups = useMemo(
+    () =>
+      BOARD_GROUPS.map((g) => ({
+        ...g,
+        items: sortTvFirst(filtered.filter((r) => g.statuses.includes(r.status))),
+      })),
+    [filtered],
+  );
 
   const totalCount = repairs.length;
   const activeCount = repairs.filter(
-    (r) => !["Выдано", "Архив", "Отказ", "Не забрано"].includes(r.status)
+    (r) => !["Выдано", "Архив", "Отказ", "Не забрано"].includes(r.status),
   ).length;
 
   return (
@@ -129,10 +178,22 @@ export default function RepairsBoardPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск: номер, телефон, бренд…"
+            placeholder="Поиск: телефон, клиент, бренд, мастер…"
             className="msb-input pl-10"
           />
         </div>
+        <select
+          value={deviceFilter}
+          onChange={(e) => setDeviceFilter(e.target.value)}
+          className="msb-input w-full sm:w-auto sm:min-w-[130px]"
+        >
+          <option value="">Вся техника</option>
+          {DEVICE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
         <select
           value={masterFilter}
           onChange={(e) => setMasterFilter(e.target.value)}
@@ -145,21 +206,9 @@ export default function RepairsBoardPage() {
             </option>
           ))}
         </select>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="msb-input w-full sm:w-auto sm:min-w-[140px]"
-        >
-          <option value="">Все статусы</option>
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-        {(q || masterFilter || statusFilter) && (
+        {(q || masterFilter || deviceFilter) && (
           <button
-            onClick={() => { setQ(""); setMasterFilter(""); setStatusFilter(""); }}
+            onClick={() => { setQ(""); setMasterFilter(""); setDeviceFilter(""); }}
             className="msb-btn-ghost text-sm text-slate-500"
           >
             Сбросить
@@ -174,99 +223,92 @@ export default function RepairsBoardPage() {
         </div>
       )}
 
-      {/* Repairs List */}
-      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-        <table className="w-full min-w-[820px] text-left">
-          <thead className="bg-slate-50/50">
-            <tr>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <div className="flex items-center gap-1">
-                  № Ремонта
+      {/* Kanban board — 3 колонки по этапам */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {groups.map((g) => (
+          <section
+            key={g.key}
+            className={`flex flex-col rounded-2xl bg-slate-50/60 shadow-sm ring-1 ring-slate-200 border-t-4 ${g.accent}`}
+          >
+            <div className="flex items-center justify-between px-4 py-3">
+              <h2 className="text-sm font-semibold text-slate-700">{g.label}</h2>
+              <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500 ring-1 ring-slate-200">
+                {g.items.length}
+              </span>
+            </div>
+            <div className="flex flex-col gap-2.5 px-3 pb-3">
+              {g.items.length === 0 && (
+                <div className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                  Нет ремонтов
                 </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <div className="flex items-center gap-1">
-                  Клиент
-                </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <div className="flex items-center gap-1">
-                  Техника
-                </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <div className="flex items-center gap-1">
-                  Мастер
-                </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <div className="flex items-center gap-1">
-                  Статус
-                </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
-                <div className="flex items-center gap-1">
-                  ETA
-                </div>
-              </th>
-              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
-                <div className="flex items-center gap-1">
-                  Оплата
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 && !error && (
-              <tr className="text-center text-slate-400">
-                <td colSpan={7} className="py-8 text-sm">
-                  Ремонтов не найдено
-                </td>
-              </tr>
-            )}
-            {filtered.map((r) => (
-              <tr key={r.id} className="group odd:bg-slate-50/30 hover:bg-msb-50/50 transition-colors duration-200">
-                <td className="px-5 py-4 text-sm font-mono font-bold text-slate-900 whitespace-nowrap">
-                  <Link href={`/repairs/${r.id}`} className="flex items-center gap-1.5">
-                    <span className={`h-2 w-2 rounded-full ${STATUS_DOT[r.status] ?? "bg-slate-400"}`} />
-                    {r.number}
-                  </Link>
-                </td>
-                <td className="px-5 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-slate-800">{r.client_name}</div>
-                  <a href={`tel:${r.client_phone}`} className="text-xs text-msb-600 hover:text-msb-700 font-medium">
-                    {r.client_phone}
-                  </a>
-                </td>
-                <td className="px-5 py-4 text-xs text-slate-600">
-                  <span className="mr-1">{DEVICE_ICON_MAP[r.device_type] ?? '⚙️'}</span>
-                  {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
-                </td>
-                <td className="px-5 py-4 text-xs text-slate-600">
-                  {r.master_name || "—"}
-                </td>
-                <td className="px-5 py-4">
-                  <span className={`msb-badge ${STATUS_COLORS[r.status] ?? "msb-badge-gray"}`}>
-                    {r.status}
-                  </span>
-                </td>
-                <td className="px-5 py-4 text-right text-xs text-slate-500 whitespace-nowrap">
-                  {r.eta_days != null ? `${r.eta_days} дн` : "—"}
-                </td>
-                <td className="px-5 py-4 text-right whitespace-nowrap">
-                  {r.price_final != null ? (
-                    <span className={`font-semibold ${r.paid ? "text-emerald-600" : "text-red-600"}`}>
-                      {r.paid ? "Оплачено" : "Не оплачено"}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400">—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              )}
+              {g.items.map((r) => (
+                <RepairCard key={r.id} r={r} onMove={move} />
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
+    </div>
+  );
+}
+
+function RepairCard({ r, onMove }: { r: Repair; onMove: (r: Repair, status: string) => void }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-shadow hover:shadow-md">
+      <Link href={`/repairs/${r.id}`} className="block">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-800">{r.client_name}</div>
+            <a
+              href={`tel:${r.client_phone}`}
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-msb-600 hover:text-msb-700 font-medium"
+            >
+              {r.client_phone}
+            </a>
+          </div>
+          <span className="shrink-0 text-lg leading-none" title={r.device_type}>
+            {DEVICE_ICON_MAP[r.device_type] ?? "⚙️"}
+          </span>
+        </div>
+
+        <div className="mt-1.5 text-xs text-slate-600">
+          {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <span>Мастер: {r.master_name || "—"}</span>
+          <span>Принят: {fmt(r.accepted_at).split(",")[0]}</span>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className={`msb-badge ${STATUS_COLORS[r.status] ?? "msb-badge-gray"}`}>
+            {r.status}
+          </span>
+          {r.eta_days != null && (
+            <span className="text-xs text-slate-400">~{r.eta_days} дн</span>
+          )}
+          {r.price_final != null && (
+            <span className={`text-xs font-semibold ${r.paid ? "text-emerald-600" : "text-red-600"}`}>
+              {r.paid ? "Оплачено" : "Не оплачено"}
+            </span>
+          )}
+        </div>
+      </Link>
+
+      <select
+        value={r.status}
+        onChange={(e) => onMove(r, e.target.value)}
+        className="mt-2.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-600 focus:border-msb-400 focus:outline-none"
+        title="Сменить статус"
+      >
+        {STATUSES.map((s) => (
+          <option key={s} value={s}>
+            {s}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
