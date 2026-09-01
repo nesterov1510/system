@@ -1,8 +1,13 @@
-# RemontFlow
+# MSB
 
-Собственная система приёмки и ремонта техники для сервисного центра.
+Собственная система приёмки и ремонта техники для сервисного центра
+**(полный редизайн: новый интерфейс, бренд MSB)**.
 **Без Bitrix / amoCRM / 1С как ядра** — свой backend (FastAPI), своя БД
 (PostgreSQL), свой UI (Next.js PWA).
+
+> ✨ **MSB** () — современный дизайн: адаптивная доска
+> ремонтов, карточки со статусами, мастер приёмки в 3 шага, касса, склад,
+> статистика, чат и печать — всё в едином фирменном стиле.
 
 > 🌍 **Регион: Туркменистан** — город Ашхабад (Asia/Ashgabat), телефоны +993,
 > **валюта — туркменский манат (TMT, «ман.»)**. Цены, статистика и печать
@@ -43,8 +48,8 @@ docs/              kickoff-документ (ТЗ, ER, API, wireframes)
 ## Быстрый старт
 
 > 🚀 **Запуск без Docker** — подробная пошаговая инструкция в файле
-> [`RUN_LOCAL.md`](RUN_LOCAL.md) (backend на `localhost:8000` + frontend на
-> `localhost:3000`, SQLite, ничего настраивать не нужно).
+> [`RUN_LOCAL.md`](RUN_LOCAL.md) (backend на `localhost:8085` + frontend на
+> `localhost:3030`, SQLite, ничего настраивать не нужно).
 
 ### 1. Docker Compose (prod-подобный путь)
 
@@ -54,7 +59,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Поднимет: PostgreSQL, API (`:8000`, Swagger на `/docs`), web (`:3000`).
+Поднимет: PostgreSQL, API (`:8085`, Swagger на `/docs`), web (`:3030`).
 
 ### 2. Без Docker (локальная разработка)
 
@@ -63,8 +68,8 @@ docker compose up -d --build
 cd apps/api
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
-# по умолчанию использует SQLite (файл remontflow.db), таблицы и сиды
+uvicorn app.main:app --reload --port 8085
+# по умолчанию использует SQLite (файл msb.db), таблицы и сиды
 # создаются автоматически при старте.
 ```
 
@@ -80,23 +85,21 @@ python -m pytest tests/ -q
 # Frontend
 cd apps/web
 npm install
-npm run dev   # http://localhost:3000
+npm run dev   # http://localhost:3030
 ```
 
 ---
 
-## Тестовые логины (создаются при первом запуске)
+## Доступ администратора при первом запуске
 
-| Роль | Email | Пароль |
-|---|---|---|
-| Админ | `admin@remontflow.local` | `admin123` |
-| Оператор | `operator@remontflow.local` | `operator123` |
-| Мастер | `master@remontflow.local` | `master123` |
-| Call-центр | `call@remontflow.local` | `call123` |
-| Менеджер | `manager@remontflow.local` | `manager123` |
+При первом запуске создаётся только один администратор. Значения задаются в `.env`:
 
-> Пароли — только для локального/демо-запуска. В проде смените через админку
-> `/admin/users` (или переменные `SEED_ADMIN_*` перед первым запуском).
+```ini
+SEED_ADMIN_EMAIL=admin@msb.local
+SEED_ADMIN_PASSWORD=измените-до-продакшена
+```
+
+Никогда не публикуйте пароль в документации. После первого входа смените его в разделе «Сотрудники».
 
 ---
 
@@ -104,17 +107,17 @@ npm run dev   # http://localhost:3000
 
 ```bash
 # 1. Логин
-TOKEN=$(curl -s -X POST localhost:8000/api/auth/login \
+TOKEN=$(curl -s -X POST localhost:8085/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@remontflow.local","password":"admin123"}' \
+  -d '{"email":"admin@msb.local","password":"admin123"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # 2. Город (сидируется "Москва")
-CITY=$(curl -s localhost:8000/api/admin/cities -H "Authorization: Bearer $TOKEN" \
+CITY=$(curl -s localhost:8085/api/admin/cities -H "Authorization: Bearer $TOKEN" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
 
 # 3. Приёмка (Idempotency-Key защищает от дублей)
-curl -s -X POST localhost:8000/api/repairs \
+curl -s -X POST localhost:8085/api/repairs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H 'Content-Type: application/json' \
@@ -123,16 +126,16 @@ curl -s -X POST localhost:8000/api/repairs \
 # → номер TV-MSK-2026-00001, public_token, storage_until = +3 месяца
 
 # 4. Публичная страница по QR-токену
-curl -s localhost:8000/api/public/r/{public_token}
+curl -s localhost:8085/api/public/r/{public_token}
 
 # 5. Печать бланка (PDF A4)
-curl -s -X POST localhost:8000/api/repairs/{repair_id}/print \
+curl -s -X POST localhost:8085/api/repairs/{repair_id}/print \
   -H "Authorization: Bearer $TOKEN"
 
 # 6. Чат с упоминанием ремонта
-CH=$(curl -s localhost:8000/api/chat/channels -H "Authorization: Bearer $TOKEN" \
+CH=$(curl -s localhost:8085/api/chat/channels -H "Authorization: Bearer $TOKEN" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
-curl -s -X POST localhost:8000/api/chat/channels/$CH/messages \
+curl -s -X POST localhost:8085/api/chat/channels/$CH/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"text":"Принято #TV-MSK-00001"}'
 ```
@@ -154,14 +157,14 @@ API рендерит PDF (кириллица) → print_jobs(queued) → print-a
 ```bash
 cd apps/print-agent
 pip install -r requirements.txt
-REMONTFLOW_API_URL=http://<api-host>:8000 \
-REMONTFLOW_EMAIL=operator@remontflow.local \
-REMONTFLOW_PASSWORD=operator123 \
-REMONTFLOW_PRINT_CMD='lp -d EPSON_L3250 {file}' \
+MSB_API_URL=http://<api-host>:8085 \
+MSB_EMAIL=admin@msb.local \
+MSB_PASSWORD=admin123 \
+MSB_PRINT_CMD='lp -d EPSON_L3250 {file}' \
 python agent.py
 ```
 
-`REMONTFLOW_PRINT_CMD` — команда печати вашей ОС с плейсхолдером `{file}`:
+`MSB_PRINT_CMD` — команда печати вашей ОС с плейсхолдером `{file}`:
 - **Linux/CUPS:** `lp -d EPSON_L3250 {file}`
 - **Windows:** `powershell -Command "Start-Process -FilePath '{file}' -Verb Print"`
 - **macOS:** `lp -d EPSON_L3250 {file}`
@@ -201,7 +204,7 @@ AI идёт за абстракцией `app/services/ai.py`: `predict_eta()` и
 
 ## API (кратко)
 
-Swagger/OpenAPI: `http://localhost:8000/docs`
+Swagger/OpenAPI: `http://localhost:8085/docs`
 
 ```
 POST /api/auth/login | /refresh      GET /api/auth/me
@@ -284,4 +287,4 @@ POST /api/admin/printer/test                     (тестовая печать)
 - [x] **PWA-офлайн**: service worker (app-shell кеш) + manifest
 - [x] **Тесты**: 30 pytest-смоук-тестов (auth/чат/ремонты/прайс/склад/оплаты/админ/статистика/AI)
 
-Подробное ТЗ, ER-модель, wireframes и риски — в `docs/remontflow-kickoff.md`.
+Подробное ТЗ, ER-модель, wireframes и риски — в `docs/msb-kickoff.md`.

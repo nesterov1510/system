@@ -1,6 +1,6 @@
 """Call-center queue: согласовать цену / сказать «готово» / просрочка хранения."""
 import uuid
-from datetime import datetime, timezone
+
 
 from fastapi import APIRouter, Query
 from sqlalchemy import select
@@ -14,7 +14,9 @@ router = APIRouter(prefix="/callcenter", tags=["callcenter"])
 
 
 async def _queue(db, kind: str, limit: int):
-    now = datetime.now(timezone.utc)
+    from app.db.base import utcnow
+
+    now = utcnow()
     q = select(Repair).options(selectinload(Repair.client), selectinload(Repair.events))
 
     if kind == "agree":

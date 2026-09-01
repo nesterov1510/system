@@ -190,7 +190,7 @@ async def set_printer_config(db: DbSession, body: dict):
         "mode": body.get("mode", "agent"),  # agent | ipp
         "name": body.get("name", "Epson L3250"),
     }
-    await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати")
+    await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати (agent|ipp)")
     return {"printer": value}
 
 

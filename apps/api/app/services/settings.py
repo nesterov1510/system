@@ -42,7 +42,7 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Юридический текст согласия на диагностику и ремонт",
     },
     "brand": {
-        "value": {"name": "RemontFlow"},
+        "value": {"name": "MSB"},
         "description": "Название сервисного центра",
     },
     "repair_statuses": {
@@ -76,8 +76,8 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Регион развёртывания",
     },
     "printer": {
-        "value": {"ip": "", "port": 631, "mode": "agent", "name": "Epson L3250"},
-        "description": "Принтер: IP-адрес, порт, режим печати (agent|ipp)",
+        "value": {"ip": "", "port": 631, "mode": "agent", "name": ""},
+        "description": "Принтер: имя, режим печати (cups|ipp)",
     },
 }
 

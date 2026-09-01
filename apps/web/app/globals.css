@@ -2,16 +2,141 @@
 @tailwind components;
 @tailwind utilities;
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
 :root {
   color-scheme: light;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
-  @apply bg-gray-50 text-gray-900;
+  @apply bg-gradient-to-br from-slate-50 via-white to-blue-50 text-slate-800 font-sans antialiased;
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Safe areas for phones with a notch / home indicator. */
+@supports (padding: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Prevent accidental horizontal scroll on narrow screens. */
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Do not zoom the page when focusing form controls on iOS. */
+@media (max-width: 640px) {
+  input, select, textarea {
+    font-size: 16px;
+  }
+}
+
+/* Native mobile scrolling feels better in tables and channel strips. */
+.overflow-x-auto, .overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Крупные hit-areas под стойку приёма (mobile-first, ≥44px) */
-button,
-a.btn {
+button, a, input, select, textarea {
   min-height: 44px;
+}
+
+/* Специальные стили для MSB */
+@layer components {
+  .msb-card {
+    @apply rounded-2xl bg-white/80 backdrop-blur-sm shadow-sm ring-1 ring-slate-200/50 transition-all duration-200 hover:shadow-md hover:ring-slate-300/70;
+  }
+
+  .msb-card-solid {
+    @apply rounded-2xl bg-white shadow-lg shadow-slate-200/50 ring-1 ring-slate-200;
+  }
+
+  .msb-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-msb-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:bg-msb-700 hover:shadow-md active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .msb-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-200 hover:bg-slate-50 hover:border-slate-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .msb-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-slate-600 transition-all duration-200 hover:bg-slate-100 active:scale-[0.98] disabled:opacity-40;
+  }
+
+  .msb-input {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all duration-200 focus:border-msb-500 focus:outline-none focus:ring-2 focus:ring-msb-500/20;
+  }
+
+  .msb-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+
+  .msb-badge {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+  }
+
+  .msb-badge-success {
+    @apply msb-badge bg-emerald-100 text-emerald-700;
+  }
+
+  .msb-badge-warning {
+    @apply msb-badge bg-amber-100 text-amber-700;
+  }
+
+  .msb-badge-danger {
+    @apply msb-badge bg-red-100 text-red-700;
+  }
+
+  .msb-badge-info {
+    @apply msb-badge bg-blue-100 text-blue-700;
+  }
+
+  .msb-badge-purple {
+    @apply msb-badge bg-purple-100 text-purple-700;
+  }
+
+  .msb-badge-cyan {
+    @apply msb-badge bg-cyan-100 text-cyan-700;
+  }
+
+  .msb-badge-gray {
+    @apply msb-badge bg-slate-100 text-slate-600;
+  }
+
+  .msb-stat {
+    @apply rounded-xl bg-gradient-to-br from-white to-slate-50 p-4 shadow-sm ring-1 ring-slate-200/60;
+  }
+
+  .msb-section-title {
+    @apply text-xs font-semibold uppercase tracking-widest text-slate-400;
+  }
+
+  .msb-divider {
+    @apply border-t border-slate-200/70;
+  }
+
+  /* Стили для скроллбара */
+  .custom-scroll::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  .custom-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 99px;
+  }
+}
+
+/* Progress bar анимация */
+.progress-bar {
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }

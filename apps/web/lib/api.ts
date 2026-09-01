@@ -1,9 +1,9 @@
-// Минимальный API-клиент. Токен хранится в localStorage (MVP);
+// MSB — минимальный API-клиент. Токен хранится в localStorage (MVP);
 // production-путь — httpOnly refresh cookie + тихий refresh.
 
 // Пустая строка => относительные пути, Next.js проксирует /api и /media на backend
 // (см. rewrites в next.config.mjs). Для прямого подключения задайте
-// NEXT_PUBLIC_API_URL=http://host:8000.
+// NEXT_PUBLIC_API_URL=http://host:8085.
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "";
 
 export interface User {
@@ -158,11 +158,12 @@ export interface Repair {
   cost_amount?: number | null;
   paid: boolean;
   print_count: number;
+  master_name?: string | null;
   events: RepairEvent[];
 }
 
-const TOKEN_KEY = "remontflow_token";
-const USER_KEY = "remontflow_user";
+const TOKEN_KEY = "msb_token";
+const USER_KEY = "msb_user";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -243,6 +244,33 @@ export const api = {
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
   byNumber: (number: string) =>
     request<Repair>(`/api/repairs/by-number/${encodeURIComponent(number)}`),
+
+  // Clients
+  lookupClient: (phone: string) =>
+    request<{
+      found: boolean;
+      phone?: string;
+      phone_norm?: string;
+      multiple?: boolean;
+      candidates?: Array<{ id: string; full_name: string; phone: string; repairs_count: number }>;
+      client?: { id: string; full_name: string; phone: string };
+      repairs?: Array<{
+        id: string; number: string; status: string;
+        device_type: string; brand?: string | null; model?: string | null;
+        accepted_at: string | null;
+        price_final?: number | null;
+        paid: boolean;
+      }>;
+      repairs_count?: number;
+    }>(`/api/repairs/clients/lookup?phone=${encodeURIComponent(phone)}`),
+  listClients: (q?: string) => {
+    const qs = q ? `?q=${encodeURIComponent(q)}` : "";
+    return request<Array<{
+      id: string; full_name: string; phone: string; repairs_count: number;
+    }>>(`/api/repairs/clients/list${qs}`);
+  },
+  clientRepairs: (clientId: string) =>
+    request<Repair[]>(`/api/repairs/clients/${clientId}/repairs`),
   createRepair: (payload: Record<string, unknown>) =>
     request<Repair>("/api/repairs", {
       method: "POST",
@@ -405,7 +433,6 @@ export const api = {
     request<{ job_id: string; status: string }>("/api/admin/printer/test", {
       method: "POST",
     }),
-
   // Print templates (admin)
   printTemplates: () =>
     request<
@@ -456,7 +483,7 @@ export function mediaUrl(path: string): string {
 }
 
 // UUID для Idempotency-Key. `crypto.randomUUID()` доступен только в HTTPS/localhost,
-// а на http://192.168.x.x:3000 его нет — поэтому свой генератор (работает везде).
+// а на http://192.168.x.x:3030 его нет — поэтому свой генератор (работает везде).
 export function uuid(): string {
   if (
     typeof crypto !== "undefined" &&

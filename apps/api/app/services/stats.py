@@ -2,7 +2,7 @@
 бренду, мастеру. Anti-hallucination: below threshold -> "мало данных".
 """
 import uuid
-from datetime import datetime, timezone
+from app.db.base import utcnow
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,7 +78,7 @@ async def city_stats(
 
 
 async def overview(db: AsyncSession) -> dict:
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     total = (await db.execute(select(func.count(Repair.id)))).scalar_one()
     active = (
         await db.execute(

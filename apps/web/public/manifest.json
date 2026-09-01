@@ -1,18 +1,42 @@
 {
-  "name": "RemontFlow",
-  "short_name": "RemontFlow",
-  "description": "Приёмка и ремонт техники",
-  "start_url": "/",
+  "id": "/",
+  "name": "MSB",
+  "short_name": "MSB",
+  "description": "Система управления ремонтом и приёмкой техники",
+  "start_url": "/repairs",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#0f172a",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait-primary",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
   "lang": "ru",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
   "icons": [
     {
-      "src": "/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

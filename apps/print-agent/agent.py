@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RemontFlow print-agent — печать бланков из очереди на принтер.
+"""MSB print-agent — печать бланков из очереди на принтер.
 
 Режимы (настраиваются в админке «Принтер»):
   - mode=agent : печать через драйвер ОС (рекомендуется для Epson L3250).
@@ -9,21 +9,22 @@
   - для тихой печати PDF нужен SumatraPDF (бесплатный, portable):
     https://www.sumatrapdfreader.org/download-free-pdf-viewer
     Скачайте `SumatraPDF.exe` и положите рядом с agent.py (или укажите путь
-    в переменной REMONTFLOW_SUMATRA). Если Sumatra нет — агент сохранит PDF
+    в переменной MSB_SUMATRA). Если Sumatra нет — агент сохранит PDF
     в папку `printed/` и откроет его для печати вручную.
 
 Каждый бланк ВСЕГДА сохраняется в папку `printed/` (запасной вариант:
 можно распечатать вручную, даже если автоматическая печать не сработала).
 
 Запуск:
-    REMONTFLOW_API_URL=http://localhost:8000 \\
-    REMONTFLOW_EMAIL=operator@remontflow.local \\
-    REMONTFLOW_PASSWORD=operator123 \\
+    MSB_API_URL=http://localhost:8085 \\
+    MSB_EMAIL=admin@msb.local \\
+    MSB_PASSWORD=admin123 \\
     python agent.py
 """
 import base64
 import os
 import shutil
+import socket
 import struct
 import subprocess
 import sys
@@ -32,13 +33,13 @@ import time
 
 import requests
 
-API_URL = os.environ.get("REMONTFLOW_API_URL", "http://localhost:8000")
-EMAIL = os.environ.get("REMONTFLOW_EMAIL", "operator@remontflow.local")
-PASSWORD = os.environ.get("REMONTFLOW_PASSWORD", "operator123")
-PRINT_CMD = os.environ.get("REMONTFLOW_PRINT_CMD", "")  # переопределение для agent-режима
-POLL_SECONDS = float(os.environ.get("REMONTFLOW_POLL_SECONDS", "3"))
-SUMATRA = os.environ.get("REMONTFLOW_SUMATRA", "")
-SAVE_DIR = os.environ.get("REMONTFLOW_SAVE_DIR", "./printed")
+API_URL = os.environ.get("MSB_API_URL", "http://localhost:8085")
+EMAIL = os.environ.get("MSB_EMAIL", "admin@msb.local")
+PASSWORD = os.environ.get("MSB_PASSWORD", "admin123")
+PRINT_CMD = os.environ.get("MSB_PRINT_CMD", "")  # переопределение для agent-режима
+POLL_SECONDS = float(os.environ.get("MSB_POLL_SECONDS", "3"))
+SUMATRA = os.environ.get("MSB_SUMATRA", "")
+SAVE_DIR = os.environ.get("MSB_SAVE_DIR", "./printed")
 
 IS_WINDOWS = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -234,33 +235,86 @@ def _build_ipp_print_job(printer_uri: str, pdf_bytes: bytes) -> bytes:
     attrs += _ipp_attribute(0x47, "attributes-charset", b"utf-8")
     attrs += _ipp_attribute(0x48, "attributes-natural-language", b"ru")
     attrs += _ipp_attribute(0x45, "printer-uri", printer_uri.encode("utf-8"))
-    attrs += _ipp_attribute(0x42, "requesting-user-name", b"remontflow")
+    attrs += _ipp_attribute(0x42, "requesting-user-name", b"msb")
     attrs += _ipp_attribute(0x49, "document-format", b"application/pdf")
 
     return version + op + request_id + attrs + b"\x03" + pdf_bytes
 
 
 def print_via_ipp(pdf_bytes: bytes, printer: dict) -> None:
+    """Отправка IPP Print-Job напрямую через TCP-сокет на порт 631.
+
+    Epson-принтеры (L3250 и др.) отвечают HTTP 426 «Upgrade Required» на
+    POST из requests (HTTP/1.0). Сырой IPP бинарный запрос по socket-протоколу
+    (как делает CUPS/ipptool) — работает со всеми принтерами.
+    """
     ip = printer.get("ip")
     if not ip:
         raise RuntimeError("Не задан IP-адрес принтера (админка → Принтер)")
     port = int(printer.get("port", 631))
-    printer_uri = f"ipp://{ip}:{port}/ipp/print"
-    body = _build_ipp_print_job(printer_uri, pdf_bytes)
 
-    log(f"печать по IPP: http://{ip}:{port}/ipp/print")
-    r = requests.post(
-        f"http://{ip}:{port}/ipp/print",
-        data=body,
-        headers={"Content-Type": "application/ipp"},
-        timeout=60,
+    # Пробуем разные пути IPP: /ipp/print (обычный), /ipp (AirPrint), / (старый)
+    paths = ["/ipp/print", "/ipp", "/printers/EPSON_L3250", "/"]
+    last_err: Exception | None = None
+
+    for path in paths:
+        printer_uri = f"ipp://{ip}:{port}{path}"
+        body = _build_ipp_print_job(printer_uri, pdf_bytes)
+
+        request = (
+            f"POST {path} HTTP/1.1\r\n"
+            f"Host: {ip}:{port}\r\n"
+            "Content-Type: application/ipp\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+        ).encode("utf-8") + body
+
+        log(f"печать по IPP: {printer_uri} ({path})")
+        try:
+            with socket.create_connection((ip, port), timeout=15) as s:
+                s.sendall(request)
+                resp = b""
+                while True:
+                    chunk = s.recv(65536)
+                    if not chunk:
+                        break
+                    resp += chunk
+                    if len(resp) > 1024 * 1024:  # защита от бесконечного ответа
+                        break
+        except OSError as e:
+            last_err = e
+            log(f"  {path}: socket error: {e}")
+            continue
+
+        # Проверяем HTTP-статус из ответа
+        try:
+            head, _, rest = resp.partition(b"\r\n\r\n")
+            status_line = head.split(b"\r\n")[0]
+            # "HTTP/1.1 200 OK" → 200
+            status = int(status_line.split(b" ")[1])
+        except (IndexError, ValueError):
+            last_err = RuntimeError(f"неожиданный ответ: {resp[:200]!r}")
+            continue
+
+        if status != 200:
+            last_err = RuntimeError(f"HTTP {status} from {path}")
+            log(f"  {path}: HTTP {status}")
+            continue
+
+        # Разбираем IPP binary response: статус в байтах 2-4
+        if rest and len(rest) >= 8:
+            ipp_status = struct.unpack(">h", rest[2:4])[0]
+            if ipp_status != 0x0000:
+                raise RuntimeError(
+                    f"IPP status code: 0x{ipp_status:04x} (путь {path})"
+                )
+        log(f"  {path}: напечатано (IPP status 0x0000)")
+        return
+
+    raise RuntimeError(
+        f"Не удалось отправить IPP: {last_err}"
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"IPP error: HTTP {r.status_code}")
-    if len(r.content) >= 8:
-        status_code = struct.unpack(">h", r.content[2:4])[0]
-        if status_code != 0x0000:
-            raise RuntimeError(f"IPP status code: 0x{status_code:04x}")
 
 
 def print_pdf(pdf_bytes: bytes, printer: dict | None) -> str:

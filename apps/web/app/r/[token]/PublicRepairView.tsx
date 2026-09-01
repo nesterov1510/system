@@ -19,9 +19,20 @@ const STATUS_COLORS: Record<string, string> = {
   Согласование: "bg-purple-500",
   "Ожидание запчастей": "bg-orange-500",
   "В ремонте": "bg-cyan-500",
-  "Готово к выдаче": "bg-green-500",
-  Выдано: "bg-gray-500",
+  "Готово к выдаче": "bg-emerald-500",
+  Выдано: "bg-slate-400",
   Отказ: "bg-red-500",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  Принято: "Принято в ремонт",
+  Диагностика: "Диагностика",
+  Согласование: "Согласование",
+  "Ожидание запчастей": "Ожидание запчастей",
+  "В ремонте": "В ремонте",
+  "Готово к выдаче": "Готово к выдаче",
+  Выдано: "Выдано",
+  Отказ: "Отказ",
 };
 
 function fmt(dt?: string | null) {
@@ -40,15 +51,17 @@ export default function PublicRepairView({ token }: { token: string }) {
 
   if (error) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-        <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center ring-1 ring-gray-200">
-          <div className="text-3xl">🔍</div>
-          <h1 className="mt-3 text-lg font-semibold text-gray-800">
-            Ремонт не найден
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            {error}. Проверьте QR-код или обратитесь в сервисный центр.
-          </p>
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-blue-50 p-6">
+        <div className="w-full max-w-md msb-card-solid p-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100 text-3xl">
+            🔍
+          </div>
+          <h1 className="text-lg font-bold text-slate-800">Ремонт не найден</h1>
+          <p className="mt-2 text-sm text-slate-500">{error}</p>
+          <p className="mt-1 text-sm text-slate-400">Проверьте QR-код или обратитесь в сервисный центр.</p>
+          <a href="tel:" className="mt-6 inline-flex items-center gap-2 text-msb-600 font-medium text-sm hover:text-msb-700">
+            📞 Позвонить в сервис
+          </a>
         </div>
       </main>
     );
@@ -56,69 +69,80 @@ export default function PublicRepairView({ token }: { token: string }) {
 
   if (!data) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-400">
-        Загрузка…
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-blue-50 text-slate-400">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-msb-500 border-t-transparent" />
+          <span className="text-sm font-medium">Загрузка…</span>
+        </div>
       </main>
     );
   }
 
   const statusIndex = STATUS_ORDER.indexOf(data.status);
-  const progress =
-    statusIndex >= 0 ? Math.round((statusIndex / (STATUS_ORDER.length - 1)) * 100) : 0;
+  const progress = statusIndex >= 0
+    ? Math.round((statusIndex / (STATUS_ORDER.length - 1)) * 100)
+    : 0;
 
   const complect = (data.complectation as { items?: string[] } | null)?.items;
   const stats = data.city_stats;
 
   return (
-    <main className="min-h-screen bg-gray-50 py-8">
-      <div className="mx-auto max-w-md px-4">
-        <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-200">
-          <div className="text-center">
-            <div className="text-sm text-gray-500">Ваш ремонт</div>
-            <div className="mt-1 font-mono text-xl font-bold text-gray-900">
-              {data.number}
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-msb-600 to-msb-800 px-4 py-6 text-white">
+        <div className="mx-auto max-w-md">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 backdrop-blur-sm">
+              <span className="text-xs font-extrabold">MSB</span>
             </div>
+            <span className="text-sm font-medium opacity-80"></span>
+          </div>
+          <p className="text-sm font-medium text-msb-200">Статус вашего ремонта</p>
+          <h1 className="mt-1 font-mono text-2xl font-extrabold tracking-tight">{data.number}</h1>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-md px-4 -mt-4">
+        {/* Status card */}
+        <div className="msb-card-solid p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className={`h-3 w-3 rounded-full ${STATUS_COLORS[data.status] ?? "bg-slate-400"}`} />
+              <span className="text-base font-semibold text-slate-800">
+                {STATUS_LABELS[data.status] ?? data.status}
+              </span>
+            </div>
+            <span className="text-sm text-slate-400">{progress}%</span>
+          </div>
+          <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className={`h-full rounded-full progress-bar ${STATUS_COLORS[data.status] ?? "bg-slate-400"}`}
+              style={{ width: `${Math.max(progress, 4)}%` }}
+            />
           </div>
 
-          {/* Статус + прогресс */}
-          <div className="mt-5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-medium text-gray-800">{data.status}</span>
-              <span className="text-gray-400">{progress}%</span>
-            </div>
-            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-              <div
-                className={`h-full rounded-full ${
-                  STATUS_COLORS[data.status] ?? "bg-gray-400"
-                }`}
-                style={{ width: `${Math.max(progress, 4)}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Техника */}
-          <dl className="mt-5 space-y-2 text-sm">
-            <Row label="Техника" value={[data.device_type, data.brand, data.model].filter(Boolean).join(" · ")} />
+          <dl className="mt-5 space-y-3 text-sm">
+            <PublicRow label="Техника" value={[data.device_type, data.brand, data.model].filter(Boolean).join(" · ")} />
             {complect && complect.length > 0 && (
-              <Row label="Комплект" value={complect.join(", ")} />
+              <PublicRow label="Комплект" value={complect.join(", ")} />
             )}
-            <Row label="Принято" value={fmt(data.accepted_at)} />
+            <PublicRow label="Принято" value={fmt(data.accepted_at)} />
             {data.eta_days != null && (
-              <Row label="Плановый срок" value={`${data.eta_days} дн`} />
+              <PublicRow label="Плановый срок" value={`~${data.eta_days} дней`} />
             )}
-            {data.ready_at && <Row label="Готово" value={fmt(data.ready_at)} />}
-            {data.issued_at && <Row label="Выдано" value={fmt(data.issued_at)} />}
+            {data.ready_at && <PublicRow label="Готово" value={fmt(data.ready_at)} />}
+            {data.issued_at && <PublicRow label="Выдано" value={fmt(data.issued_at)} />}
             {data.storage_until && (
-              <Row label="Хранение до" value={fmt(data.storage_until)} />
+              <PublicRow label="Хранение до" value={fmt(data.storage_until)} />
             )}
           </dl>
         </div>
 
-        {/* Условия хранения */}
+        {/* Storage info */}
         {data.storage_text && (
           <div className="mt-3 rounded-2xl bg-amber-50 p-5 ring-1 ring-amber-200">
-            <h2 className="text-sm font-semibold text-amber-800">
-              ⚠ Условия хранения
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+              <span>⚠️</span> Условия хранения
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-amber-900">
               {data.storage_text}
@@ -126,57 +150,67 @@ export default function PublicRepairView({ token }: { token: string }) {
           </div>
         )}
 
-        {/* «Как обычно» по городу */}
+        {/* City stats */}
         {stats && (
-          <div className="mt-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200">
-            <h2 className="text-sm font-semibold text-gray-700">
-              Как обычно у нас в городе
+          <div className="mt-3 msb-card-solid p-5">
+            <h2 className="text-sm font-semibold text-slate-700">
+              Как обычно у нас
             </h2>
-            {stats.message === "мало данных" || stats.n < stats.threshold ? (
-              <p className="mt-2 text-sm text-gray-400">
-                Пока недостаточно данных для статистики.
-              </p>
+            {stats.message === "мало данных" || (stats.n != null && stats.n < stats.threshold) ? (
+              <p className="mt-2 text-sm text-slate-400">Пока недостаточно данных для статистики.</p>
             ) : (
-              <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <div className="text-xs text-gray-400">Средний срок</div>
-                  <div className="text-lg font-semibold text-gray-800">
-                    {stats.avg_days} дн
-                  </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-gradient-to-br from-msb-50 to-blue-50 p-4 text-center ring-1 ring-msb-100">
+                  <div className="text-xs font-medium text-msb-600 uppercase tracking-wide">Средний срок</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-800">{stats.avg_days} <span className="text-sm font-medium text-slate-500">дн</span></div>
                 </div>
-                <div className="rounded-lg bg-gray-50 p-3">
-                  <div className="text-xs text-gray-400">Средний чек</div>
-                  <div className="text-lg font-semibold text-gray-800">
-                    {money(stats.avg_price)}
-                  </div>
+                <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-teal-50 p-4 text-center ring-1 ring-emerald-100">
+                  <div className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Средний чек</div>
+                  <div className="mt-1 text-2xl font-bold text-slate-800">{money(stats.avg_price)}</div>
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Контакты */}
+        {/* Contacts */}
         {(data.branch_name || data.branch_phone) && (
-          <div className="mt-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-gray-200 text-sm text-gray-600">
-            <div className="font-medium text-gray-800">Контакты сервиса</div>
-            {data.branch_name && <div className="mt-1">{data.branch_name}</div>}
+          <div className="mt-3 msb-card-solid p-5 text-sm">
+            <h2 className="font-semibold text-slate-700">Контакты сервиса</h2>
+            {data.branch_name && (
+              <p className="mt-2 text-slate-600">{data.branch_name}</p>
+            )}
             {data.branch_phone && (
-              <a href={`tel:${data.branch_phone}`} className="mt-1 block text-blue-600">
-                ☎ {data.branch_phone}
+              <a href={`tel:${data.branch_phone}`}
+                className="mt-2 inline-flex items-center gap-2 text-msb-600 font-semibold hover:text-msb-700">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-msb-50 text-lg ring-1 ring-msb-100">
+                  📞
+                </span>
+                {data.branch_phone}
               </a>
             )}
           </div>
         )}
+
+        {/* Footer */}
+        <div className="mt-8 mb-6 text-center">
+          <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-msb-600 to-msb-800">
+              <span className="text-[8px] font-bold text-white">MSB</span>
+            </div>
+            <span></span>
+          </div>
+        </div>
       </div>
     </main>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function PublicRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-gray-400">{label}</dt>
-      <dd className="text-right font-medium text-gray-800">{value}</dd>
+      <dt className="text-slate-400">{label}</dt>
+      <dd className="text-right font-medium text-slate-800">{value}</dd>
     </div>
   );
 }

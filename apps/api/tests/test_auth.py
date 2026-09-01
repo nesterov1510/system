@@ -5,7 +5,7 @@ def test_login_success(client, admin_headers):
 def test_login_failure(client):
     r = client.post(
         "/api/auth/login",
-        json={"email": "admin@remontflow.local", "password": "wrong"},
+        json={"email": "admin@msb.local", "password": "wrong"},
     )
     assert r.status_code == 401
 

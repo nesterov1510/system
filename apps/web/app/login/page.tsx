@@ -6,8 +6,8 @@ import { api, setSession } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@remontflow.local");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,53 +27,67 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-sm ring-1 ring-gray-200">
-        <h1 className="text-2xl font-bold text-gray-900">RemontFlow</h1>
-        <p className="mt-1 text-sm text-gray-500">Стойка приёма и ремонта</p>
-
-        <form onSubmit={onSubmit} className="mt-8 space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Email
-            </label>
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-base"
-              autoComplete="username"
-            />
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-blue-50 p-4">
+      <div className="w-full max-w-sm animate-slide-up">
+        {/* Logo */}
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-msb-600 to-msb-800 shadow-lg shadow-msb-600/20">
+            <span className="text-2xl font-extrabold text-white">MSB</span>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">
-              Пароль
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-base"
-              autoComplete="current-password"
-            />
-          </div>
+          <h1 className="text-2xl font-bold text-slate-900">MSB</h1>
+          <p className="mt-1 text-sm text-slate-500"></p>
+        </div>
 
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </p>
-          )}
+        <div className="rounded-2xl bg-white p-8 shadow-lg shadow-slate-200/60 ring-1 ring-slate-200">
+          <form onSubmit={onSubmit} className="space-y-5">
+            <div>
+              <label className="msb-label">Email</label>
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="msb-input"
+                autoComplete="username"
+                placeholder="email@example.com"
+              />
+            </div>
+            <div>
+              <label className="msb-label">Пароль</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="msb-input"
+                autoComplete="current-password"
+                placeholder="••••••••"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-slate-900 px-4 py-3 text-base font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {loading ? "Входим…" : "Войти"}
-          </button>
-        </form>
+            {error && (
+              <div className="flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">
+                <span>⚠</span>
+                <span>{error}</span>
+              </div>
+            )}
 
-        <p className="mt-6 text-xs text-gray-400">
-          Демо: admin@remontflow.local / admin123
+            <button
+              type="submit"
+              disabled={loading}
+              className="msb-btn-primary w-full py-3 text-base"
+            >
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Входим…
+                </span>
+              ) : (
+                "Войти в систему"
+              )}
+            </button>
+          </form>
+        </div>
+
+        <p className="mt-6 text-center text-xs text-slate-400">
+          MSB v1.0 — Система управления сервисным центром
         </p>
       </div>
     </main>

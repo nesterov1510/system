@@ -17,16 +17,43 @@ const STATUSES = [
   "Отказ",
 ];
 
-const STATUS_STYLES: Record<string, string> = {
-  Принято: "bg-blue-50 border-blue-200",
-  Диагностика: "bg-amber-50 border-amber-200",
-  Согласование: "bg-purple-50 border-purple-200",
-  "Ожидание запчастей": "bg-orange-50 border-orange-200",
-  "В ремонте": "bg-cyan-50 border-cyan-200",
-  "Готово к выдаче": "bg-green-50 border-green-200",
-  Выдано: "bg-gray-50 border-gray-200",
-  Отказ: "bg-red-50 border-red-200",
+// Цветовые стили для статусов (для бейджей)
+const STATUS_COLORS: Record<string, string> = {
+  Принято: "msb-badge-info",
+  Диагностика: "msb-badge-warning",
+  Согласование: "msb-badge-purple",
+  "Ожидание запчастей": "bg-orange-100 text-orange-700",
+  "В ремонте": "msb-badge-cyan",
+  "Готово к выдаче": "msb-badge-success",
+  Выдано: "msb-badge-gray",
+  "Не забрано": "bg-rose-100 text-rose-700",
+  Архив: "msb-badge-gray",
+  Отказ: "msb-badge-danger",
 };
+
+const STATUS_DOT: Record<string, string> = {
+  Принято: "bg-blue-500",
+  Диагностика: "bg-amber-500",
+  Согласование: "bg-purple-500",
+  "Ожидание запчастей": "bg-orange-500",
+  "В ремонте": "bg-cyan-500",
+  "Готово к выдаче": "bg-emerald-500",
+  Выдано: "bg-slate-400",
+  "Не забрано": "bg-rose-500",
+  Архив: "bg-slate-300",
+  Отказ: "bg-red-500",
+};
+
+const DEVICE_ICON_MAP: Record<string, string> = {
+  ТВ: "📺",
+  Монитор: "🖥️",
+  Аудио: "🔊",
+  Другое: "⚙️",
+};
+
+function fmt(dt: string | null | undefined) {
+  return dt ? new Date(dt).toLocaleString("ru") : "—";
+}
 
 export default function RepairsBoardPage() {
   const [repairs, setRepairs] = useState<Repair[]>([]);
@@ -52,7 +79,7 @@ export default function RepairsBoardPage() {
       await api.updateRepair(repair.id, { status });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
-      load();
+      load(); // Reload to revert UI if API fails
     }
   }
 
@@ -68,39 +95,48 @@ export default function RepairsBoardPage() {
     });
   }, [repairs, masterFilter, statusFilter, q]);
 
-  const grouped = useMemo(() => {
-    const g: Record<string, Repair[]> = {};
-    for (const s of STATUSES) g[s] = [];
-    for (const r of filtered) {
-      (g[r.status] ?? (g[r.status] = [])).push(r);
-    }
-    return g;
-  }, [filtered]);
+  const totalCount = repairs.length;
+  const activeCount = repairs.filter(
+    (r) => !["Выдано", "Архив", "Отказ", "Не забрано"].includes(r.status)
+  ).length;
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Доска ремонтов</h1>
-        <Link
-          href="/repairs/new"
-          className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
-        >
-          + Приёмка
-        </Link>
+      {/* Header */}
+      <div className="mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Все ремонты</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {totalCount} всего · {activeCount} в работе
+            </p>
+          </div>
+          <Link href="/repairs/new" className="msb-btn-primary">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Новая приёмка
+          </Link>
+        </div>
       </div>
 
-      {/* Фильтры */}
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Поиск: № / телефон / бренд"
-          className="min-w-[200px] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-        />
+      {/* Filters */}
+      <div className="mb-6 grid gap-2.5 sm:flex sm:flex-wrap sm:items-center sm:gap-3">
+        <div className="relative min-w-0 sm:flex-1">
+          <svg className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Поиск: номер, телефон, бренд…"
+            className="msb-input pl-10"
+          />
+        </div>
         <select
           value={masterFilter}
           onChange={(e) => setMasterFilter(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          className="msb-input w-full sm:w-auto sm:min-w-[140px]"
         >
           <option value="">Все мастера</option>
           {masters.map((m) => (
@@ -112,7 +148,7 @@ export default function RepairsBoardPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          className="msb-input w-full sm:w-auto sm:min-w-[140px]"
         >
           <option value="">Все статусы</option>
           {STATUSES.map((s) => (
@@ -121,56 +157,115 @@ export default function RepairsBoardPage() {
             </option>
           ))}
         </select>
+        {(q || masterFilter || statusFilter) && (
+          <button
+            onClick={() => { setQ(""); setMasterFilter(""); setStatusFilter(""); }}
+            className="msb-btn-ghost text-sm text-slate-500"
+          >
+            Сбросить
+          </button>
+        )}
       </div>
 
-      {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+      {error && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">
+          <span>⚠</span>
+          <span>{error}</span>
+        </div>
+      )}
 
-      {/* Канбан (горизонтальный скролл на мобильном) */}
-      <div className="flex gap-3 overflow-x-auto pb-4">
-        {STATUSES.map((s) => (
-          <div
-            key={s}
-            className="w-64 shrink-0 rounded-xl bg-gray-100/70 p-2"
-          >
-            <div className="mb-2 flex items-center justify-between px-1">
-              <span className="text-xs font-semibold text-gray-500">{s}</span>
-              <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-500">
-                {grouped[s]?.length ?? 0}
-              </span>
-            </div>
-            <div className="space-y-2">
-              {(grouped[s] ?? []).map((r) => (
-                <div
-                  key={r.id}
-                  className={`block rounded-lg border bg-white p-3 ${STATUS_STYLES[s] ?? "border-gray-200"}`}
-                >
-                  <Link href={`/repairs/${r.id}`} className="block">
-                    <div className="font-mono text-sm font-semibold text-gray-900">
-                      {r.number}
-                    </div>
-                    <div className="mt-0.5 text-xs text-gray-600">
-                      {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
-                    </div>
-                    <div className="mt-0.5 text-xs text-gray-500">
-                      {r.client_name}
-                    </div>
-                  </Link>
-                  <select
-                    value={r.status}
-                    onChange={(e) => move(r, e.target.value)}
-                    className="mt-2 w-full rounded border border-gray-200 px-1 py-1 text-xs text-gray-600"
-                  >
-                    {STATUSES.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
+      {/* Repairs List */}
+      <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <table className="w-full min-w-[820px] text-left">
+          <thead className="bg-slate-50/50">
+            <tr>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <div className="flex items-center gap-1">
+                  № Ремонта
                 </div>
-              ))}
-            </div>
-          </div>
-        ))}
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <div className="flex items-center gap-1">
+                  Клиент
+                </div>
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <div className="flex items-center gap-1">
+                  Техника
+                </div>
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <div className="flex items-center gap-1">
+                  Мастер
+                </div>
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <div className="flex items-center gap-1">
+                  Статус
+                </div>
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
+                <div className="flex items-center gap-1">
+                  ETA
+                </div>
+              </th>
+              <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
+                <div className="flex items-center gap-1">
+                  Оплата
+                </div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && !error && (
+              <tr className="text-center text-slate-400">
+                <td colSpan={7} className="py-8 text-sm">
+                  Ремонтов не найдено
+                </td>
+              </tr>
+            )}
+            {filtered.map((r) => (
+              <tr key={r.id} className="group odd:bg-slate-50/30 hover:bg-msb-50/50 transition-colors duration-200">
+                <td className="px-5 py-4 text-sm font-mono font-bold text-slate-900 whitespace-nowrap">
+                  <Link href={`/repairs/${r.id}`} className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 rounded-full ${STATUS_DOT[r.status] ?? "bg-slate-400"}`} />
+                    {r.number}
+                  </Link>
+                </td>
+                <td className="px-5 py-4 whitespace-nowrap">
+                  <div className="text-sm font-medium text-slate-800">{r.client_name}</div>
+                  <a href={`tel:${r.client_phone}`} className="text-xs text-msb-600 hover:text-msb-700 font-medium">
+                    {r.client_phone}
+                  </a>
+                </td>
+                <td className="px-5 py-4 text-xs text-slate-600">
+                  <span className="mr-1">{DEVICE_ICON_MAP[r.device_type] ?? '⚙️'}</span>
+                  {[r.device_type, r.brand, r.model].filter(Boolean).join(" · ")}
+                </td>
+                <td className="px-5 py-4 text-xs text-slate-600">
+                  {r.master_name || "—"}
+                </td>
+                <td className="px-5 py-4">
+                  <span className={`msb-badge ${STATUS_COLORS[r.status] ?? "msb-badge-gray"}`}>
+                    {r.status}
+                  </span>
+                </td>
+                <td className="px-5 py-4 text-right text-xs text-slate-500 whitespace-nowrap">
+                  {r.eta_days != null ? `${r.eta_days} дн` : "—"}
+                </td>
+                <td className="px-5 py-4 text-right whitespace-nowrap">
+                  {r.price_final != null ? (
+                    <span className={`font-semibold ${r.paid ? "text-emerald-600" : "text-red-600"}`}>
+                      {r.paid ? "Оплачено" : "Не оплачено"}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

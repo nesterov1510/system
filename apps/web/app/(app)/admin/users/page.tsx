@@ -11,25 +11,15 @@ const ROLES: Array<{ value: string; label: string }> = [
   { value: "callcenter", label: "Call-центр" },
 ];
 
-const ROLE_LABELS: Record<string, string> = Object.fromEntries(
-  ROLES.map((r) => [r.value, r.label]),
-);
-
 const ROLE_COLORS: Record<string, string> = {
-  admin: "bg-red-100 text-red-700",
-  manager: "bg-blue-100 text-blue-700",
-  operator: "bg-green-100 text-green-700",
-  master: "bg-amber-100 text-amber-700",
-  callcenter: "bg-purple-100 text-purple-700",
+  admin: "bg-red-100 text-red-700 ring-red-200",
+  manager: "bg-blue-100 text-blue-700 ring-blue-200",
+  operator: "bg-emerald-100 text-emerald-700 ring-emerald-200",
+  master: "bg-amber-100 text-amber-700 ring-amber-200",
+  callcenter: "bg-purple-100 text-purple-700 ring-purple-200",
 };
 
-const EMPTY_FORM = {
-  name: "",
-  email: "",
-  phone: "",
-  password: "",
-  role: "operator",
-};
+const EMPTY_FORM = { name: "", email: "", phone: "", password: "", role: "operator" };
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -115,177 +105,138 @@ export default function AdminUsersPage() {
     setShowForm(true);
   }
 
-  const input = "rounded-lg border border-gray-300 px-3 py-2 text-sm";
-
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Пользователи</h1>
-        <button
-          onClick={() => {
-            resetForm();
-            setShowForm((v) => !v);
-          }}
-          className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white"
-        >
-          + Пользователь
+    <div className="mx-auto max-w-4xl">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Сотрудники</h1>
+          <p className="mt-1 text-sm text-slate-500">{users.length} пользователей в системе</p>
+        </div>
+        <button onClick={() => { resetForm(); setShowForm((v) => !v); }}
+          className="msb-btn-primary">
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+          </svg>
+          Добавить
         </button>
       </div>
 
       {msg && (
-        <p className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          {msg}
-        </p>
+        <div className="mb-4 flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700 ring-1 ring-emerald-200">
+          <span>✅</span> {msg}
+        </div>
       )}
       {error && (
-        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-          {error}
-        </p>
+        <div className="mb-4 flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">
+          <span>⚠</span> {error}
+        </div>
       )}
 
+      {/* Form */}
       {showForm && (
-        <form
-          onSubmit={submit}
-          className="mb-4 space-y-3 rounded-2xl bg-white p-4 ring-1 ring-gray-200"
-        >
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={submit} className="mb-6 msb-card-solid p-5 space-y-4 animate-slide-up">
+          <h3 className="text-sm font-semibold text-slate-700">
+            {editing ? "Редактирование" : "Новый сотрудник"}
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                ФИО *
-              </label>
-              <input
-                className={`${input} w-full`}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
+              <label className="msb-label">ФИО *</label>
+              <input className="msb-input" value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Роль
-              </label>
-              <select
-                className={`${input} w-full`}
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-              >
+              <label className="msb-label">Роль</label>
+              <select className="msb-input" value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}>
                 {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
+                  <option key={r.value} value={r.value}>{r.label}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Email *
-              </label>
-              <input
-                className={`${input} w-full`}
-                type="email"
-                value={form.email}
+              <label className="msb-label">Email *</label>
+              <input className="msb-input" type="email" value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                disabled={!!editing}
-                required
-              />
+                disabled={!!editing} required />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                Телефон
-              </label>
-              <input
-                className={`${input} w-full`}
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              />
+              <label className="msb-label">Телефон</label>
+              <input className="msb-input" value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-500">
-                {editing ? "Новый пароль (пусто = не менять)" : "Пароль *"}
-              </label>
-              <input
-                className={`${input} w-full`}
-                type="password"
-                value={form.password}
+              <label className="msb-label">{editing ? "Новый пароль" : "Пароль *"}</label>
+              <input className="msb-input" type="password" value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                required={!editing}
-                minLength={6}
-              />
+                required={!editing} minLength={6}
+                placeholder={editing ? "Оставьте пустым чтобы не менять" : "Минимум 6 символов"} />
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">
-              {editing ? "Сохранить" : "Создать"}
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600"
-            >
-              Отмена
-            </button>
+          <div className="flex gap-3">
+            <button className="msb-btn-primary">{editing ? "Сохранить" : "Создать"}</button>
+            <button type="button" onClick={resetForm} className="msb-btn-secondary">Отмена</button>
           </div>
         </form>
       )}
 
-      <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-gray-200">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 text-xs text-gray-500">
-            <tr>
-              <th className="px-4 py-3">Сотрудник</th>
-              <th className="px-4 py-3">Роль</th>
-              <th className="px-4 py-3">Телефон</th>
-              <th className="px-4 py-3">Статус</th>
-              <th className="px-4 py-3 text-right">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id} className="border-b border-gray-100 last:border-0">
-                <td className="px-4 py-3">
-                  <div className="font-medium text-gray-900">{u.name}</div>
-                  <div className="text-xs text-gray-400">{u.email}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      ROLE_COLORS[u.role] ?? "bg-gray-100 text-gray-600"
-                    }`}
-                  >
-                    {ROLE_LABELS[u.role] ?? u.role}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-gray-600">{u.phone || "—"}</td>
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => toggleActive(u)}
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      u.active
-                        ? "bg-green-100 text-green-700"
-                        : "bg-gray-100 text-gray-500"
-                    }`}
-                  >
-                    {u.active ? "активен" : "отключён"}
-                  </button>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => startEdit(u)}
-                    className="mr-2 text-sm text-blue-600 hover:underline"
-                  >
-                    изменить
-                  </button>
-                  <button
-                    onClick={() => deactivate(u)}
-                    className="text-sm text-red-500 hover:underline"
-                  >
-                    отключить
-                  </button>
-                </td>
+      {/* Users table */}
+      <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50/50">
+                <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Сотрудник</th>
+                <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Роль</th>
+                <th className="hidden sm:table-cell px-5 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Телефон</th>
+                <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500">Статус</th>
+                <th className="px-5 py-4 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Действия</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.map((u) => (
+                <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="px-5 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
+                        {u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="font-medium text-slate-900">{u.name}</div>
+                        <div className="text-xs text-slate-400">{u.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-4">
+                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ${ROLE_COLORS[u.role] ?? "bg-slate-100 text-slate-600 ring-slate-200"}`}>
+                      {ROLES.find((r) => r.value === u.role)?.label ?? u.role}
+                    </span>
+                  </td>
+                  <td className="hidden sm:table-cell px-5 py-4 text-slate-600">{u.phone || "—"}</td>
+                  <td className="px-5 py-4">
+                    <button onClick={() => toggleActive(u)}
+                      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                        u.active
+                          ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      }`}>
+                      {u.active ? "Активен" : "Отключён"}
+                    </button>
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <button onClick={() => startEdit(u)}
+                      className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors mr-3">
+                      Изменить
+                    </button>
+                    <button onClick={() => deactivate(u)}
+                      className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors">
+                      Отключить
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
