@@ -164,6 +164,60 @@ export interface Repair {
 
 const TOKEN_KEY = "msb_token";
 const USER_KEY = "msb_user";
+const REMEMBER_KEY = "msb_remember";
+
+export interface RememberedLogin {
+  email: string;
+  password: string;
+}
+
+/** base64 (utf-8 safe) — это НЕ шифрование, только чтобы пароль
+ *  не лежал в localStorage открытым текстом при беглом взгляде. */
+function encode(value: string): string {
+  return window.btoa(
+    String.fromCharCode(...new TextEncoder().encode(value)),
+  );
+}
+
+function decode(value: string): string {
+  const bin = window.atob(value);
+  return new TextDecoder().decode(
+    Uint8Array.from(bin, (ch) => ch.charCodeAt(0)),
+  );
+}
+
+/** Сохранить данные входа для автозаполнения формы логина. */
+export function saveRememberedLogin(email: string, password: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      REMEMBER_KEY,
+      encode(JSON.stringify({ email, password })),
+    );
+  } catch {
+    /* приватный режим / переполненное хранилище — просто не запоминаем */
+  }
+}
+
+/** Прочитать сохранённые данные входа (или null). */
+export function getRememberedLogin(): RememberedLogin | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(REMEMBER_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(decode(raw)) as RememberedLogin;
+    if (!data || typeof data.email !== "string") return null;
+    return { email: data.email, password: data.password ?? "" };
+  } catch {
+    window.localStorage.removeItem(REMEMBER_KEY);
+    return null;
+  }
+}
+
+export function clearRememberedLogin() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(REMEMBER_KEY);
+}
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;

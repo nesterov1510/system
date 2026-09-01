@@ -1,15 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, setSession } from "@/lib/api";
+import {
+  api,
+  clearRememberedLogin,
+  getRememberedLogin,
+  saveRememberedLogin,
+  setSession,
+} from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Автозаполнение формы, если в прошлый раз отметили «Запомнить вход».
+  useEffect(() => {
+    const saved = getRememberedLogin();
+    if (saved) {
+      setEmail(saved.email);
+      setPassword(saved.password);
+      setRemember(true);
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,6 +35,11 @@ export default function LoginPage() {
     try {
       const res = await api.login(email, password);
       setSession(res.access_token, res.user);
+      if (remember) {
+        saveRememberedLogin(email, password);
+      } else {
+        clearRememberedLogin();
+      }
       router.push("/repairs");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
@@ -61,6 +83,19 @@ export default function LoginPage() {
                 placeholder="••••••••"
               />
             </div>
+
+            <label className="flex cursor-pointer select-none items-center gap-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(e) => {
+                  setRemember(e.target.checked);
+                  if (!e.target.checked) clearRememberedLogin();
+                }}
+                className="h-5 w-5 rounded border-slate-300 text-msb-600 focus:ring-msb-500"
+              />
+              <span>Запомнить вход</span>
+            </label>
 
             {error && (
               <div className="flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">
