@@ -50,8 +50,8 @@ DEFAULT_TEMPLATE = {
     "name": "Бланк приёма (Turkmen)",
     "paper": "A4",
     "brand": "MSB",
-    "title": "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy",
-    "subtitle": "Сервисный центр · {city} · {branch}",
+    "title": "",
+    "subtitle": "",
     "fields": [
         "client", "phone", "device", "serial", "complect",
         "condition", "fault", "accepted_by", "master",
@@ -65,11 +65,22 @@ DEFAULT_TEMPLATE = {
 }
 
 
+# Строки шапки, которые больше не печатаются на бланке (остались в старых
+# шаблонах, сохранённых в БД) — вырезаем их при нормализации.
+LEGACY_HEADER_TEXTS = {
+    "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy",
+    "Сервисный центр · {city} · {branch}",
+}
+
+
 def normalize_template(body: dict) -> dict:
     t = dict(DEFAULT_TEMPLATE)
     if body:
         t.update(body)
     t["fields"] = [f for f in t.get("fields", []) if f in AVAILABLE_FIELDS]
+    for key in ("title", "subtitle"):
+        if (t.get(key) or "").strip() in LEGACY_HEADER_TEXTS:
+            t[key] = ""
     return t
 
 
@@ -161,18 +172,7 @@ def _render_turkmen_form(
     draw("", left_margin + 22 * mm, y + 1 * mm, 7, bold=True)
     y -= 6 * mm
 
-    title = t.get("title") or "Bejergi üçin kabul edilen enjamlaryň hasaba alyş kagyzy"
-    draw(title, left_margin, y, 9, bold=True)
-    y -= 6 * mm
-
-    subtitle = t.get("subtitle") or ""
-    if subtitle:
-        try:
-            sub_text = subtitle.format(city=city_name, branch=branch_name)
-        except (KeyError, IndexError):
-            sub_text = subtitle
-        draw(sub_text, left_margin, y, 7)
-        y -= 5 * mm
+    # Заголовок бланка и подзаголовок ("Сервисный центр ...") не печатаются.
 
     c.setStrokeColorRGB(0.2, 0.2, 0.2)
     c.setLineWidth(0.8)
