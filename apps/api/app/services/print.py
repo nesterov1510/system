@@ -104,6 +104,16 @@ def _qr_png(data: str) -> io.BytesIO:
     return buf
 
 
+def _ellipsis(c, text: str, font: str, size: float, max_width: float) -> str:
+    """Обрезать текст под ширину поля бланка, добавив многоточие."""
+    text = str(text)
+    if c.stringWidth(text, font, size) <= max_width:
+        return text
+    while text and c.stringWidth(text + "…", font, size) > max_width:
+        text = text[:-1]
+    return text + "…"
+
+
 def _render_turkmen_form(
     *,
     t: dict,
@@ -127,8 +137,24 @@ def _render_turkmen_form(
     currency_symbol: str,
     consent_repair_text: str,
     consent_repair: bool,
+    master_names: list[str] | None = None,
+    faults: list[str] | None = None,
+    parts_used: list[str] | None = None,
+    parts_ordered: list[dict] | None = None,
+    work_done: str = "",
+    warranty_text: str = "",
+    repair_price: str = "",
+    payment_text: str = "",
+    issued_at: str = "",
+    ready_at: str = "",
 ) -> bytes:
     _register_fonts()
+
+    masters = [m for m in (master_names or []) if m]
+    fault_list = [f for f in (faults or []) if f]
+    used_list = [x for x in (parts_used or []) if x]
+    ordered_list = [o for o in (parts_ordered or []) if o and o.get("name")]
+
     page = A4
     w, h = page
     buf = io.BytesIO()
@@ -204,26 +230,54 @@ def _render_turkmen_form(
     draw_line(left_margin + 120 * mm, y - 0.5 * mm, 18 * mm)
     y -= 6 * mm
 
-    draw_row_two_col("Telefon belgisi:", client_phone, "1. Inžiner:", "", y)
+    def master_at(i: int) -> str:
+        return masters[i] if i < len(masters) else ""
+
+    eta_text = f"{eta_days} gün" if eta_days else ""
+
+    draw_row_two_col("Telefon belgisi:", client_phone, "1. Inžiner:", master_at(0), y)
     y -= 5.5 * mm
-    draw_row_two_col("Eýesiniň ady:", client_name, "2. Inžiner:", "", y)
+    draw_row_two_col("Eýesiniň ady:", client_name, "2. Inžiner:", master_at(1), y)
     y -= 5.5 * mm
-    draw_row_two_col("M_Model:", device, "3. Inžiner:", "", y)
+    draw_row_two_col("M_Model:", device, "3. Inžiner:", master_at(2), y)
     y -= 5.5 * mm
-    draw_row_two_col("Gürleşilen baha:", "", "4. Inžiner:", "", y)
+    draw_row_two_col("Gürleşilen baha:", repair_price, "4. Inžiner:", master_at(3), y)
     y -= 5.5 * mm
-    draw_row_two_col("Aýdylan wagty:", "", "Ammar (Склад):", "", y)
-    y -= 7 * mm
+    draw_row_two_col("Aýdylan wagty:", eta_text, "Ammar (Склад):", "", y)
+    y -= 5.5 * mm
+
+    # Мастеров может быть больше четырёх — доносим остальных отдельной строкой.
+    if len(masters) > 4:
+        draw_field("Inžinerler:", ", ".join(masters[4:]), left_margin, y,
+                   blank_width=content_w - 22 * mm)
+        y -= 5.5 * mm
+    y -= 1.5 * mm
 
     draw("Görkezme:", left_margin, y, 7, bold=True)
     y -= 5 * mm
-    for _ in range(3):
+    # Что сказал клиент + комплектация + внешний вид при приёме.
+    gorkezme: list[str] = []
+    if fault:
+        gorkezme.append(str(fault))
+    if complectation and complectation != "—":
+        gorkezme.append(f"Toplum: {complectation}")
+    if condition and condition != "—":
+        gorkezme.append(f"Daşky görnüşi: {condition}")
+    gorkezme_lines: list[str] = []
+    for item in gorkezme:
+        gorkezme_lines += simpleSplit(item, FONT, 7, content_w - 2 * mm)
+    for i in range(max(3, len(gorkezme_lines))):
+        if i < len(gorkezme_lines):
+            draw(gorkezme_lines[i], left_margin, y + 1 * mm, 7)
         draw_line(left_margin, y, content_w)
         y -= 5 * mm
 
     y -= 2 * mm
-    for i in range(1, 4):
+    for i in range(1, max(4, len(fault_list) + 1)):
+        text_ = fault_list[i - 1] if i - 1 < len(fault_list) else ""
         draw(f"{i}. Kemçilik:", left_margin, y, 7, bold=True)
+        if text_:
+            draw(_ellipsis(c, text_, FONT, 7, 44 * mm), left_margin + 23 * mm, y, 7)
         draw_line(left_margin + 23 * mm, y - 0.5 * mm, 45 * mm)
         draw("Kim taraplaýyn barlanyldy:", left_margin + 73 * mm, y, 7, bold=True)
         draw_line(left_margin + 73 * mm + 48 * mm, y - 0.5 * mm, 10 * mm)
@@ -235,8 +289,11 @@ def _render_turkmen_form(
     draw("Dakylan ätiýaçlyk şaýlary:", left_margin, y, 7, bold=True)
     draw("//_______//_______//_______//_______//_______//____", left_margin + 55 * mm, y, 7)
     y -= 5 * mm
-    for _ in range(5):
+    for i in range(max(5, len(used_list))):
         draw("Ady:", left_margin, y, 7, bold=True)
+        if i < len(used_list):
+            draw(_ellipsis(c, used_list[i], FONT, 7, content_w - 12 * mm),
+                 left_margin + 12 * mm, y, 7)
         draw_line(left_margin + 10 * mm, y - 0.5 * mm, content_w - 10 * mm)
         y -= 5 * mm
 
@@ -244,8 +301,13 @@ def _render_turkmen_form(
     draw("Sargalan gerek bolan ätiýaçlyk şaýlary:", left_margin, y, 7, bold=True)
     draw("________//________//________//________//________//", left_margin + 75 * mm, y, 7)
     y -= 5 * mm
-    for _ in range(6):
+    for i in range(max(6, len(ordered_list))):
         draw("Ady:", left_margin, y, 7, bold=True)
+        if i < len(ordered_list):
+            item = ordered_list[i]
+            draw(_ellipsis(c, str(item.get("name", "")), FONT, 7, 98 * mm),
+                 left_margin + 12 * mm, y, 7)
+            draw(str(item.get("date", "")), left_margin + 126 * mm, y, 7)
         draw_line(left_margin + 10 * mm, y - 0.5 * mm, 100 * mm)
         draw("wagty", left_margin + 115 * mm, y, 7, bold=True)
         draw_line(left_margin + 125 * mm, y - 0.5 * mm, 30 * mm)
@@ -254,23 +316,36 @@ def _render_turkmen_form(
     y -= 2 * mm
     draw("Düzedilen (Düzedilmedik) enjamyn görkezmesi:", left_margin, y, 7, bold=True)
     y -= 5 * mm
-    draw_line(left_margin, y, content_w)
-    y -= 5 * mm
-    draw_line(left_margin, y, content_w)
-    y -= 5 * mm
+    done_lines = simpleSplit(str(work_done), FONT, 7, content_w - 2 * mm) if work_done else []
+    for i in range(max(2, len(done_lines))):
+        if i < len(done_lines):
+            draw(done_lines[i], left_margin, y + 1 * mm, 7)
+        draw_line(left_margin, y, content_w)
+        y -= 5 * mm
 
     y -= 2 * mm
     draw("Test:", left_margin, y, 7, bold=True)
     draw_line(left_margin + 12 * mm, y - 0.5 * mm, 25 * mm)
     draw("//Kepillik", left_margin + 42 * mm, y, 7, bold=True)
+    if warranty_text:
+        draw(_ellipsis(c, str(warranty_text), FONT, 7, 39 * mm),
+             left_margin + 66 * mm, y, 7)
     draw_line(left_margin + 65 * mm, y - 0.5 * mm, 40 * mm)
     y -= 6 * mm
 
     draw("Enjam tabşyryldy:", left_margin, y, 7, bold=True)
+    if issued_at:
+        draw(issued_at, left_margin + 36 * mm, y, 7)
     draw_line(left_margin + 35 * mm, y - 0.5 * mm, 25 * mm)
     draw("Tölegi:", left_margin + 65 * mm, y, 7, bold=True)
+    if payment_text:
+        draw(_ellipsis(c, str(payment_text), FONT, 7, 26 * mm),
+             left_margin + 78 * mm, y, 7)
     draw_line(left_margin + 78 * mm, y - 0.5 * mm, 20 * mm)
     draw("kabul eden:", left_margin + 105 * mm, y, 7, bold=True)
+    if accepted_by and accepted_by != "—":
+        draw(_ellipsis(c, str(accepted_by), FONT, 7, 29 * mm),
+             left_margin + 126 * mm, y, 7)
     draw_line(left_margin + 125 * mm, y - 0.5 * mm, 30 * mm)
     y -= 8 * mm
 
@@ -306,6 +381,16 @@ def render_blank_pdf(
     currency_symbol: str = "ман.",
     consent_repair_text: str = "",
     consent_repair: bool = False,
+    master_names: list[str] | None = None,
+    faults: list[str] | None = None,
+    parts_used: list[str] | None = None,
+    parts_ordered: list[dict] | None = None,
+    work_done: str = "",
+    warranty_text: str = "",
+    repair_price: str = "",
+    payment_text: str = "",
+    issued_at: str = "",
+    ready_at: str = "",
 ) -> bytes:
     t = normalize_template(template)
     _register_fonts()
@@ -323,6 +408,11 @@ def render_blank_pdf(
             currency_symbol=currency_symbol,
             consent_repair_text=consent_repair_text,
             consent_repair=consent_repair,
+            master_names=master_names, faults=faults,
+            parts_used=parts_used, parts_ordered=parts_ordered,
+            work_done=work_done, warranty_text=warranty_text,
+            repair_price=repair_price, payment_text=payment_text,
+            issued_at=issued_at, ready_at=ready_at,
         )
 
     copies = max(1, int(t.get("copies", 2) or 2))

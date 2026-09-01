@@ -6,8 +6,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import Client, City, Repair, RepairEvent, RepairPhoto, UserRole
+from app.db.models import (
+    Client,
+    City,
+    Repair,
+    RepairEvent,
+    RepairMaster,
+    RepairPartOrder,
+    RepairPhoto,
+    User,
+    UserRole,
+)
 from app.schemas.repair import (
+    PartOrderCreate,
+    PartOrderOut,
+    PartOrderUpdate,
     PhotoOut,
     RepairCreate,
     RepairEventOut,
@@ -25,7 +38,10 @@ router = APIRouter(prefix="/repairs", tags=["repairs"])
 def _can_access(user, repair: Repair) -> bool:
     """Masters see only their own repairs; others see all."""
     if user.role == UserRole.MASTER.value:
-        return repair.master_id == user.id
+        if repair.master_id == user.id:
+            return True
+        # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
+        return any(m.user_id == user.id for m in repair.masters)
     return True
 
 
@@ -36,6 +52,15 @@ def _serialize(repair: Repair) -> RepairOut:
         )
         for e in repair.events
     ]
+    masters = list(repair.masters)
+    master_ids = [m.user_id for m in masters]
+    master_names = [m.user.name for m in masters if m.user]
+    # Основной мастер всегда первым, даже если связей ещё нет (старые ремонты).
+    if repair.master_id and repair.master_id not in master_ids:
+        master_ids.insert(0, repair.master_id)
+        if repair.master:
+            master_names.insert(0, repair.master.name)
+
     return RepairOut(
         id=repair.id,
         number=repair.number,
@@ -62,6 +87,8 @@ def _serialize(repair: Repair) -> RepairOut:
         price_final=repair.price_final,
         cost_amount=repair.cost_amount,
         paid=repair.paid,
+        work_done=repair.work_done,
+        warranty_text=repair.warranty_text,
         accepted_at=repair.accepted_at,
         ready_at=repair.ready_at,
         issued_at=repair.issued_at,
@@ -72,6 +99,8 @@ def _serialize(repair: Repair) -> RepairOut:
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         master_name=repair.master.name if repair.master else None,
+        master_ids=master_ids,
+        master_names=master_names,
     )
 
 
@@ -83,6 +112,7 @@ async def _get_repair_or_404(db, repair_id: uuid.UUID) -> Repair:
             selectinload(Repair.client),
             selectinload(Repair.master),
             selectinload(Repair.events),
+            selectinload(Repair.masters).selectinload(RepairMaster.user),
         )
     )
     repair = row.scalar_one_or_none()
@@ -221,7 +251,12 @@ async def client_repairs(
     repairs_q = (
         select(Repair)
         .where(Repair.client_id == client_id)
-        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
+        .options(
+            selectinload(Repair.client),
+            selectinload(Repair.master),
+            selectinload(Repair.events),
+            selectinload(Repair.masters).selectinload(RepairMaster.user),
+        )
         .order_by(Repair.accepted_at.desc())
     )
     if user.role == UserRole.MASTER.value:
@@ -339,7 +374,12 @@ async def list_repairs(
 ):
     q_stmt = (
         select(Repair)
-        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
+        .options(
+            selectinload(Repair.client),
+            selectinload(Repair.master),
+            selectinload(Repair.events),
+            selectinload(Repair.masters).selectinload(RepairMaster.user),
+        )
         .order_by(Repair.accepted_at.desc())
     )
     if status:
@@ -364,7 +404,12 @@ async def get_by_number(number: str, db: DbSession, user: CurrentUser):
     row = await db.execute(
         select(Repair)
         .where(Repair.number == number)
-        .options(selectinload(Repair.client), selectinload(Repair.master), selectinload(Repair.events))
+        .options(
+            selectinload(Repair.client),
+            selectinload(Repair.master),
+            selectinload(Repair.events),
+            selectinload(Repair.masters).selectinload(RepairMaster.user),
+        )
     )
     repair = row.scalar_one_or_none()
     if repair is None:
@@ -393,8 +438,58 @@ async def update_repair(
     from app.db.base import utcnow
 
     old_status = repair.status
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    master_ids = data.pop("master_ids", None)
+    for field, value in data.items():
         setattr(repair, field, value)
+
+    # Несколько мастеров на один ремонт: перезаписываем список целиком.
+    if master_ids is not None:
+        # убрать дубликаты, сохранив порядок
+        ordered_ids: list[uuid.UUID] = []
+        for mid in master_ids:
+            if mid not in ordered_ids:
+                ordered_ids.append(mid)
+
+        if ordered_ids:
+            rows = await db.execute(select(User).where(User.id.in_(ordered_ids)))
+            found = {u.id for u in rows.scalars().all()}
+            missing = [str(m) for m in ordered_ids if m not in found]
+            if missing:
+                raise HTTPException(404, f"Мастер не найден: {', '.join(missing)}")
+
+        old_count = len(repair.masters)
+        # Обновляем список «по-разному»: существующие связи переиспользуем,
+        # иначе DELETE+INSERT той же пары в одном flush ломает уникальный индекс.
+        existing = {m.user_id: m for m in repair.masters}
+        for link in list(repair.masters):
+            if link.user_id not in ordered_ids:
+                repair.masters.remove(link)
+        for position, mid in enumerate(ordered_ids):
+            link = existing.get(mid)
+            if link is not None:
+                link.position = position
+            else:
+                repair.masters.append(RepairMaster(user_id=mid, position=position))
+        # Основной мастер = первый в списке (используется правами и доской).
+        if "master_id" not in data:
+            repair.master_id = ordered_ids[0] if ordered_ids else None
+
+        if len(ordered_ids) != old_count or ordered_ids:
+            repair.events.append(
+                RepairEvent(
+                    repair_id=repair.id,
+                    type="assign",
+                    actor_id=user.id,
+                    data={"message": "Изменён состав мастеров", "count": len(ordered_ids)},
+                )
+            )
+    elif "master_id" in data and data["master_id"]:
+        # Одиночное назначение — держим список мастеров в согласованном виде.
+        if not any(m.user_id == data["master_id"] for m in repair.masters):
+            repair.masters.append(
+                RepairMaster(user_id=data["master_id"], position=len(repair.masters))
+            )
 
     if payload.status and payload.status != old_status:
         repair.events.append(
@@ -435,7 +530,10 @@ async def update_repair(
         )
 
     await db.commit()
-    repair = await _get_repair_or_404(db, repair.id)
+    # Сессия живёт с expire_on_commit=False, поэтому связи (master, masters)
+    # остались бы прежними — сбрасываем кэш, чтобы ответ был актуальным.
+    db.expire(repair)  # после expire нельзя трогать repair.* — берём id из пути
+    repair = await _get_repair_or_404(db, repair_id)
 
     if payload.status and payload.status != old_status:
         await manager.broadcast(
@@ -464,6 +562,85 @@ async def add_event(
     )
     await db.commit()
     return _serialize(await _get_repair_or_404(db, repair_id))
+
+
+# --------------------------------------------------------------------------
+# Заказанные под ремонт запчасти (в бланке — «Sargalan gerek bolan
+# ätiýaçlyk şaýlary»). Свободный текст: заказывают и то, чего нет в каталоге.
+# --------------------------------------------------------------------------
+@router.get("/{repair_id}/part-orders", response_model=list[PartOrderOut])
+async def list_part_orders(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+    rows = await db.execute(
+        select(RepairPartOrder)
+        .where(RepairPartOrder.repair_id == repair_id)
+        .order_by(RepairPartOrder.created_at)
+    )
+    return list(rows.scalars().all())
+
+
+@router.post("/{repair_id}/part-orders", response_model=PartOrderOut, status_code=201)
+async def add_part_order(
+    repair_id: uuid.UUID, payload: PartOrderCreate, db: DbSession, user: CurrentUser
+):
+    from app.db.base import utcnow
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    order = RepairPartOrder(
+        repair_id=repair_id,
+        name=payload.name.strip(),
+        qty=payload.qty,
+        ordered_at=payload.ordered_at or utcnow(),
+        price=payload.price,
+        created_by=user.id,
+    )
+    db.add(order)
+    db.add(
+        RepairEvent(
+            repair_id=repair_id,
+            type="comment",
+            actor_id=user.id,
+            data={"message": f"Заказана запчасть: {order.name} ×{order.qty}"},
+        )
+    )
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+@router.patch("/{repair_id}/part-orders/{order_id}", response_model=PartOrderOut)
+async def update_part_order(
+    repair_id: uuid.UUID,
+    order_id: uuid.UUID,
+    payload: PartOrderUpdate,
+    db: DbSession,
+    user: CurrentUser,
+):
+    order = await db.get(RepairPartOrder, order_id)
+    if order is None or order.repair_id != repair_id:
+        raise HTTPException(404, "Заказ запчасти не найден")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(order, field, value)
+    await db.commit()
+    await db.refresh(order)
+    return order
+
+
+@router.delete("/{repair_id}/part-orders/{order_id}")
+async def delete_part_order(
+    repair_id: uuid.UUID, order_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    order = await db.get(RepairPartOrder, order_id)
+    if order is None or order.repair_id != repair_id:
+        raise HTTPException(404, "Заказ запчасти не найден")
+    await db.delete(order)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/{repair_id}/photos", response_model=list[PhotoOut])

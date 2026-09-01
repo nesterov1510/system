@@ -8,7 +8,9 @@ import {
   downloadPdfBase64,
   mediaUrl,
   money,
+  type Lookup,
   type Part,
+  type PartOrder,
   type Payment,
   type Photo,
   type Repair,
@@ -88,6 +90,18 @@ export default function RepairCardPage() {
   const [finalPrice, setFinalPrice] = useState("");
   const [finalPaid, setFinalPaid] = useState(false);
   const [comment, setComment] = useState("");
+  // --- данные для печатного бланка ---
+  const [mastersList, setMastersList] = useState<Lookup[]>([]);
+  const [partOrders, setPartOrders] = useState<PartOrder[]>([]);
+  const [blankMasters, setBlankMasters] = useState<string[]>([]);
+  const [blankFault, setBlankFault] = useState("");
+  const [blankWork, setBlankWork] = useState("");
+  const [blankWarranty, setBlankWarranty] = useState("");
+  const [blankEta, setBlankEta] = useState("");
+  const [blankPrice, setBlankPrice] = useState("");
+  const [orderName, setOrderName] = useState("");
+  const [orderQty, setOrderQty] = useState("1");
+  const [blankSaved, setBlankSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
@@ -101,6 +115,8 @@ export default function RepairCardPage() {
     api.repairParts(id).then(setRepairParts).catch(() => {});
     api.parts().then(setPartsCatalog).catch(() => {});
     api.payments(id).then(setPayments).catch(() => {});
+    api.partOrders(id).then(setPartOrders).catch(() => {});
+    api.masters().then(setMastersList).catch(() => {});
   }, [id]);
 
   useEffect(load, [load]);
@@ -221,8 +237,74 @@ export default function RepairCardPage() {
       setFinalCost(repair.cost_amount?.toString() ?? "");
       setFinalPrice(repair.price_final?.toString() ?? "");
       setFinalPaid(repair.paid);
+      setBlankMasters(repair.master_ids ?? []);
+      setBlankFault(repair.fault_master ?? "");
+      setBlankWork(repair.work_done ?? "");
+      setBlankWarranty(repair.warranty_text ?? "");
+      setBlankEta(repair.eta_days?.toString() ?? "");
+      setBlankPrice(repair.price_final?.toString() ?? "");
     }
   }, [repair]);
+
+  // --- бланк: сохранение и заказанные запчасти ---
+  async function saveBlank() {
+    setBusy(true);
+    setError(null);
+    setBlankSaved(false);
+    try {
+      const updated = await api.updateRepair(id, {
+        master_ids: blankMasters,
+        fault_master: blankFault.trim() || null,
+        work_done: blankWork.trim() || null,
+        warranty_text: blankWarranty.trim() || null,
+        eta_days: blankEta ? Number(blankEta) : null,
+        price_final: blankPrice ? Number(blankPrice) : null,
+      });
+      setRepair(updated);
+      setBlankSaved(true);
+      setTimeout(() => setBlankSaved(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleMaster(masterId: string) {
+    setBlankMasters((prev) =>
+      prev.includes(masterId)
+        ? prev.filter((m) => m !== masterId)
+        : [...prev, masterId],
+    );
+  }
+
+  async function addOrder() {
+    const name = orderName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await api.addPartOrder(id, { name, qty: Number(orderQty) || 1 });
+      setOrderName("");
+      setOrderQty("1");
+      setPartOrders(await api.partOrders(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeOrder(orderId: string) {
+    setBusy(true);
+    try {
+      await api.removePartOrder(id, orderId);
+      setPartOrders(await api.partOrders(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function finalize() {
     if (!repair) return;
@@ -265,6 +347,7 @@ export default function RepairCardPage() {
   const TABS = [
     { id: "info", label: "Инфо", icon: "📋" },
     { id: "parts", label: "Запчасти", icon: "🔩" },
+    { id: "blank", label: "Бланк", icon: "🖨️" },
     { id: "payment", label: "Оплата", icon: "💰" },
     { id: "timeline", label: "История", icon: "📜" },
   ];
@@ -458,6 +541,162 @@ export default function RepairCardPage() {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+        )}
+
+        {/* Бланк для печати */}
+        {activeTab === "blank" && (
+          <div className="msb-card-solid p-6">
+            <h2 className="msb-section-title mb-1">🖨️ Данные для бланка</h2>
+            <p className="mb-5 text-xs text-slate-500">
+              Всё, что заполнено здесь, печатается в бланке ремонта.
+            </p>
+
+            {/* Мастера */}
+            <label className="msb-label">
+              Мастера <span className="text-slate-400">(Inžiner 1…4)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {mastersList.length === 0 && (
+                <span className="text-sm text-slate-400">Список мастеров пуст</span>
+              )}
+              {mastersList.map((m) => {
+                const idx = blankMasters.indexOf(m.id);
+                const active = idx >= 0;
+                return (
+                  <button key={m.id} type="button" onClick={() => toggleMaster(m.id)}
+                    disabled={busy}
+                    className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 transition-all ${
+                      active
+                        ? "bg-msb-600 text-white ring-msb-600"
+                        : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"}`}>
+                    {active && <span className="mr-1 font-bold">{idx + 1}.</span>}
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Можно выбрать нескольких — в бланке они встанут в строки «Inžiner» по порядку.
+              Первый считается основным мастером ремонта.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="msb-label">
+                  Цена ремонта, ман. <span className="text-slate-400">(Gürleşilen baha)</span>
+                </label>
+                <input type="number" value={blankPrice} placeholder="0"
+                  onChange={(e) => setBlankPrice(e.target.value)} className="msb-input" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Срок ремонта, дней <span className="text-slate-400">(Aýdylan wagty)</span>
+                </label>
+                <input type="number" value={blankEta} placeholder="0"
+                  onChange={(e) => setBlankEta(e.target.value)} className="msb-input" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Гарантия <span className="text-slate-400">(Kepillik)</span>
+                </label>
+                <input value={blankWarranty} placeholder="напр. 3 aý"
+                  onChange={(e) => setBlankWarranty(e.target.value)} className="msb-input" />
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {["1 aý", "3 aý", "6 aý", "1 ýyl"].map((w) => (
+                    <button key={w} type="button" onClick={() => setBlankWarranty(w)}
+                      className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="msb-label">
+                  Неисправности <span className="text-slate-400">(Kemçilik)</span>
+                </label>
+                <textarea value={blankFault} rows={4}
+                  onChange={(e) => setBlankFault(e.target.value)}
+                  placeholder={"Одна неисправность — одна строка:\nНе включается\nШумит вентилятор"}
+                  className="msb-input resize-y" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Что починили <span className="text-slate-400">(Düzedilen enjamyn görkezmesi)</span>
+                </label>
+                <textarea value={blankWork} rows={4}
+                  onChange={(e) => setBlankWork(e.target.value)}
+                  placeholder="Заменена клавиатура, чистка системы охлаждения…"
+                  className="msb-input resize-y" />
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button onClick={saveBlank} disabled={busy} className="msb-btn-primary">
+                Сохранить для печати
+              </button>
+              {blankSaved && (
+                <span className="text-sm font-medium text-emerald-600">✓ Сохранено</span>
+              )}
+              <button onClick={doPrint} disabled={busy} className="msb-btn-secondary ml-auto">
+                🖨️ Печать
+              </button>
+            </div>
+
+            {/* Заказанные запчасти */}
+            <h2 className="msb-section-title mt-8 mb-1">
+              📦 Заказанные запчасти
+            </h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Sargalan gerek bolan ätiýaçlyk şaýlary — что заказали под этот ремонт.
+              Установленные запчасти берутся из вкладки «Запчасти».
+            </p>
+            {partOrders.length === 0 ? (
+              <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-6 text-sm text-slate-400">
+                Ничего не заказано
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {partOrders.map((o) => (
+                  <div key={o.id}
+                    className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+                    <div>
+                      <span className="text-sm font-medium text-slate-800">{o.name}</span>
+                      <span className="ml-2 text-xs text-slate-500">×{o.qty}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-500">
+                        {o.ordered_at ? new Date(o.ordered_at).toLocaleDateString("ru") : "—"}
+                      </span>
+                      <button onClick={() => removeOrder(o.id)} disabled={busy}
+                        className="text-xs font-medium text-red-500 transition-colors hover:text-red-700">
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <div className="min-w-[200px] flex-1">
+                <label className="msb-label">Название запчасти</label>
+                <input value={orderName} onChange={(e) => setOrderName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addOrder(); }}
+                  placeholder="Матрица 15.6 FHD" className="msb-input" />
+              </div>
+              <div className="w-24">
+                <label className="msb-label">Кол-во</label>
+                <input type="number" min={1} value={orderQty}
+                  onChange={(e) => setOrderQty(e.target.value)} className="msb-input" />
+              </div>
+              <button onClick={addOrder} disabled={busy || !orderName.trim()}
+                className="msb-btn-primary">
+                + Заказать
+              </button>
             </div>
           </div>
         )}

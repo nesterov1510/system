@@ -13,7 +13,18 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, RepairEvent
+from app.db.models import (
+    Branch,
+    City,
+    Payment,
+    PrintJob,
+    PrintTemplate,
+    Repair,
+    RepairEvent,
+    RepairMaster,
+    RepairPart,
+    RepairPartOrder,
+)
 from app.services.print import body_to_template, render_blank_pdf
 from app.services.settings import (
     get_consent_repair_text,
@@ -27,6 +38,32 @@ router = APIRouter(tags=["print"])
 
 def _fmt(dt) -> str:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
+
+
+def _fmt_date(dt) -> str:
+    return dt.strftime("%d.%m.%Y") if dt else ""
+
+
+def _money(value, symbol: str) -> str:
+    """1234.5 -> «1234.50 ман.»; пусто, если значения нет."""
+    if value is None:
+        return ""
+    try:
+        return f"{float(value):,.2f}".replace(",", " ") + f" {symbol}".rstrip()
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _split_lines(text: str | None) -> list[str]:
+    """Разбить многострочный текст на отдельные пункты (строки/«;»)."""
+    if not text:
+        return []
+    items: list[str] = []
+    for chunk in str(text).replace(";", "\n").splitlines():
+        chunk = chunk.strip(" -•\t")
+        if chunk:
+            items.append(chunk)
+    return items
 
 
 async def get_default_template(db) -> dict:
@@ -54,6 +91,50 @@ async def build_context(db, repair: Repair) -> dict:
     master = repair.master.name if repair.master else "в очереди"
     qr_url = f"{settings.PUBLIC_BASE_URL}/r/{repair.public_token}"
 
+    currency = await get_currency(db)
+    symbol = currency.get("symbol", "ман.")
+
+    # Мастера ремонта (Inžiner 1..4): сначала список, иначе основной мастер.
+    master_names = [m.user.name for m in repair.masters if m.user]
+    if not master_names and repair.master:
+        master_names = [repair.master.name]
+
+    # Неисправности (Kemçilik): найденные мастером, иначе со слов клиента.
+    faults = _split_lines(repair.fault_master) or _split_lines(repair.fault_client)
+
+    # Установленные запчасти (Dakylan ätiýaçlyk şaýlary).
+    rows = await db.execute(
+        select(RepairPart)
+        .options(selectinload(RepairPart.part))
+        .where(RepairPart.repair_id == repair.id)
+        .order_by(RepairPart.created_at)
+    )
+    parts_used = [
+        f"{rp.part.name} ×{rp.qty}" if rp.qty and rp.qty > 1 else rp.part.name
+        for rp in rows.scalars().all()
+        if rp.part
+    ]
+
+    # Заказанные под ремонт запчасти (Sargalan ... + дата).
+    rows = await db.execute(
+        select(RepairPartOrder)
+        .where(RepairPartOrder.repair_id == repair.id)
+        .order_by(RepairPartOrder.created_at)
+    )
+    parts_ordered = [
+        {
+            "name": f"{o.name} ×{o.qty}" if o.qty and o.qty > 1 else o.name,
+            "date": _fmt_date(o.ordered_at or o.created_at),
+        }
+        for o in rows.scalars().all()
+    ]
+
+    # Оплата: сумма проведённых платежей, иначе итоговая цена.
+    rows = await db.execute(select(Payment).where(Payment.repair_id == repair.id))
+    paid_total = sum(float(p.amount) for p in rows.scalars().all())
+    # Поле «Tölegi» узкое — печатаем только сумму, без пометок.
+    payment_text = _money(paid_total or repair.price_final, symbol)
+
     return {
         "number": repair.number,
         "accepted_at": _fmt(repair.accepted_at),
@@ -69,6 +150,17 @@ async def build_context(db, repair: Repair) -> dict:
         "accepted_by": accepted_by,
         "master": master,
         "eta_days": str(repair.eta_days) if repair.eta_days else "",
+        # --- данные, которые оператор/мастер заполняет для бланка ---
+        "master_names": master_names,
+        "faults": faults,
+        "parts_used": parts_used,
+        "parts_ordered": parts_ordered,
+        "work_done": repair.work_done or "",
+        "warranty_text": repair.warranty_text or "",
+        "repair_price": _money(repair.price_final, symbol),
+        "payment_text": payment_text,
+        "issued_at": _fmt(repair.issued_at) if repair.issued_at else "",
+        "ready_at": _fmt(repair.ready_at) if repair.ready_at else "",
         "legal_text": legal_text,
         "consent_repair_text": consent_repair_text,
         "consent_repair": bool(repair.consent_repair_at),
@@ -86,6 +178,7 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
             selectinload(Repair.client),
             selectinload(Repair.accepted_by_user),
             selectinload(Repair.master),
+                selectinload(Repair.masters).selectinload(RepairMaster.user),
         )
     )
     repair = row.scalar_one_or_none()

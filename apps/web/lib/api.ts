@@ -113,6 +113,18 @@ export interface RepairPart {
   price?: number | null;
 }
 
+/** Запчасть, заказанная под конкретный ремонт. */
+export interface PartOrder {
+  id: string;
+  repair_id: string;
+  name: string;
+  qty: number;
+  ordered_at?: string | null;
+  received_at?: string | null;
+  price?: number | null;
+  created_at: string;
+}
+
 export interface Payment {
   id: string;
   repair_id: string;
@@ -157,8 +169,12 @@ export interface Repair {
   price_final?: number | null;
   cost_amount?: number | null;
   paid: boolean;
+  work_done?: string | null;
+  warranty_text?: string | null;
   print_count: number;
   master_name?: string | null;
+  master_ids?: string[];
+  master_names?: string[];
   events: RepairEvent[];
 }
 
@@ -398,6 +414,19 @@ export const api = {
     }),
   removeRepairPart: (repairId: string, rpId: string) =>
     request<{ ok: boolean }>(`/api/repairs/${repairId}/parts/${rpId}`, {
+      method: "DELETE",
+    }),
+
+  // Заказанные под ремонт запчасти (печатаются в бланке)
+  partOrders: (repairId: string) =>
+    request<PartOrder[]>(`/api/repairs/${repairId}/part-orders`),
+  addPartOrder: (repairId: string, payload: Record<string, unknown>) =>
+    request<PartOrder>(`/api/repairs/${repairId}/part-orders`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  removePartOrder: (repairId: string, orderId: string) =>
+    request<{ ok: boolean }>(`/api/repairs/${repairId}/part-orders/${orderId}`, {
       method: "DELETE",
     }),
 

@@ -188,6 +188,11 @@ class Repair(Base, TimestampMixin):
     price_min: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_max: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_final: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Что починили — комментарий мастера для бланка
+    # (Düzedilen (Düzedilmedik) enjamyn görkezmesi).
+    work_done: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Гарантия на ремонт (Kepillik), напр. «3 aý» / «90 дней».
+    warranty_text: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Расходы (себестоимость) — сколько потратили на ремонт.
     cost_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Отметка «оплачено» оператором при оформлении починки.
@@ -206,7 +211,19 @@ class Repair(Base, TimestampMixin):
 
     client: Mapped["Client"] = relationship(back_populates="repairs")
     accepted_by_user: Mapped["User"] = relationship(foreign_keys=[accepted_by])
+    # Основной мастер (для совместимости: фильтры, доска, права доступа).
     master: Mapped["User | None"] = relationship(foreign_keys=[master_id])
+    # Все мастера, работающие над ремонтом (Inžiner 1..4 в бланке).
+    masters: Mapped[list["RepairMaster"]] = relationship(
+        back_populates="repair",
+        cascade="all, delete-orphan",
+        order_by="RepairMaster.position",
+    )
+    part_orders: Mapped[list["RepairPartOrder"]] = relationship(
+        back_populates="repair",
+        cascade="all, delete-orphan",
+        order_by="RepairPartOrder.created_at",
+    )
     events: Mapped[list["RepairEvent"]] = relationship(
         back_populates="repair", cascade="all, delete-orphan", order_by="RepairEvent.created_at"
     )
@@ -232,6 +249,26 @@ class RepairEvent(Base, TimestampMixin):
     )
 
     repair: Mapped["Repair"] = relationship(back_populates="events")
+
+
+class RepairMaster(Base, TimestampMixin):
+    """Мастера, назначенные на ремонт (в бланке — строки «1..4 Inžiner»)."""
+
+    __tablename__ = "repair_masters"
+    __table_args__ = (
+        UniqueConstraint("repair_id", "user_id", name="uq_repair_master"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    repair_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("repairs.id"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
+    # Порядок вывода в бланке (0 — основной мастер).
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+    repair: Mapped["Repair"] = relationship(back_populates="masters")
+    user: Mapped["User"] = relationship()
 
 
 class RepairPhoto(Base, TimestampMixin):
@@ -277,6 +314,31 @@ class RepairPart(Base, TimestampMixin):
     price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     part: Mapped["Part"] = relationship()
+
+
+class RepairPartOrder(Base, TimestampMixin):
+    """Запчасти, заказанные под конкретный ремонт.
+
+    В бланке — раздел «Sargalan gerek bolan ätiýaçlyk şaýlary» (название + дата).
+    Название свободным текстом: заказывают и то, чего ещё нет в каталоге.
+    """
+
+    __tablename__ = "repair_part_orders"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    repair_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("repairs.id"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    qty: Mapped[int] = mapped_column(Integer, default=1)
+    ordered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True
+    )
+
+    repair: Mapped["Repair"] = relationship(back_populates="part_orders")
 
 
 # --------------------------------------------------------------------------
