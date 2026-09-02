@@ -6,6 +6,8 @@ Default keys:
 - sla_defaults: dict
 - brand: str
 - repair_statuses: list[str]
+- printer: основной принтер бланков
+- label_printer: удалённая CUPS-очередь для этикеток 58×38 мм
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,7 +79,19 @@ DEFAULT_SETTINGS: dict[str, dict] = {
     },
     "printer": {
         "value": {"ip": "", "port": 631, "mode": "agent", "name": ""},
-        "description": "Принтер: имя, режим печати (cups|ipp)",
+        "description": "Основной принтер: имя, режим печати (agent|ipp)",
+    },
+    "label_printer": {
+        "value": {
+            "ip": "192.168.5.238",
+            "port": 631,
+            "mode": "cups_remote",
+            "name": "3B-350B",
+            "width_mm": 58,
+            "height_mm": 38,
+            "media": "Custom.58x38mm",
+        },
+        "description": "CUPS-принтер этикеток 58×38 мм",
     },
 }
 
@@ -137,3 +151,17 @@ async def get_printer(db: AsyncSession) -> dict:
     if s:
         return s
     return DEFAULT_SETTINGS["printer"]["value"]
+
+
+async def get_label_printer(db: AsyncSession) -> dict:
+    """Настройки удалённой CUPS-очереди для этикеток ремонта.
+
+    Формат PDF и режим маршрутизации фиксированы требованиями этого принтера;
+    из БД настраиваются только адрес, порт, очередь и media option.
+    """
+    value = dict(DEFAULT_SETTINGS["label_printer"]["value"])
+    saved = await get_setting(db, "label_printer")
+    if saved:
+        value.update(saved)
+    value.update(mode="cups_remote", width_mm=58, height_mm=38)
+    return value

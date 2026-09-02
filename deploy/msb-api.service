@@ -4,8 +4,10 @@
 
 [Unit]
 Description=MSB API (FastAPI backend)
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+# PostgreSQL may be an existing system service or a container on 5432.
+# Restart=on-failure below handles a short database startup race.
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple

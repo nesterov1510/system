@@ -186,6 +186,14 @@ feature flag `print_mode=escpos`.
 
 Подробная инструкция и как узнать IP принтера — в [`RUN_LOCAL.md`](RUN_LOCAL.md).
 
+### Этикетки ремонта 58×38 мм
+
+Для USB-принтера `3B-350B`, подключённого к компьютеру `192.168.5.238`,
+поддерживается отдельная PDF-этикетка: ФИО клиента, телефон, номер ремонта и QR
+на авторизованную карточку мастера. Print-agent отправляет её в удалённую
+CUPS-очередь, не меняя настройку основного A4-принтера. Настройка сети, CUPS и
+проверка описаны в [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
+
 ## AI (Итерация 6)
 
 AI идёт за абстракцией `app/services/ai.py`: `predict_eta()` и
@@ -217,7 +225,8 @@ WS   /ws?token=...                   (realtime чат + уведомления)
 POST /api/repairs                    (Idempotency-Key)
 GET  /api/repairs | /:id | /by-number/:number
 PATCH /api/repairs/:id               POST /api/repairs/:id/events
-POST /api/repairs/:id/print          GET /api/print/jobs | PATCH /api/print/jobs/:id
+POST /api/repairs/:id/print          POST /api/repairs/:id/print-label
+GET  /api/print/jobs                 PATCH /api/print/jobs/:id
 GET  /api/public/r/:token            (публичная QR-страница, limited DTO + city_stats)
 GET  /api/notifications              POST /api/notifications/:id/read
 GET  /api/lookups/cities|branches|masters|complectation-items

@@ -90,8 +90,22 @@ sudo apt update
 sudo apt install -y \
   ca-certificates curl git openssl rsync iproute2 ufw \
   build-essential python3 python3-dev python3-venv python3-pip \
-  fonts-dejavu-core \
-  postgresql postgresql-contrib
+  fonts-dejavu-core postgresql-client
+```
+
+На `192.168.8.81` порт PostgreSQL `5432` уже может обслуживаться другим
+развёртыванием. В таком случае используйте **тот же экземпляр**, создав в нём
+отдельные роль и базу `msb`; не устанавливайте и не запускайте второй сервер.
+Сначала проверьте порт:
+
+```bash
+if pg_isready --host=127.0.0.1 --port=5432; then
+  echo "PostgreSQL на 5432 уже работает — второй экземпляр не запускаем"
+else
+  sudo apt install -y postgresql postgresql-contrib
+  sudo systemctl enable --now postgresql
+  sudo systemctl is-active postgresql
+fi
 ```
 
 Установите поддерживаемый Node.js 22 LTS (Node.js 20 уже достиг EOL):
@@ -109,9 +123,7 @@ python3 -c 'import sys; assert sys.version_info >= (3, 10), "Нужен Python >
 node --version          # v22.x
 npm --version
 psql --version
-
-sudo systemctl enable --now postgresql
-sudo systemctl is-active postgresql
+pg_isready --host=127.0.0.1 --port=5432
 ```
 
 ---
@@ -194,6 +206,12 @@ done
 
 Команды идемпотентны: если роль или БД уже существуют, они не удаляются.
 Пароль роли приводится в соответствие с новым `.env`.
+
+Блок ниже рассчитан на локальный системный PostgreSQL, где административная
+роль доступна через `sudo -u postgres`. Если уже работающий сервер запущен в
+Docker или управляется другой системой, выполните те же `CREATE/ALTER ROLE` и
+`CREATE/ALTER DATABASE` через его существующий административный способ. Не
+останавливайте его и не запускайте ради MSB второй PostgreSQL на порту 5432.
 
 ```bash
 export MSB_ROOT=/home/windowrepair-ae/msb
@@ -412,6 +430,10 @@ grep '^SEED_ADMIN_PASSWORD=' .env
 
 ## 9. Print-agent и Epson L3250 (опционально)
 
+> Второй принтер `3B-350B` для этикеток 58×38, расшаренный через CUPS на
+> `192.168.5.238`, настраивается отдельно по инструкции
+> [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
+
 Не запускайте `msb-print-agent`, пока принтер не установлен в ОС. Если агент
 будет работать на другом компьютере рядом с принтером, на нём нужно указать
 `MSB_API_URL=http://192.168.8.81:8085`. Ниже описан вариант на этом же Linux-
@@ -512,21 +534,15 @@ sudo install -o root -g root -m 0644 \
   deploy/msb-api.service /etc/systemd/system/msb-api.service
 sudo install -o root -g root -m 0644 \
   deploy/msb-web.service /etc/systemd/system/msb-web.service
-if systemctl list-unit-files msb-print-agent.service >/dev/null 2>&1; then
+if systemctl cat msb-print-agent.service >/dev/null 2>&1; then
   sudo install -o root -g root -m 0644 \
     deploy/msb-print-agent.service /etc/systemd/system/msb-print-agent.service
 fi
 sudo systemctl daemon-reload
 
 # Установит зависимости, проверит Python, пересоберёт Web,
-# перезапустит API/Web и выполнит health-check.
+# перезапустит API/Web, активный print-agent и выполнит health-check.
 sudo bash deploy/update.sh
-
-# Агент не входит в update.sh — обновите его отдельно, если используется.
-if systemctl is-enabled --quiet msb-print-agent 2>/dev/null; then
-  apps/print-agent/.venv/bin/pip install -r apps/print-agent/requirements.txt
-  sudo systemctl restart msb-print-agent
-fi
 ```
 
 После обновления:

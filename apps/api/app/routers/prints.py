@@ -1,8 +1,9 @@
-"""Print jobs: render PDF blank -> queue for the on-site print-agent.
+"""Print jobs for A4 blanks and 58×38 repair labels.
 
-The blank layout is driven by the default `print_templates` row (editable in
-admin). The print-agent polls `GET /print/jobs?status=queued`, downloads the PDF
-and sends it to the OS printer (Epson EcoTank L3250 via driver).
+The A4 layout is driven by the default `print_templates` row. Labels contain
+client contact data and an authenticated master-card QR. The print-agent polls
+`GET /print/jobs?status=queued` and routes every PDF by its payload printer
+configuration (local driver, direct IPP, or remote CUPS).
 """
 import base64
 import uuid
@@ -24,16 +25,37 @@ from app.db.models import (
     RepairMaster,
     RepairPart,
     RepairPartOrder,
+    UserRole,
 )
-from app.services.print import body_to_template, render_blank_pdf
+from app.services.print import (
+    body_to_template,
+    render_blank_pdf,
+    render_repair_label_pdf,
+)
 from app.services.settings import (
     get_consent_repair_text,
     get_currency,
+    get_label_printer,
     get_legal_text,
     get_printer,
 )
 
 router = APIRouter(tags=["print"])
+
+PRINT_QUEUE_ROLES = {
+    UserRole.ADMIN.value,
+    UserRole.MANAGER.value,
+    UserRole.OPERATOR.value,
+}
+
+
+def _can_print(user, repair: Repair) -> bool:
+    """Мастер может печатать только назначенный ему ремонт."""
+    if user.role != UserRole.MASTER.value:
+        return True
+    return repair.master_id == user.id or any(
+        link.user_id == user.id for link in repair.masters
+    )
 
 
 def _fmt(dt) -> str:
@@ -178,12 +200,14 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
             selectinload(Repair.client),
             selectinload(Repair.accepted_by_user),
             selectinload(Repair.master),
-                selectinload(Repair.masters).selectinload(RepairMaster.user),
+            selectinload(Repair.masters).selectinload(RepairMaster.user),
         )
     )
     repair = row.scalar_one_or_none()
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+    if not _can_print(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
 
     template = await get_default_template(db)
     ctx = await build_context(db, repair)
@@ -207,6 +231,7 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
         branch_id=repair.branch_id,
     )
     db.add(job)
+    await db.flush()  # job.id нужен для события аудита до commit
     repair.print_count += 1
     db.add(
         RepairEvent(
@@ -226,6 +251,80 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
     }
 
 
+@router.post("/repairs/{repair_id}/print-label")
+async def create_label_print_job(
+    repair_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    """Поставить в очередь этикетку 58×38 с QR на карточку мастера."""
+    row = await db.execute(
+        select(Repair)
+        .where(Repair.id == repair_id)
+        .options(
+            selectinload(Repair.client),
+            selectinload(Repair.masters),
+        )
+    )
+    repair = row.scalar_one_or_none()
+    if repair is None:
+        raise HTTPException(404, "Ремонт не найден")
+    if not _can_print(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    printer = await get_label_printer(db)
+    if printer.get("mode") == "cups_remote" and not printer.get("ip"):
+        raise HTTPException(400, "Не задан IP компьютера с принтером этикеток")
+    if not printer.get("name"):
+        raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
+
+    repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs/{repair.id}"
+    width_mm = printer.get("width_mm", 58)
+    height_mm = printer.get("height_mm", 38)
+    pdf = render_repair_label_pdf(
+        repair_number=repair.number,
+        client_name=repair.client.full_name,
+        client_phone=repair.client.phone,
+        repair_url=repair_url,
+        width_mm=width_mm,
+        height_mm=height_mm,
+    )
+
+    job = PrintJob(
+        repair_id=repair.id,
+        template_id="repair-label-58x38",
+        payload={
+            "document_kind": "repair_label",
+            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "printer": printer,
+            "repair_url": repair_url,
+        },
+        status="queued",
+        branch_id=repair.branch_id,
+    )
+    db.add(job)
+    await db.flush()  # job.id нужен для события аудита до commit
+    db.add(
+        RepairEvent(
+            repair_id=repair.id,
+            type="print",
+            actor_id=user.id,
+            data={
+                "job_id": str(job.id),
+                "kind": "label",
+                "printer": printer.get("name"),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(job)
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+        "repair_url": repair_url,
+    }
+
+
 @router.get("/print/jobs")
 async def list_print_jobs(
     db: DbSession,
@@ -233,6 +332,8 @@ async def list_print_jobs(
     status: str | None = None,
     branch_id: uuid.UUID | None = None,
 ):
+    if user.role not in PRINT_QUEUE_ROLES:
+        raise HTTPException(403, "Нет доступа к очереди печати")
     q = select(PrintJob).order_by(PrintJob.created_at.desc())
     if status:
         q = q.where(PrintJob.status == status)
@@ -246,6 +347,8 @@ async def list_print_jobs(
 async def update_print_job(
     job_id: uuid.UUID, db: DbSession, user: CurrentUser, body: dict
 ):
+    if user.role not in PRINT_QUEUE_ROLES:
+        raise HTTPException(403, "Нет доступа к очереди печати")
     job = await db.get(PrintJob, job_id)
     if job is None:
         raise HTTPException(404, "Задание печати не найдено")

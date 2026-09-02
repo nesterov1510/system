@@ -419,6 +419,13 @@ export const api = {
       `/api/repairs/${repairId}/print`,
       { method: "POST" },
     ),
+  printLabel: (repairId: string) =>
+    request<{
+      job_id: string;
+      status: string;
+      pdf_base64: string;
+      repair_url: string;
+    }>(`/api/repairs/${repairId}/print-label`, { method: "POST" }),
 
   // Photos
   photos: (repairId: string) =>
@@ -552,11 +559,22 @@ export const api = {
   getPrinter: () =>
     request<{
       printer: { ip: string; port: number; mode: string; name: string };
+      label_printer: {
+        ip: string;
+        port: number;
+        mode: string;
+        name: string;
+        width_mm: number;
+        height_mm: number;
+        media: string;
+      };
       recent_jobs: Array<{
         id: string;
         status: string;
         error?: string | null;
         created_at: string;
+        template_id?: string | null;
+        printer_name?: string | null;
       }>;
     }>("/api/admin/printer"),
   savePrinter: (payload: {
@@ -569,10 +587,28 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+  saveLabelPrinter: (payload: {
+    ip: string;
+    port: number;
+    mode: string;
+    name: string;
+    width_mm: number;
+    height_mm: number;
+    media: string;
+  }) =>
+    request<{ label_printer: Record<string, unknown> }>(
+      "/api/admin/printer/label",
+      { method: "PUT", body: JSON.stringify(payload) },
+    ),
   testPrint: () =>
     request<{ job_id: string; status: string }>("/api/admin/printer/test", {
       method: "POST",
     }),
+  testLabelPrint: () =>
+    request<{ job_id: string; status: string }>(
+      "/api/admin/printer/label/test",
+      { method: "POST" },
+    ),
   // Print templates (admin)
   printTemplates: () =>
     request<
