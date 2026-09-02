@@ -6,7 +6,16 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
 from app.core.security import hash_password
-from app.db.models import Branch, City, PrintJob, PrintTemplate, Repair, Setting, User
+from app.db.models import (
+    Branch,
+    City,
+    PrintJob,
+    PrintTemplate,
+    Repair,
+    RepairMaster,
+    Setting,
+    User,
+)
 from app.schemas.admin import (
     BranchCreate,
     BranchOut,
@@ -323,6 +332,7 @@ async def preview_print_template(db: DbSession, body: dict):
                 selectinload(Repair.client),
                 selectinload(Repair.accepted_by_user),
                 selectinload(Repair.master),
+                selectinload(Repair.masters).selectinload(RepairMaster.user),
             )
         )
         repair = row.scalar_one_or_none()

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession, require_roles
-from app.db.models import Repair, UserRole
+from app.db.models import Repair, RepairMaster, UserRole
 from app.routers.repairs import _serialize
 
 router = APIRouter(prefix="/callcenter", tags=["callcenter"])
@@ -17,7 +17,12 @@ async def _queue(db, kind: str, limit: int):
     from app.db.base import utcnow
 
     now = utcnow()
-    q = select(Repair).options(selectinload(Repair.client), selectinload(Repair.events))
+    q = select(Repair).options(
+        selectinload(Repair.client),
+        selectinload(Repair.events),
+        selectinload(Repair.master),
+        selectinload(Repair.masters).selectinload(RepairMaster.user),
+    )
 
     if kind == "agree":
         # Нужно позвонить клиенту для согласования цены.
@@ -48,9 +53,14 @@ async def callcenter_queue(
     kind: str = Query("all", pattern="^(agree|ready|overdue|all)$"),
     limit: int = Query(100, le=200),
 ):
-    # callcenter + admin + manager can view the queue.
-    if user.role not in (UserRole.CALLCENTER.value, UserRole.ADMIN.value, UserRole.MANAGER.value):
-        # Masters/operators still can list their repairs via /repairs.
+    # Очередь видит callcenter + админ + менеджер + оператор (оператор — всё
+    # кроме аналитики). Мастер остаётся на своей доске /repairs.
+    if user.role not in (
+        UserRole.CALLCENTER.value,
+        UserRole.ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.OPERATOR.value,
+    ):
         from fastapi import HTTPException
 
         raise HTTPException(403, "Недостаточно прав для очереди call-центра")

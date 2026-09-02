@@ -34,6 +34,9 @@ class RepairCreate(BaseModel):
 class RepairUpdate(BaseModel):
     status: str | None = None
     master_id: uuid.UUID | None = None
+    # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
+    # Первый в списке становится основным (master_id).
+    master_ids: list[uuid.UUID] | None = None
     fault_master: str | None = None
     eta_days: int | None = None
     eta_source: str | None = None
@@ -42,6 +45,9 @@ class RepairUpdate(BaseModel):
     price_final: float | None = None
     cost_amount: float | None = None
     paid: bool | None = None
+    # Что починили (для бланка) и гарантия на ремонт.
+    work_done: str | None = None
+    warranty_text: str | None = None
 
 
 class RepairEventOut(BaseModel):
@@ -92,6 +98,8 @@ class RepairOut(BaseModel):
     price_final: float | None = None
     cost_amount: float | None = None
     paid: bool = False
+    work_done: str | None = None
+    warranty_text: str | None = None
     accepted_at: datetime
     ready_at: datetime | None = None
     issued_at: datetime | None = None
@@ -105,6 +113,37 @@ class RepairOut(BaseModel):
     client_phone: str | None = None
     # denormalized master info
     master_name: str | None = None
+    # все мастера ремонта (по порядку; первый — основной)
+    master_ids: list[uuid.UUID] = []
+    master_names: list[str] = []
+
+
+class PartOrderCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    qty: int = Field(default=1, ge=1)
+    ordered_at: datetime | None = None
+    price: float | None = None
+
+
+class PartOrderUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    qty: int | None = Field(default=None, ge=1)
+    ordered_at: datetime | None = None
+    received_at: datetime | None = None
+    price: float | None = None
+
+
+class PartOrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    repair_id: uuid.UUID
+    name: str
+    qty: int
+    ordered_at: datetime | None = None
+    received_at: datetime | None = None
+    price: float | None = None
+    created_at: datetime
 
 
 class PublicRepairOut(BaseModel):
@@ -125,3 +164,12 @@ class PublicRepairOut(BaseModel):
     branch_name: str | None = None
     branch_phone: str | None = None
     city_stats: dict | None = None
+
+
+class RepairsPage(BaseModel):
+    """Пейджированный список ремонтов для страницы «Все ремонты»."""
+
+    items: list[RepairOut] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 20

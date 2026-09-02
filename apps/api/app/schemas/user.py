@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     name: str
     email: str
     phone: str | None = None
+    telegram: str | None = None
     role: str
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
@@ -22,6 +23,7 @@ class UserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     email: str
     phone: str | None = None
+    telegram: str | None = None
     password: str = Field(min_length=6)
     role: str = "operator"
     city_id: uuid.UUID | None = None
@@ -32,6 +34,7 @@ class UserCreate(BaseModel):
 class UserUpdate(BaseModel):
     name: str | None = None
     phone: str | None = None
+    telegram: str | None = None
     role: str | None = None
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None

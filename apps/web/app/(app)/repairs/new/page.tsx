@@ -5,7 +5,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { api, getStoredUser, money, type Lookup, type PriceHint, type Repair } from "@/lib/api";
 
-const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
+// Техника делится на классы: телевизоры / компьютеры / бытовая техника / другое.
+const DEVICE_TYPES = ["Телевизоры", "Компьютеры", "Бытовая техника", "Другое"];
+const DEVICE_ICONS: Record<string, string> = {
+  Телевизоры: "📺",
+  Компьютеры: "🖥️",
+  "Бытовая техника": "🧺",
+  Другое: "⚙️",
+};
 const BRAND_CHIPS = ["Samsung", "LG", "Xiaomi", "Sony", "Philips", "TCL"];
 const CONDITION_ITEMS = ["Линии на экране", "Царапины"];
 
@@ -41,7 +48,7 @@ export default function NewRepairPage() {
   const [clientPhone, setClientPhone] = useState("");
   const [existingClient, setExistingClient] = useState<ClientLookup | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
-  const [deviceType, setDeviceType] = useState("ТВ");
+  const [deviceType, setDeviceType] = useState("Телевизоры");
   const [brand, setBrand] = useState("");
   const [model, setModel] = useState("");
   const [serial, setSerial] = useState("");
@@ -90,13 +97,7 @@ export default function NewRepairPage() {
     setLookingUp(true);
     const t = setTimeout(() => {
       api.lookupClient(phone)
-        .then((r) => {
-          setExistingClient(r);
-          // Если нашли ровно одного — подставим имя, если оно пустое
-          if (r.found && !r.multiple && r.client && !clientName.trim()) {
-            setClientName(r.client.full_name);
-          }
-        })
+        .then((r) => setExistingClient(r))
         .catch(() => setExistingClient(null))
         .finally(() => setLookingUp(false));
     }, 400);
@@ -294,16 +295,21 @@ export default function NewRepairPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold text-emerald-700">
-                        ✅ Клиент найден
+                        Похожий контакт найден
                       </p>
                       <p className="text-sm font-medium text-emerald-900">
-                        {existingClient.client.full_name}
+                        {existingClient.client.full_name} · {existingClient.client.phone}
                       </p>
                     </div>
                     <span className="msb-badge-success">
                       {existingClient.repairs_count || 0} ремонт(ов)
                     </span>
                   </div>
+                  <button type="button"
+                    onClick={() => setClientName(existingClient.client!.full_name)}
+                    className="mt-2.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors">
+                    ✓ Заполнить имя из контакта
+                  </button>
                   {existingClient.repairs && existingClient.repairs.length > 0 && (
                     <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto custom-scroll">
                       {existingClient.repairs.slice(0, 5).map((r) => (
@@ -389,15 +395,15 @@ export default function NewRepairPage() {
             </h2>
 
             <div className="mt-4">
-              <label className="msb-label">Тип устройства</label>
+              <label className="msb-label">Класс техники</label>
               <div className="flex flex-wrap gap-2">
                 {DEVICE_TYPES.map((t) => (
                   <button key={t} onClick={() => setDeviceType(t)}
-                    className={`rounded-xl px-5 py-2.5 text-sm font-medium transition-all ${
+                    className={`flex items-center gap-1.5 rounded-xl px-5 py-2.5 text-sm font-medium transition-all ${
                       deviceType === t
                         ? "bg-msb-600 text-white shadow-sm"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
-                    {t}
+                    <span>{DEVICE_ICONS[t]}</span> {t}
                   </button>
                 ))}
               </div>

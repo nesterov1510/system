@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.db.base import Base
+from app.db.migrate import run_migrations
 from app.db.models import *  # noqa: F401,F403 — register all models
 from app.db.seed import seed
 from app.db.session import async_session_factory, engine
@@ -34,6 +35,8 @@ async def lifespan(app: FastAPI):
     # MVP: create tables + seed. Replace with Alembic migrations later.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Новые колонки в уже существующих таблицах (create_all их не добавляет).
+    await run_migrations(engine)
     async with async_session_factory() as db:
         await seed(db)
     # Local file storage for photos (MVP).

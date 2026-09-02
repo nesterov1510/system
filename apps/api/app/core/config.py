@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = ""
     AI_MODEL: str = ""
 
+    # --- SMS gateway (сервер 192.168.8.81) ---
+    # Параметры заданы дефолтом прямо в коде (см. задачу), но их можно
+    # переопределить через env без правки кода.
+    SMS_ENABLED: bool = True
+    SMS_GATEWAY_URL: str = "https://192.168.8.81/api/3rdparty/v1/messages"
+    SMS_GATEWAY_USERNAME: str = "KJV7XJ"
+    SMS_GATEWAY_PASSWORD: str = "fbsybvpoothupl"
+    # Сертификат шлюза самоподписанный — аналог `curl -k`.
+    SMS_VERIFY_SSL: bool = False
+    SMS_TIMEOUT_SEC: float = 10.0
+
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"
     SEED_ADMIN_PASSWORD: str = "admin123"  # только dev; в ENV=prod обязательно заменить

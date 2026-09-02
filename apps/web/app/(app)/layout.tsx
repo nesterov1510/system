@@ -1,21 +1,32 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { clearSession, getStoredUser, type User } from "@/lib/api";
+import {
+  api,
+  clearSession,
+  getStoredUser,
+  getToken,
+  type User,
+} from "@/lib/api";
+import { canView, isAdminRole } from "@/lib/catalog";
+import { subscribeChat, connectChat, disconnectChat } from "@/lib/chatSocket";
+import { playNotify, primeAudio } from "@/lib/sound";
 import MobileNav from "@/components/MobileNav";
 
+// role  -> какие страницы доступны. См. lib/catalog.ts (canView).
 const NAV_ITEMS = [
   {
     group: "Основное",
     items: [
-      { href: "/repairs", label: "Доска", icon: "📋" },
+      { href: "/repairs", label: "Все ремонты", icon: "📋" },
       { href: "/repairs/new", label: "Приёмка", icon: "➕" },
       { href: "/clients", label: "Клиенты", icon: "👥" },
       { href: "/callcenter", label: "Call-центр", icon: "📞" },
       { href: "/chat", label: "Чат", icon: "💬" },
       { href: "/dashboard", label: "Курс", icon: "📊" },
+      { href: "/profile", label: "Профиль", icon: "👤" },
     ],
   },
   {
@@ -52,6 +63,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -62,6 +74,56 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setUser(u);
     setReady(true);
   }, [router]);
+
+  const refreshUnread = useCallback(() => {
+    api
+      .chatUnreadTotal()
+      .then((r) => setChatUnread(r.total))
+      .catch(() => {});
+  }, []);
+
+  // Единый WebSocket на всё приложение: обновляем бейдж и звучим уведомлением,
+  // когда приходит сообщение (напр. о назначении мастера на ремонт).
+  useEffect(() => {
+    if (!ready || !user || !canView(user.role, "/chat")) return;
+    const token = getToken();
+    if (!token) return;
+    connectChat(token);
+    const unsub = subscribeChat((event) => {
+      if (event?.type !== "chat.message") return;
+      const authorId = event?.message?.author?.id;
+      const isMine = authorId && authorId === user.id;
+      if (isMine) return;
+      // Если это сообщение в канал, который сейчас открыт у пользователя —
+      // не звучим (он его уже видит), чат-страница сама помечает прочитанным.
+      const active = (window as unknown as { __msbActiveChat?: string }).__msbActiveChat;
+      const onScreen = active && active === event.channel_id;
+      if (!onScreen) {
+        playNotify();
+      }
+      // Лёгкая задержка — чтобы сервер успел записать сообщение.
+      setTimeout(refreshUnread, 400);
+    });
+    refreshUnread();
+    // Периодическая сверка как fallback.
+    const t = setInterval(refreshUnread, 15000);
+    // Слушаем ручное обновление от чат-страницы (после прочтения канала).
+    const onUnreadRefresh = () => refreshUnread();
+    window.addEventListener("msb:unread-refresh", onUnreadRefresh);
+    return () => {
+      unsub();
+      clearInterval(t);
+      window.removeEventListener("msb:unread-refresh", onUnreadRefresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, user?.id]);
+
+  // Разблокируем аудио после первого клика по странице.
+  useEffect(() => {
+    const onFirst = () => primeAudio();
+    window.addEventListener("pointerdown", onFirst, { once: true });
+    return () => window.removeEventListener("pointerdown", onFirst);
+  }, []);
 
   function isActive(href: string) {
     if (href === "/repairs" && pathname === "/repairs") return true;
@@ -115,7 +177,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* User area */}
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 sm:flex">
+            <Link href="/profile" title="Профиль"
+              className="hidden items-center gap-2 sm:flex">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
                 {user.name.charAt(0).toUpperCase()}
               </div>
@@ -123,7 +186,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="text-sm font-medium text-slate-800">{user.name}</div>
                 <div className="text-xs text-slate-500">{user.email}</div>
               </div>
-            </div>
+            </Link>
             <span className={`hidden rounded-full px-2.5 py-0.5 text-xs font-semibold sm:inline-block ${STATUS_BADGES[user.role] ?? "bg-slate-100 text-slate-600"}`}>
               {ROLE_LABELS[user.role] ?? user.role}
             </span>
@@ -155,7 +218,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -167,7 +230,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       >
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
-                        {isActive(item.href) && (
+                        {item.href === "/chat" && chatUnread > 0 && (
+                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
+                            {chatUnread > 99 ? "99+" : chatUnread}
+                          </span>
+                        )}
+                        {isActive(item.href) && item.href !== "/chat" && (
                           <span className="ml-auto h-1.5 w-1.5 rounded-full bg-msb-600" />
                         )}
                       </Link>
@@ -218,7 +286,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -231,6 +299,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       >
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
+                        {item.href === "/chat" && chatUnread > 0 && (
+                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
+                            {chatUnread > 99 ? "99+" : chatUnread}
+                          </span>
+                        )}
                       </Link>
                     ))}
                   </div>

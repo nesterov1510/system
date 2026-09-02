@@ -11,6 +11,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string | null;
+  telegram?: string | null;
   role: string;
   city_id?: string | null;
   branch_id?: string | null;
@@ -22,6 +23,8 @@ export interface Channel {
   slug: string;
   name: string;
   kind: string;
+  peer?: { id: string; name: string; role: string } | null;
+  unread?: number;
 }
 
 export interface Lookup {
@@ -113,6 +116,18 @@ export interface RepairPart {
   price?: number | null;
 }
 
+/** Запчасть, заказанная под конкретный ремонт. */
+export interface PartOrder {
+  id: string;
+  repair_id: string;
+  name: string;
+  qty: number;
+  ordered_at?: string | null;
+  received_at?: string | null;
+  price?: number | null;
+  created_at: string;
+}
+
 export interface Payment {
   id: string;
   repair_id: string;
@@ -157,13 +172,71 @@ export interface Repair {
   price_final?: number | null;
   cost_amount?: number | null;
   paid: boolean;
+  work_done?: string | null;
+  warranty_text?: string | null;
   print_count: number;
   master_name?: string | null;
+  master_ids?: string[];
+  master_names?: string[];
   events: RepairEvent[];
 }
 
 const TOKEN_KEY = "msb_token";
 const USER_KEY = "msb_user";
+const REMEMBER_KEY = "msb_remember";
+
+export interface RememberedLogin {
+  email: string;
+  password: string;
+}
+
+/** base64 (utf-8 safe) — это НЕ шифрование, только чтобы пароль
+ *  не лежал в localStorage открытым текстом при беглом взгляде. */
+function encode(value: string): string {
+  return window.btoa(
+    String.fromCharCode(...new TextEncoder().encode(value)),
+  );
+}
+
+function decode(value: string): string {
+  const bin = window.atob(value);
+  return new TextDecoder().decode(
+    Uint8Array.from(bin, (ch) => ch.charCodeAt(0)),
+  );
+}
+
+/** Сохранить данные входа для автозаполнения формы логина. */
+export function saveRememberedLogin(email: string, password: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      REMEMBER_KEY,
+      encode(JSON.stringify({ email, password })),
+    );
+  } catch {
+    /* приватный режим / переполненное хранилище — просто не запоминаем */
+  }
+}
+
+/** Прочитать сохранённые данные входа (или null). */
+export function getRememberedLogin(): RememberedLogin | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(REMEMBER_KEY);
+  if (!raw) return null;
+  try {
+    const data = JSON.parse(decode(raw)) as RememberedLogin;
+    if (!data || typeof data.email !== "string") return null;
+    return { email: data.email, password: data.password ?? "" };
+  } catch {
+    window.localStorage.removeItem(REMEMBER_KEY);
+    return null;
+  }
+}
+
+export function clearRememberedLogin() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(REMEMBER_KEY);
+}
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -220,6 +293,11 @@ export const api = {
       { method: "POST", body: JSON.stringify({ email, password }) },
     ),
   me: () => request<User>("/api/auth/me"),
+  updateMe: (payload: Record<string, unknown>) =>
+    request<User>("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 
   // Lookups (для формы приёмки — доступны всем ролям)
   cities: () => request<Lookup[]>("/api/lookups/cities"),
@@ -229,6 +307,16 @@ export const api = {
 
   // Chat
   channels: () => request<Channel[]>("/api/chat/channels"),
+  chatUsers: () =>
+    request<Array<{ id: string; name: string; role: string }>>("/api/chat/users"),
+  openDirect: (userId: string) =>
+    request<Channel>(`/api/chat/direct/${userId}`, { method: "POST" }),
+  chatUnreadTotal: () =>
+    request<{ total: number }>("/api/chat/unread-total"),
+  markChannelRead: (channelId: string) =>
+    request<{ ok: boolean }>(`/api/chat/channels/${channelId}/read`, {
+      method: "POST",
+    }),
   messages: (channelId: string) =>
     request<Array<Record<string, unknown>>>(
       `/api/chat/channels/${channelId}/messages`,
@@ -239,9 +327,30 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
 
-  // Repairs
-  repairs: () => request<Repair[]>("/api/repairs"),
+  // Repairs — пейджированный список для страницы «Все ремонты»
+  repairs: (params: {
+    stage?: string;
+    q?: string;
+    page?: number;
+    page_size?: number;
+    master_id?: string;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.stage) qs.set("stage", params.stage);
+    if (params.q) qs.set("q", params.q);
+    if (params.page) qs.set("page", String(params.page));
+    if (params.page_size) qs.set("page_size", String(params.page_size));
+    if (params.master_id) qs.set("master_id", params.master_id);
+    const s = qs.toString();
+    return request<{ items: Repair[]; total: number; page: number; page_size: number }>(
+      `/api/repairs${s ? `?${s}` : ""}`,
+    );
+  },
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
+  stageCounts: () =>
+    request<{ all: number; new: number; diag: number; work: number; done: number }>(
+      "/api/repairs/stage-counts",
+    ),
   byNumber: (number: string) =>
     request<Repair>(`/api/repairs/by-number/${encodeURIComponent(number)}`),
 
@@ -271,6 +380,10 @@ export const api = {
   },
   clientRepairs: (clientId: string) =>
     request<Repair[]>(`/api/repairs/clients/${clientId}/repairs`),
+  deleteClient: (clientId: string) =>
+    request<{ ok: boolean }>(`/api/repairs/clients/${clientId}`, {
+      method: "DELETE",
+    }),
   createRepair: (payload: Record<string, unknown>) =>
     request<Repair>("/api/repairs", {
       method: "POST",
@@ -281,6 +394,20 @@ export const api = {
     request<Repair>(`/api/repairs/${id}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
+    }),
+  deleteRepair: (id: string) =>
+    request<{ ok: boolean }>(`/api/repairs/${id}`, { method: "DELETE" }),
+  // «Ремонт закончен»: переводит в «Готово к выдаче» + шаблон SMS клиенту.
+  finishRepair: (id: string) =>
+    request<{ repair: Repair; sms: { to: string; text: string } }>(
+      `/api/repairs/${id}/finish`,
+      { method: "POST" },
+    ),
+  // Отправить клиенту SMS (текст из модалки — по шаблону или свой).
+  sendFinishSms: (id: string, text: string) =>
+    request<{ ok: boolean; to: string }>(`/api/repairs/${id}/finish-sms`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
     }),
   comment: (id: string, message: string) =>
     request<Repair>(`/api/repairs/${id}/events`, {
@@ -344,6 +471,19 @@ export const api = {
     }),
   removeRepairPart: (repairId: string, rpId: string) =>
     request<{ ok: boolean }>(`/api/repairs/${repairId}/parts/${rpId}`, {
+      method: "DELETE",
+    }),
+
+  // Заказанные под ремонт запчасти (печатаются в бланке)
+  partOrders: (repairId: string) =>
+    request<PartOrder[]>(`/api/repairs/${repairId}/part-orders`),
+  addPartOrder: (repairId: string, payload: Record<string, unknown>) =>
+    request<PartOrder>(`/api/repairs/${repairId}/part-orders`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  removePartOrder: (repairId: string, orderId: string) =>
+    request<{ ok: boolean }>(`/api/repairs/${repairId}/part-orders/${orderId}`, {
       method: "DELETE",
     }),
 

@@ -6,40 +6,45 @@ import { useParams } from "next/navigation";
 import {
   api,
   downloadPdfBase64,
+  getStoredUser,
   mediaUrl,
   money,
+  type Lookup,
   type Part,
+  type PartOrder,
   type Payment,
   type Photo,
   type Repair,
   type RepairPart,
 } from "@/lib/api";
 
-const STATUSES = [
-  "Принято",
-  "Диагностика",
-  "Согласование",
-  "Ожидание запчастей",
-  "В ремонте",
-  "Готово к выдаче",
-  "Выдано",
-  "Не забрано",
-  "Архив",
-  "Отказ",
+// Статус ремонта в карточке — только 4 этапа (как и на доске).
+const STAGES = [
+  { status: "Принято", label: "Новый ремонт", color: "msb-badge-info" },
+  { status: "Диагностика", label: "Диагностика", color: "msb-badge-warning" },
+  { status: "В ремонте", label: "В ремонте", color: "msb-badge-cyan" },
+  { status: "Готово к выдаче", label: "Закончен", color: "msb-badge-success" },
 ];
-
-const STATUS_COLORS: Record<string, string> = {
-  Принято: "msb-badge-info",
-  Диагностика: "msb-badge-warning",
-  Согласование: "msb-badge-purple",
-  "Ожидание запчастей": "bg-orange-100 text-orange-700",
-  "В ремонте": "msb-badge-cyan",
-  "Готово к выдаче": "msb-badge-success",
-  Выдано: "msb-badge-gray",
-  "Не забрано": "bg-rose-100 text-rose-700",
-  Архив: "msb-badge-gray",
-  Отказ: "msb-badge-danger",
+// Из какого «этапа» текущий статус (чтобы показать выбранную колонку).
+const STAGE_OF: Record<string, string> = {
+  Принято: "Принято",
+  Диагностика: "Диагностика",
+  Согласование: "В ремонте",
+  "Ожидание запчастей": "В ремонте",
+  "В ремонте": "В ремонте",
+  "Готово к выдаче": "Готово к выдаче",
+  Выдано: "Готово к выдаче",
+  "Не забрано": "Готово к выдаче",
+  Архив: "Готово к выдаче",
+  Отказ: "Готово к выдаче",
 };
+function stageRep(status: string): string {
+  return STAGE_OF[status] ?? "Принято";
+}
+function stageMeta(status: string) {
+  const rep = stageRep(status);
+  return STAGES.find((s) => s.status === rep) ?? STAGES[0];
+}
 
 const EVENT_LABELS: Record<string, string> = {
   status_change: "изменение статуса",
@@ -88,12 +93,28 @@ export default function RepairCardPage() {
   const [finalPrice, setFinalPrice] = useState("");
   const [finalPaid, setFinalPaid] = useState(false);
   const [comment, setComment] = useState("");
+  // --- данные для печатного бланка ---
+  const [mastersList, setMastersList] = useState<Lookup[]>([]);
+  const [partOrders, setPartOrders] = useState<PartOrder[]>([]);
+  const [blankMasters, setBlankMasters] = useState<string[]>([]);
+  const [blankFault, setBlankFault] = useState("");
+  const [blankWork, setBlankWork] = useState("");
+  const [blankWarranty, setBlankWarranty] = useState("");
+  const [blankEta, setBlankEta] = useState("");
+  const [blankPrice, setBlankPrice] = useState("");
+  const [orderName, setOrderName] = useState("");
+  const [orderQty, setOrderQty] = useState("1");
+  const [blankSaved, setBlankSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("info");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Модалка SMS клиенту при «Ремонт закончен».
+  const [smsModal, setSmsModal] = useState<{ to: string; text: string } | null>(null);
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsMsg, setSmsMsg] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.repair(id).then(setRepair).catch((e) => setError(e.message));
@@ -101,9 +122,13 @@ export default function RepairCardPage() {
     api.repairParts(id).then(setRepairParts).catch(() => {});
     api.parts().then(setPartsCatalog).catch(() => {});
     api.payments(id).then(setPayments).catch(() => {});
+    api.partOrders(id).then(setPartOrders).catch(() => {});
+    api.masters().then(setMastersList).catch(() => {});
   }, [id]);
 
   useEffect(load, [load]);
+
+  const currentUser = getStoredUser();
 
   async function changeStatus(status: string) {
     setBusy(true);
@@ -114,6 +139,20 @@ export default function RepairCardPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeThis() {
+    if (!repair) return;
+    if (!confirm(`Удалить ремонт ${repair.number} и все его данные? Это действие необратимо.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteRepair(id);
+      window.location.href = "/repairs";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка удаления");
       setBusy(false);
     }
   }
@@ -221,8 +260,74 @@ export default function RepairCardPage() {
       setFinalCost(repair.cost_amount?.toString() ?? "");
       setFinalPrice(repair.price_final?.toString() ?? "");
       setFinalPaid(repair.paid);
+      setBlankMasters(repair.master_ids ?? []);
+      setBlankFault(repair.fault_master ?? "");
+      setBlankWork(repair.work_done ?? "");
+      setBlankWarranty(repair.warranty_text ?? "");
+      setBlankEta(repair.eta_days?.toString() ?? "");
+      setBlankPrice(repair.price_final?.toString() ?? "");
     }
   }, [repair]);
+
+  // --- бланк: сохранение и заказанные запчасти ---
+  async function saveBlank() {
+    setBusy(true);
+    setError(null);
+    setBlankSaved(false);
+    try {
+      const updated = await api.updateRepair(id, {
+        master_ids: blankMasters,
+        fault_master: blankFault.trim() || null,
+        work_done: blankWork.trim() || null,
+        warranty_text: blankWarranty.trim() || null,
+        eta_days: blankEta ? Number(blankEta) : null,
+        price_final: blankPrice ? Number(blankPrice) : null,
+      });
+      setRepair(updated);
+      setBlankSaved(true);
+      setTimeout(() => setBlankSaved(false), 2500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleMaster(masterId: string) {
+    setBlankMasters((prev) =>
+      prev.includes(masterId)
+        ? prev.filter((m) => m !== masterId)
+        : [...prev, masterId],
+    );
+  }
+
+  async function addOrder() {
+    const name = orderName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await api.addPartOrder(id, { name, qty: Number(orderQty) || 1 });
+      setOrderName("");
+      setOrderQty("1");
+      setPartOrders(await api.partOrders(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeOrder(orderId: string) {
+    setBusy(true);
+    try {
+      await api.removePartOrder(id, orderId);
+      setPartOrders(await api.partOrders(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function finalize() {
     if (!repair) return;
@@ -246,6 +351,43 @@ export default function RepairCardPage() {
     }
   }
 
+  // --- «Ремонт закончен» + SMS клиенту ---
+  async function openFinish() {
+    if (!repair) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.finishRepair(id);
+      setRepair(res.repair);
+      setSmsMsg(null);
+      setSmsModal({ to: res.sms.to, text: res.sms.text });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function closeSmsModal() {
+    setSmsModal(null);
+    setSmsMsg(null);
+  }
+
+  async function sendSmsNow() {
+    if (!smsModal) return;
+    setSmsSending(true);
+    setSmsMsg(null);
+    try {
+      await api.sendFinishSms(id, smsModal.text.trim());
+      setSmsMsg("SMS отправлено клиенту ✓");
+      setRepair(await api.repair(id));
+    } catch (e) {
+      setSmsMsg(`Не удалось отправить SMS: ${e instanceof Error ? e.message : "Ошибка"}`);
+    } finally {
+      setSmsSending(false);
+    }
+  }
+
   if (!repair) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-400">
@@ -265,6 +407,7 @@ export default function RepairCardPage() {
   const TABS = [
     { id: "info", label: "Инфо", icon: "📋" },
     { id: "parts", label: "Запчасти", icon: "🔩" },
+    { id: "blank", label: "Бланк", icon: "🖨️" },
     { id: "payment", label: "Оплата", icon: "💰" },
     { id: "timeline", label: "История", icon: "📜" },
   ];
@@ -285,6 +428,19 @@ export default function RepairCardPage() {
             className="msb-btn-secondary">
             🖨️ Печать
           </button>
+          {(currentUser?.role === "admin" || currentUser?.role === "operator") &&
+            !["Выдано", "Не забрано", "Архив", "Отказ"].includes(repair.status) && (
+              <button onClick={openFinish} disabled={busy}
+                className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700">
+                ✅ Ремонт закончен
+              </button>
+            )}
+          {currentUser?.role === "admin" && (
+            <button onClick={removeThis} disabled={busy}
+              className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition-colors hover:bg-red-100">
+              🗑 Удалить
+            </button>
+          )}
         </div>
       </div>
 
@@ -296,13 +452,13 @@ export default function RepairCardPage() {
               <p className="text-sm font-medium text-msb-200">Ремонт</p>
               <h1 className="font-mono text-2xl font-extrabold text-white">{repair.number}</h1>
             </div>
-            <select value={repair.status} onChange={(e) => changeStatus(e.target.value)}
+            <select
+              value={stageRep(repair.status)}
+              onChange={(e) => changeStatus(e.target.value)}
               disabled={busy}
-              className={`rounded-xl border-0 px-4 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-white/50 ${
-                STATUS_COLORS[repair.status] ?? "msb-badge-gray"
-              }`}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
+              className={`rounded-xl border-0 px-4 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-white/50 ${stageMeta(repair.status).color}`}>
+              {STAGES.map((s) => (
+                <option key={s.status} value={s.status}>{s.label}</option>
               ))}
             </select>
           </div>
@@ -462,6 +618,162 @@ export default function RepairCardPage() {
           </div>
         )}
 
+        {/* Бланк для печати */}
+        {activeTab === "blank" && (
+          <div className="msb-card-solid p-6">
+            <h2 className="msb-section-title mb-1">🖨️ Данные для бланка</h2>
+            <p className="mb-5 text-xs text-slate-500">
+              Всё, что заполнено здесь, печатается в бланке ремонта.
+            </p>
+
+            {/* Мастера */}
+            <label className="msb-label">
+              Мастера <span className="text-slate-400">(Inžiner 1…4)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {mastersList.length === 0 && (
+                <span className="text-sm text-slate-400">Список мастеров пуст</span>
+              )}
+              {mastersList.map((m) => {
+                const idx = blankMasters.indexOf(m.id);
+                const active = idx >= 0;
+                return (
+                  <button key={m.id} type="button" onClick={() => toggleMaster(m.id)}
+                    disabled={busy}
+                    className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 transition-all ${
+                      active
+                        ? "bg-msb-600 text-white ring-msb-600"
+                        : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"}`}>
+                    {active && <span className="mr-1 font-bold">{idx + 1}.</span>}
+                    {m.name}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Можно выбрать нескольких — в бланке они встанут в строки «Inžiner» по порядку.
+              Первый считается основным мастером ремонта.
+            </p>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-3">
+              <div>
+                <label className="msb-label">
+                  Цена ремонта, ман. <span className="text-slate-400">(Gürleşilen baha)</span>
+                </label>
+                <input type="number" value={blankPrice} placeholder="0"
+                  onChange={(e) => setBlankPrice(e.target.value)} className="msb-input" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Срок ремонта, дней <span className="text-slate-400">(Aýdylan wagty)</span>
+                </label>
+                <input type="number" value={blankEta} placeholder="0"
+                  onChange={(e) => setBlankEta(e.target.value)} className="msb-input" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Гарантия <span className="text-slate-400">(Kepillik)</span>
+                </label>
+                <input value={blankWarranty} placeholder="напр. 3 aý"
+                  onChange={(e) => setBlankWarranty(e.target.value)} className="msb-input" />
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {["1 aý", "3 aý", "6 aý", "1 ýyl"].map((w) => (
+                    <button key={w} type="button" onClick={() => setBlankWarranty(w)}
+                      className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200">
+                      {w}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="msb-label">
+                  Неисправности <span className="text-slate-400">(Kemçilik)</span>
+                </label>
+                <textarea value={blankFault} rows={4}
+                  onChange={(e) => setBlankFault(e.target.value)}
+                  placeholder={"Одна неисправность — одна строка:\nНе включается\nШумит вентилятор"}
+                  className="msb-input resize-y" />
+              </div>
+              <div>
+                <label className="msb-label">
+                  Что починили <span className="text-slate-400">(Düzedilen enjamyn görkezmesi)</span>
+                </label>
+                <textarea value={blankWork} rows={4}
+                  onChange={(e) => setBlankWork(e.target.value)}
+                  placeholder="Заменена клавиатура, чистка системы охлаждения…"
+                  className="msb-input resize-y" />
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <button onClick={saveBlank} disabled={busy} className="msb-btn-primary">
+                Сохранить для печати
+              </button>
+              {blankSaved && (
+                <span className="text-sm font-medium text-emerald-600">✓ Сохранено</span>
+              )}
+              <button onClick={doPrint} disabled={busy} className="msb-btn-secondary ml-auto">
+                🖨️ Печать
+              </button>
+            </div>
+
+            {/* Заказанные запчасти */}
+            <h2 className="msb-section-title mt-8 mb-1">
+              📦 Заказанные запчасти
+            </h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Sargalan gerek bolan ätiýaçlyk şaýlary — что заказали под этот ремонт.
+              Установленные запчасти берутся из вкладки «Запчасти».
+            </p>
+            {partOrders.length === 0 ? (
+              <div className="flex items-center justify-center rounded-xl border-2 border-dashed border-slate-200 py-6 text-sm text-slate-400">
+                Ничего не заказано
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {partOrders.map((o) => (
+                  <div key={o.id}
+                    className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+                    <div>
+                      <span className="text-sm font-medium text-slate-800">{o.name}</span>
+                      <span className="ml-2 text-xs text-slate-500">×{o.qty}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-slate-500">
+                        {o.ordered_at ? new Date(o.ordered_at).toLocaleDateString("ru") : "—"}
+                      </span>
+                      <button onClick={() => removeOrder(o.id)} disabled={busy}
+                        className="text-xs font-medium text-red-500 transition-colors hover:text-red-700">
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <div className="min-w-[200px] flex-1">
+                <label className="msb-label">Название запчасти</label>
+                <input value={orderName} onChange={(e) => setOrderName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addOrder(); }}
+                  placeholder="Матрица 15.6 FHD" className="msb-input" />
+              </div>
+              <div className="w-24">
+                <label className="msb-label">Кол-во</label>
+                <input type="number" min={1} value={orderQty}
+                  onChange={(e) => setOrderQty(e.target.value)} className="msb-input" />
+              </div>
+              <button onClick={addOrder} disabled={busy || !orderName.trim()}
+                className="msb-btn-primary">
+                + Заказать
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Payment tab */}
         {activeTab === "payment" && (
           <div className="msb-card-solid p-6">
@@ -583,6 +895,57 @@ export default function RepairCardPage() {
           </div>
         )}
       </div>
+
+      {/* SMS-модалка «Ремонт закончен» */}
+      {smsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={closeSmsModal} />
+          <div className="relative w-full max-w-md msb-card-solid p-6 animate-slide-up">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="msb-section-title">✅ Ремонт закончен</h3>
+              <button onClick={closeSmsModal} className="text-slate-400 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-600">
+              Ремонт переведён в статус «Готово к выдаче». Отправить уведомление
+              клиенту по SMS? Текст можно изменить или пропустить.
+            </p>
+            <div className="mb-3 flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600 ring-1 ring-slate-100">
+              <span>📞</span>
+              <span className="font-medium">{smsModal.to}</span>
+            </div>
+            <label className="msb-label">Текст SMS</label>
+            <textarea
+              value={smsModal.text}
+              onChange={(e) => setSmsModal({ ...smsModal, text: e.target.value })}
+              rows={4}
+              className="msb-input resize-y mb-4"
+            />
+            {smsMsg && (
+              <div className={`mb-4 rounded-xl px-4 py-2.5 text-sm ring-1 ${
+                smsMsg.startsWith("Не удалось")
+                  ? "bg-red-50 text-red-600 ring-red-100"
+                  : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+              }`}>
+                {smsMsg}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button onClick={sendSmsNow} disabled={smsSending || !smsModal.text.trim()}
+                className="msb-btn-primary flex-1">
+                {smsSending ? "Отправка…" : "📤 Отправить SMS"}
+              </button>
+              <button onClick={closeSmsModal} disabled={smsSending}
+                className="msb-btn-secondary">
+                Без SMS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Print message */}
       {printMsg && (

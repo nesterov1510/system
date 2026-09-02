@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, type Repair } from "@/lib/api";
+import { api, getStoredUser, type Repair } from "@/lib/api";
 
 interface ClientRow {
   id: string;
@@ -29,11 +29,23 @@ export default function ClientsPage() {
     summary: ClientRepairSummary;
   } | null>(null);
   const [loadingClientId, setLoadingClientId] = useState<string | null>(null);
+  const currentUser = getStoredUser();
 
   function load() {
     api.listClients().then(setClients).catch((e) => setError(e.message));
   }
   useEffect(load, []);
+
+  async function removeClient(c: ClientRow) {
+    if (!confirm(`Удалить клиента «${c.full_name}»? История его ремонтов останется, но из списка клиентов он исчезнет.`)) return;
+    setError(null);
+    try {
+      await api.deleteClient(c.id);
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка удаления");
+    }
+  }
 
   async function openClient(c: ClientRow) {
     setLoadingClientId(c.id);
@@ -160,10 +172,18 @@ export default function ClientsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-4 text-right">
-                    <button onClick={() => openClient(c)} disabled={loadingClientId === c.id}
-                      className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors disabled:opacity-50">
-                      {loadingClientId === c.id ? "Загрузка…" : "Открыть →"}
-                    </button>
+                    <div className="flex items-center justify-end gap-3">
+                      <button onClick={() => openClient(c)} disabled={loadingClientId === c.id}
+                        className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors disabled:opacity-50">
+                        {loadingClientId === c.id ? "Загрузка…" : "Открыть →"}
+                      </button>
+                      {currentUser?.role === "admin" && (
+                        <button onClick={() => removeClient(c)}
+                          className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors">
+                          Удалить
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
