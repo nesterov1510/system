@@ -11,6 +11,7 @@ interface Message {
   created_at: string;
   author?: { id: string; name: string; role: string } | null;
   repair_preview?: {
+    id?: string;
     number: string;
     status: string;
     device_type: string;
@@ -257,12 +258,13 @@ export default function ChatPage() {
                     <p>{m.text}</p>
                   </div>
                   {m.repair_preview && (
-                    <a href="/repairs"
+                    <a
+                      href={m.repair_preview.id ? `/repairs/${m.repair_preview.id}` : "/repairs"}
                       className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${
                         isMe ? "text-msb-200 bg-msb-700/20" : "text-msb-700 bg-msb-50 ring-1 ring-msb-100"
                       }`}>
                       <span>🔧</span>
-                      #{m.repair_preview.number} · {m.repair_preview.status}
+                      #{m.repair_preview.number} · {m.repair_preview.status} → карточка
                     </a>
                   )}
                 </div>

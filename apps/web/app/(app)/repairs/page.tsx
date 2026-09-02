@@ -56,9 +56,18 @@ export default function RepairsBoardPage() {
     page: number;
     page_size: number;
   }>({ items: [], total: 0, page: 1, page_size: PAGE_SIZE });
+  const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const currentUser = getStoredUser();
+  // Счётчики по этапам показывает админу/оператору.
+  const showCounts = currentUser?.role === "admin" || currentUser?.role === "operator";
+
+  // Счётчики по этапам (сколько техники на каждом этапе)
+  useEffect(() => {
+    if (!showCounts) return;
+    api.stageCounts().then(setCounts).catch(() => {});
+  }, [showCounts, data.total]);
 
   // Debounce поиска
   useEffect(() => {
@@ -118,21 +127,35 @@ export default function RepairsBoardPage() {
         <p className="mt-1 text-sm text-slate-500">{data.total} ремонтов</p>
       </div>
 
-      {/* Stage tabs */}
+      {/* Stage tabs (для админа/оператора — счётчики техники на каждом этапе) */}
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {STAGES.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setTab(s.key)}
-            className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all ${
-              tab === s.key
-                ? "bg-msb-600 text-white shadow-sm"
-                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            <span>{s.icon}</span> {s.label}
-          </button>
-        ))}
+        {STAGES.map((s) => {
+          const n = counts?.[s.key];
+          return (
+            <button
+              key={s.key}
+              onClick={() => setTab(s.key)}
+              className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold transition-all ${
+                tab === s.key
+                  ? "bg-msb-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              <span>{s.icon}</span> {s.label}
+              {showCounts && n != null && (
+                <span
+                  className={`ml-0.5 flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+                    tab === s.key
+                      ? "bg-white/25 text-white"
+                      : "bg-msb-600/10 text-msb-700"
+                  }`}
+                >
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Search */}

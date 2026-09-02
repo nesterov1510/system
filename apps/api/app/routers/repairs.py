@@ -32,6 +32,7 @@ from app.schemas.repair import (
     RepairUpdate,
     RepairsPage,
 )
+from app.services.chat import send_assignment_notice
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.settings import get_storage_months
 from app.services.storage import object_key_for, public_url, save_object
@@ -48,6 +49,15 @@ def _can_access(user, repair: Repair) -> bool:
         # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
         return any(m.user_id == user.id for m in repair.masters)
     return True
+
+
+def _is_assigner(user) -> bool:
+    """Кто может назначать мастеров на ремонт (не сам мастер)."""
+    return user.role in (
+        UserRole.ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.OPERATOR.value,
+    )
 
 
 def _master_scope(user_id) -> "object":
@@ -414,6 +424,15 @@ async def create_repair(
 
     repair = await _get_repair_or_404(db, repair.id)
 
+    # Если оператор/админ при приёмке сразу назначил мастера — сообщим ему в личку.
+    if (
+        master_id
+        and _is_assigner(user)
+        and repair.master is not None
+        and repair.master.id != user.id
+    ):
+        await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
+
     # Notify the chat: new acceptance.
     await manager.broadcast(
         {
@@ -492,6 +511,34 @@ async def list_repairs(
     return RepairsPage(items=items, total=total, page=page, page_size=page_size)
 
 
+@router.get("/stage-counts")
+async def stage_counts(db: DbSession, user: CurrentUser):
+    """Сколько техники на каждом этапе — для бейджей на доске."""
+    scope = []
+    if user.role == UserRole.MASTER.value:
+        scope.append(_master_scope(user.id))
+    counts: dict[str, int] = {}
+    for key, statuses in STAGE_STATUSES.items():
+        cnt = (
+            await db.execute(
+                select(func.count())
+                .select_from(
+                    select(Repair)
+                    .where(Repair.status.in_(statuses), *scope)
+                    .subquery()
+                )
+            )
+        ).scalar() or 0
+        counts[key] = cnt
+    counts["all"] = (
+        await db.execute(
+            select(func.count())
+            .select_from(select(Repair).where(*scope).subquery())
+        )
+    ).scalar() or 0
+    return counts
+
+
 @router.get("/by-number/{number}", response_model=RepairOut)
 async def get_by_number(number: str, db: DbSession, user: CurrentUser):
     row = await db.execute(
@@ -536,6 +583,9 @@ async def update_repair(
     for field, value in data.items():
         setattr(repair, field, value)
 
+    # Каких мастеров назначили заново в этом запросе (чтобы уведомить в личку).
+    newly_assigned_ids: list[uuid.UUID] = []
+
     # Несколько мастеров на один ремонт: перезаписываем список целиком.
     if master_ids is not None:
         # убрать дубликаты, сохранив порядок
@@ -555,6 +605,8 @@ async def update_repair(
         # Обновляем список «по-разному»: существующие связи переиспользуем,
         # иначе DELETE+INSERT той же пары в одном flush ломает уникальный индекс.
         existing = {m.user_id: m for m in repair.masters}
+        already = set(existing) | ({repair.master_id} if repair.master_id else set())
+        newly_assigned_ids = [mid for mid in ordered_ids if mid not in already]
         for link in list(repair.masters):
             if link.user_id not in ordered_ids:
                 repair.masters.remove(link)
@@ -579,10 +631,14 @@ async def update_repair(
             )
     elif "master_id" in data and data["master_id"]:
         # Одиночное назначение — держим список мастеров в согласованном виде.
-        if not any(m.user_id == data["master_id"] for m in repair.masters):
+        if (
+            data["master_id"] != repair.master_id
+            and not any(m.user_id == data["master_id"] for m in repair.masters)
+        ):
             repair.masters.append(
                 RepairMaster(user_id=data["master_id"], position=len(repair.masters))
             )
+            newly_assigned_ids.append(data["master_id"])
 
     if payload.status and payload.status != old_status:
         repair.events.append(
@@ -627,6 +683,15 @@ async def update_repair(
     # остались бы прежними — сбрасываем кэш, чтобы ответ был актуальным.
     db.expire(repair)  # после expire нельзя трогать repair.* — берём id из пути
     repair = await _get_repair_or_404(db, repair_id)
+
+    # Уведомляем в личку мастеров, назначенных в этом запросе.
+    if newly_assigned_ids and _is_assigner(user):
+        rows = await db.execute(select(User).where(User.id.in_(newly_assigned_ids)))
+        for master in rows.scalars().all():
+            if master.id != user.id:
+                await send_assignment_notice(
+                    db, actor=user, master=master, repair=repair
+                )
 
     if payload.status and payload.status != old_status:
         await manager.broadcast(

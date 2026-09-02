@@ -340,6 +340,10 @@ export const api = {
     );
   },
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
+  stageCounts: () =>
+    request<{ all: number; new: number; diag: number; work: number; done: number }>(
+      "/api/repairs/stage-counts",
+    ),
   byNumber: (number: string) =>
     request<Repair>(`/api/repairs/by-number/${encodeURIComponent(number)}`),
 

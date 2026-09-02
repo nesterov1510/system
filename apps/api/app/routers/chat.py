@@ -34,6 +34,7 @@ async def _repair_preview(db, number: str) -> dict | None:
     if repair is None:
         return None
     return {
+        "id": str(repair.id),
         "number": repair.number,
         "status": repair.status,
         "device_type": repair.device_type,

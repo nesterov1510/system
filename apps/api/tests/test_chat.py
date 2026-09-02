@@ -17,6 +17,68 @@ def test_send_message_with_mention(client, admin_headers, created_repair):
     assert r.json()["repair_ref"] is not None
 
 
+def test_operator_assigning_master_sends_direct_notice(
+    client, admin_headers, operator_headers, master_headers, city_id
+):
+    # Создаём свой ремонт (оператор), чтобы не конфликтовать с общей фикстурой.
+    phone = "+7999" + "7" * 6 + "1"
+    new_repair = client.post(
+        "/api/repairs",
+        headers=operator_headers,
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Клиент Уведомления", "phone": phone,
+                       "consent_pdn": True, "consent_storage": True},
+            "device_type": "Телевизоры",
+            "brand": "Samsung",
+            "model": "UE50",
+        },
+    )
+    assert new_repair.status_code == 201, new_repair.text
+    rid = new_repair.json()["id"]
+
+    # Найдём id мастера через список сотрудников (admin может видеть).
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    master_id = next(
+        u["id"] for u in users if u["role"] == "master" and u["active"]
+    )
+
+    # Оператор назначает мастера на ремонт.
+    r = client.patch(
+        f"/api/repairs/{rid}",
+        headers=operator_headers,
+        json={"master_ids": [master_id]},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["master_id"] == master_id
+
+    # Мастер в своих личных чатах находит диалог с оператором и уведомление.
+    chans = client.get("/api/chat/channels", headers=master_headers).json()
+    dms = [c for c in chans if c["kind"] == "direct"]
+    assert dms, "у мастера должен появиться личный чат с оператором"
+    msgs_all = []
+    for chan in dms:
+        msgs_all += client.get(
+            f"/api/chat/channels/{chan['id']}/messages", headers=master_headers
+        ).json()
+    found = next(
+        m for m in msgs_all
+        if m.get("repair_preview") and m["repair_preview"]["id"] == rid
+    )
+    assert "назначил" in found["text"].lower() or "ремонт" in found["text"].lower()
+    assert found["repair_preview"]["id"] == rid
+
+
+def test_stage_counts(client, admin_headers, created_repair):
+    r = client.get("/api/repairs/stage-counts", headers=admin_headers)
+    assert r.status_code == 200
+    body = r.json()
+    for k in ("all", "new", "diag", "work", "done"):
+        assert k in body
+    assert body["new"] >= 1  # created_repair в «Принято»
+    assert body["all"] >= body["new"]
+
+
 def test_repair_mention_preview_resolves(client, admin_headers, created_repair):
     channels = client.get("/api/chat/channels", headers=admin_headers).json()
     channel_id = channels[0]["id"]
