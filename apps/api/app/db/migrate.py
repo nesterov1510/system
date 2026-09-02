@@ -21,6 +21,9 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     "users": {
         "telegram": "VARCHAR(128)",
     },
+    "chat_channel_members": {
+        "last_read_at": "DATETIME",
+    },
 }
 
 

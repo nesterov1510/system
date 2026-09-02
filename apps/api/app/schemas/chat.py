@@ -19,6 +19,8 @@ class ChannelOut(BaseModel):
     kind: str = "public"
     # Для личного (direct) канала — собеседник текущего пользователя.
     peer: ChatUser | None = None
+    # Сколько непрочитанных сообщений у текущего пользователя в этом канале.
+    unread: int = 0
 
 
 class MessageAuthor(BaseModel):

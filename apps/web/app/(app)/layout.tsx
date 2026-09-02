@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { clearSession, getStoredUser, type User } from "@/lib/api";
+import { api, clearSession, getStoredUser, type User } from "@/lib/api";
 import { canView, isAdminRole } from "@/lib/catalog";
 import MobileNav from "@/components/MobileNav";
 
@@ -55,6 +55,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -65,6 +66,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setUser(u);
     setReady(true);
   }, [router]);
+
+  // Периодически спрашиваем количество непрочитанных в чате (для бейджа в меню).
+  useEffect(() => {
+    if (!ready || !canView(user?.role, "/chat")) return;
+    const tick = () =>
+      api.chatUnreadTotal().then((r) => setChatUnread(r.total)).catch(() => {});
+    tick();
+    const t = setInterval(tick, 20000);
+    return () => clearInterval(t);
+  }, [ready, user]);
 
   function isActive(href: string) {
     if (href === "/repairs" && pathname === "/repairs") return true;
@@ -171,7 +182,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       >
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
-                        {isActive(item.href) && (
+                        {item.href === "/chat" && chatUnread > 0 && (
+                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                            {chatUnread > 99 ? "99+" : chatUnread}
+                          </span>
+                        )}
+                        {isActive(item.href) && item.href !== "/chat" && (
                           <span className="ml-auto h-1.5 w-1.5 rounded-full bg-msb-600" />
                         )}
                       </Link>
@@ -235,6 +251,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       >
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
+                        {item.href === "/chat" && chatUnread > 0 && (
+                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                            {chatUnread > 99 ? "99+" : chatUnread}
+                          </span>
+                        )}
                       </Link>
                     ))}
                   </div>

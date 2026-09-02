@@ -69,6 +69,33 @@ def test_operator_assigning_master_sends_direct_notice(
     assert found["repair_preview"]["id"] == rid
 
 
+def test_unread_badge(client, admin_headers, operator_headers, master_headers, city_id):
+    # Оператор открывает личный чат с мастером и пишет ему.
+    users = client.get("/api/chat/users", headers=operator_headers).json()
+    master_u = next(u for u in users if u["role"] == "master")
+    ch = client.post(f"/api/chat/direct/{master_u['id']}", headers=operator_headers).json()
+
+    # Оператор прочитал свой (пустой) канал, пишет сообщение мастеру.
+    client.get(f"/api/chat/channels/{ch['id']}/messages", headers=operator_headers)
+    client.post(
+        f"/api/chat/channels/{ch['id']}/messages",
+        headers=operator_headers,
+        json={"text": "Привет, это для бейджа"},
+    )
+
+    # У мастера — непрочитанное = 1 в этом канале и в общем.
+    mchans = client.get("/api/chat/channels", headers=master_headers).json()
+    dm = next(c for c in mchans if c["kind"] == "direct")
+    assert dm["unread"] >= 1
+    tot = client.get("/api/chat/unread-total", headers=master_headers).json()
+    assert tot["total"] >= 1
+
+    # После чтения мастером — непрочитанное сбрасывается.
+    client.get(f"/api/chat/channels/{dm['id']}/messages", headers=master_headers)
+    tot2 = client.get("/api/chat/unread-total", headers=master_headers).json()
+    assert tot2["total"] == 0
+
+
 def test_stage_counts(client, admin_headers, created_repair):
     r = client.get("/api/repairs/stage-counts", headers=admin_headers)
     assert r.status_code == 200

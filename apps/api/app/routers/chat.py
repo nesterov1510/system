@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
@@ -17,6 +17,42 @@ from app.services.chat import extract_repair_ref
 from app.ws.manager import manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+async def _member(db, channel_id, user_id):
+    row = await db.execute(
+        select(ChatChannelMember).where(
+            ChatChannelMember.channel_id == channel_id,
+            ChatChannelMember.user_id == user_id,
+        )
+    )
+    return row.scalar_one_or_none()
+
+
+async def _unread_count(db, channel_id: uuid.UUID, user_id: uuid.UUID) -> int:
+    """Сколько чужих сообщений в канале после последнего прочтения."""
+    mem = await _member(db, channel_id, user_id)
+    if mem is None:
+        return 0
+    q = select(func.count()).where(
+        ChatMessage.channel_id == channel_id,
+        ChatMessage.author_id != user_id,
+    )
+    if mem.last_read_at is not None:
+        q = q.where(ChatMessage.created_at > mem.last_read_at)
+    return (await db.execute(q)).scalar() or 0
+
+
+async def _mark_read(db, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Пометить канал прочитанным для пользователя."""
+    from app.db.base import utcnow
+
+    mem = await _member(db, channel_id, user_id)
+    if mem is None:
+        # Публичный канал без записи членства — создаём лениво.
+        mem = ChatChannelMember(channel_id=channel_id, user_id=user_id)
+        db.add(mem)
+    mem.last_read_at = utcnow()
 
 
 async def _repair_preview(db, number: str) -> dict | None:
@@ -62,6 +98,26 @@ async def _require_access(db, user, channel: ChatChannel) -> None:
             raise HTTPException(403, "Нет доступа к этому чату")
 
 
+@router.get("/unread-total")
+async def unread_total(db: DbSession, user: CurrentUser):
+    """Суммарное количество непрочитанных сообщений пользователя (для бейджа в меню)."""
+    mine = await db.execute(
+        select(ChatChannelMember.channel_id).where(ChatChannelMember.user_id == user.id)
+    )
+    my_ids = list(mine.scalars().all())
+    total = 0
+    if my_ids:
+        channels = await db.execute(
+            select(ChatChannel).where(
+                ChatChannel.id.in_(my_ids),
+                ChatChannel.kind.in_(["direct", "public"]),
+            )
+        )
+        for c in channels.scalars().all():
+            total += await _unread_count(db, c.id, user.id)
+    return {"total": total}
+
+
 @router.get("/users", response_model=list[ChatUser])
 async def list_users(db: DbSession, user: CurrentUser):
     """Активные сотрудники (для личной переписки), кроме текущего."""
@@ -104,6 +160,7 @@ async def open_direct(db: DbSession, user: CurrentUser, user_id: uuid.UUID):
         name=channel.name,
         kind="direct",
         peer=ChatUser(id=target.id, name=target.name, role=target.role),
+        unread=0,
     )
 
 
@@ -119,7 +176,14 @@ async def list_channels(db: DbSession, user: CurrentUser):
     )
     for c in pub.scalars().all():
         out.append(
-            ChannelOut(id=c.id, slug=c.slug, name=c.name, kind=c.kind, peer=None)
+            ChannelOut(
+                id=c.id,
+                slug=c.slug,
+                name=c.name,
+                kind=c.kind,
+                peer=None,
+                unread=await _unread_count(db, c.id, user.id),
+            )
         )
 
     mine = await db.execute(
@@ -148,6 +212,7 @@ async def list_channels(db: DbSession, user: CurrentUser):
                     name=peer.name if peer else c.name,
                     kind=c.kind,
                     peer=peer,
+                    unread=await _unread_count(db, c.id, user.id),
                 )
             )
     return out
@@ -176,6 +241,10 @@ async def list_messages(
     row = await db.execute(q)
     messages = list(row.scalars().all())
     messages.reverse()
+
+    # Чтение канала — сбрасываем счётчик непрочитанного.
+    await _mark_read(db, channel_id, user.id)
+    await db.commit()
 
     out = []
     for m in messages:

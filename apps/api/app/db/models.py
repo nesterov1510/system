@@ -416,6 +416,8 @@ class ChatChannelMember(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
     channel_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("chat_channels.id"), index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
+    # Когда пользователь последний раз читал канал — для счётчика непрочитанного.
+    last_read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     channel: Mapped["ChatChannel"] = relationship(back_populates="members")
 

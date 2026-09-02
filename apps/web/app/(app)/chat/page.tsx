@@ -44,12 +44,16 @@ export default function ChatPage() {
   const [users, setUsers] = useState<Array<{ id: string; name: string; role: string }>>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [unread, setUnread] = useState<Record<string, number>>({});
   const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadChannels = useCallback(async () => {
     const ch = await api.channels();
     setChannels(ch);
+    const u: Record<string, number> = {};
+    for (const c of ch) u[c.id] = c.unread ?? 0;
+    setUnread(u);
     setActive((cur) => cur ?? ch[0]?.id ?? null);
   }, []);
 
@@ -59,6 +63,12 @@ export default function ChatPage() {
 
   useEffect(() => {
     api.chatUsers().then(setUsers).catch(() => {});
+  }, []);
+
+  const selectChannel = useCallback((channelId: string) => {
+    setActive(channelId);
+    // Сброс счётчика непрочитанного для открываемого канала.
+    setUnread((prev) => (prev[channelId] ? { ...prev, [channelId]: 0 } : prev));
   }, []);
 
   useEffect(() => {
@@ -79,8 +89,14 @@ export default function ChatPage() {
     ws.onmessage = (ev) => {
       try {
         const event = JSON.parse(ev.data);
-        if (event.type === "chat.message" && event.channel_id === active) {
-          setMessages((prev) => [...prev, event.message as Message]);
+        if (event.type === "chat.message") {
+          const cid = event.channel_id as string;
+          if (cid === active) {
+            setMessages((prev) => [...prev, event.message as Message]);
+          } else {
+            // Сообщение в неактивном канале — прибавляем непрочитанное.
+            setUnread((prev) => ({ ...prev, [cid]: (prev[cid] ?? 0) + 1 }));
+          }
         }
       } catch { /* ignore */ }
     };
@@ -111,8 +127,8 @@ export default function ChatPage() {
       setChannels((prev) =>
         prev.some((c) => c.id === ch.id) ? prev : [...prev, ch],
       );
-      setActive(ch.id);
       setPickerOpen(false);
+      selectChannel(ch.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
@@ -176,7 +192,8 @@ export default function ChatPage() {
               </p>
               <div className="space-y-1.5">
                 {publicChannels.map((c) => (
-                  <ChannelBtn key={c.id} c={c} active={active === c.id} onClick={() => setActive(c.id)} />
+                  <ChannelBtn key={c.id} c={c} active={active === c.id}
+                    unread={unread[c.id] ?? 0} onClick={() => selectChannel(c.id)} />
                 ))}
               </div>
             </div>
@@ -188,7 +205,8 @@ export default function ChatPage() {
               </p>
               <div className="space-y-1.5">
                 {directChannels.map((c) => (
-                  <ChannelBtn key={c.id} c={c} active={active === c.id} onClick={() => setActive(c.id)} direct />
+                  <ChannelBtn key={c.id} c={c} active={active === c.id}
+                    unread={unread[c.id] ?? 0} onClick={() => selectChannel(c.id)} direct />
                 ))}
               </div>
             </div>
@@ -301,19 +319,28 @@ export default function ChatPage() {
   );
 }
 
-function ChannelBtn({ c, active, onClick, direct }: {
-  c: Channel; active: boolean; onClick: () => void; direct?: boolean;
+function ChannelBtn({ c, active, onClick, unread, direct }: {
+  c: Channel; active: boolean; onClick: () => void; unread: number; direct?: boolean;
 }) {
   const label = direct && c.peer ? c.peer.name : c.name;
   return (
-    <button onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all ${
+    <button onClick={onClick} title={label}
+      className={`relative flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-all ${
         active
           ? "bg-msb-600 text-white shadow-sm"
           : "bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-msb-200"
       }`}>
       <span className="text-base">{direct ? "👤" : "💬"}</span>
-      <span className="max-w-32 truncate">{label}</span>
+      <span className="max-w-28 truncate">{label}</span>
+      {unread > 0 && (
+        <span
+          className={`ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${
+            active ? "bg-white text-msb-700" : "bg-msb-600 text-white"
+          }`}
+        >
+          {unread > 99 ? "99+" : unread}
+        </span>
+      )}
     </button>
   );
 }

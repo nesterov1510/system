@@ -24,6 +24,7 @@ export interface Channel {
   name: string;
   kind: string;
   peer?: { id: string; name: string; role: string } | null;
+  unread?: number;
 }
 
 export interface Lookup {
@@ -310,6 +311,8 @@ export const api = {
     request<Array<{ id: string; name: string; role: string }>>("/api/chat/users"),
   openDirect: (userId: string) =>
     request<Channel>(`/api/chat/direct/${userId}`, { method: "POST" }),
+  chatUnreadTotal: () =>
+    request<{ total: number }>("/api/chat/unread-total"),
   messages: (channelId: string) =>
     request<Array<Record<string, unknown>>>(
       `/api/chat/channels/${channelId}/messages`,
