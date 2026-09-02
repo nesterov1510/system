@@ -341,7 +341,7 @@ async def preview_print_template(db: DbSession, body: dict):
             "branch_name": "Центральная точка",
             "client_name": "Иванов Иван Иванович",
             "client_phone": "+7 900 000-00-00",
-            "device": "ТВ Samsung UE55",
+            "device": "Телевизоры Samsung UE55",
             "serial": "SN123456",
             "complectation": "ПДУ, Кабель питания",
             "fault": "не включается",

@@ -27,7 +27,7 @@ export default function DashboardPage() {
     profit: number;
   } | null>(null);
   const [eta, setEta] = useState<EtaPrediction | null>(null);
-  const [etaType, setEtaType] = useState("ТВ");
+  const [etaType, setEtaType] = useState("Телевизоры");
   const [etaBrand, setEtaBrand] = useState("Samsung");
   const [error, setError] = useState<string | null>(null);
 
@@ -156,7 +156,7 @@ export default function DashboardPage() {
         </h2>
         <div className="mt-4 grid gap-3 sm:flex sm:flex-wrap">
           <input value={etaType} onChange={(e) => setEtaType(e.target.value)}
-            placeholder="Тип (ТВ)" className="msb-input min-w-0 flex-1" />
+            placeholder="Тип (Телевизоры)" className="msb-input min-w-0 flex-1" />
           <input value={etaBrand} onChange={(e) => setEtaBrand(e.target.value)}
             placeholder="Бренд" className="msb-input min-w-0 flex-1" />
           <button onClick={runEta} className="msb-btn-primary">

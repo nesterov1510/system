@@ -45,14 +45,14 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 const DEVICE_ICON_MAP: Record<string, string> = {
-  ТВ: "📺",
-  Монитор: "🖥️",
-  Аудио: "🔊",
+  Телевизоры: "📺",
+  Компьютеры: "💻",
+  "Бытовая техника": "🔌",
   Другое: "⚙️",
 };
 
-// Типы техники — ТВ вынесен на первую позицию.
-const DEVICE_TYPES = ["ТВ", "Монитор", "Аудио", "Другое"];
+// Классы техники — Телевизоры вынесены на первую позицию.
+const DEVICE_TYPES = ["Телевизоры", "Компьютеры", "Бытовая техника", "Другое"];
 
 // Группировка доски по этапам ремонта.
 const BOARD_GROUPS: Array<{
@@ -85,11 +85,11 @@ function fmt(dt: string | null | undefined) {
   return dt ? new Date(dt).toLocaleString("ru") : "—";
 }
 
-// ТВ-ремонты всегда в начале списка, затем по дате приёмки (свежие выше).
+// Телевизоры всегда в начале списка, затем по дате приёмки (свежие выше).
 function sortTvFirst(list: Repair[]): Repair[] {
   return [...list].sort((a, b) => {
-    const at = a.device_type === "ТВ" ? 0 : 1;
-    const bt = b.device_type === "ТВ" ? 0 : 1;
+    const at = a.device_type === "Телевизоры" ? 0 : 1;
+    const bt = b.device_type === "Телевизоры" ? 0 : 1;
     if (at !== bt) return at - bt;
     return (b.accepted_at ?? "").localeCompare(a.accepted_at ?? "");
   });
