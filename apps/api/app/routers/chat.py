@@ -13,7 +13,7 @@ from app.db.models import (
     User,
 )
 from app.schemas.chat import ChannelOut, ChatUser, MessageCreate, MessageOut
-from app.services.chat import extract_repair_ref
+from app.services.chat import dm_slug, extract_repair_ref
 from app.ws.manager import manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -79,10 +79,6 @@ async def _repair_preview(db, number: str) -> dict | None:
     }
 
 
-def _dm_slug(a: uuid.UUID, b: uuid.UUID) -> str:
-    return "dm-" + "-".join(sorted([str(a), str(b)]))
-
-
 async def _channel_member_ids(db, channel_id) -> list[uuid.UUID]:
     row = await db.execute(
         select(ChatChannelMember.user_id).where(ChatChannelMember.channel_id == channel_id)
@@ -140,11 +136,11 @@ async def open_direct(db: DbSession, user: CurrentUser, user_id: uuid.UUID):
     if target is None or not target.active:
         raise HTTPException(404, "Сотрудник не найден")
 
-    slug = _dm_slug(user.id, user_id)
+    slug = dm_slug(user.id, user_id)
     row = await db.execute(select(ChatChannel).where(ChatChannel.slug == slug))
     channel = row.scalar_one_or_none()
     if channel is None:
-        channel = ChatChannel(slug=slug, name=f"{target.name} (личный)", kind="direct")
+        channel = ChatChannel(slug=slug, name="direct", kind="direct")
         db.add(channel)
         await db.flush()
         db.add_all(

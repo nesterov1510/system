@@ -1,4 +1,5 @@
 """Chat helpers: repair-number mention parsing + direct-channel helpers."""
+import hashlib
 import re
 import uuid
 
@@ -21,7 +22,13 @@ def extract_repair_ref(text: str) -> str | None:
 
 
 def dm_slug(a: uuid.UUID, b: uuid.UUID) -> str:
-    return "dm-" + "-".join(sorted([str(a), str(b)]))
+    """Детерминированный короткий slug личного чата двух пользователей.
+
+    Колонка chat_channels.slug — VARCHAR(64), поэтому slug из двух полных
+    uuid не помещается (77+ симв.). Берём md5 от отсортированных id — 32 hex.
+    """
+    raw = "|".join(sorted([str(a), str(b)]))
+    return "dm-" + hashlib.md5(raw.encode()).hexdigest()
 
 
 async def ensure_direct_channel(db, user_a_id: uuid.UUID, user_b_id: uuid.UUID):
