@@ -1,10 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { api, clearSession, getStoredUser, type User } from "@/lib/api";
+import {
+  api,
+  clearSession,
+  getStoredUser,
+  getToken,
+  type User,
+} from "@/lib/api";
 import { canView, isAdminRole } from "@/lib/catalog";
+import { subscribeChat, connectChat, disconnectChat } from "@/lib/chatSocket";
+import { playNotify, primeAudio } from "@/lib/sound";
 import MobileNav from "@/components/MobileNav";
 
 // role  -> какие страницы доступны. См. lib/catalog.ts (canView).
@@ -67,15 +75,55 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, [router]);
 
-  // Периодически спрашиваем количество непрочитанных в чате (для бейджа в меню).
+  const refreshUnread = useCallback(() => {
+    api
+      .chatUnreadTotal()
+      .then((r) => setChatUnread(r.total))
+      .catch(() => {});
+  }, []);
+
+  // Единый WebSocket на всё приложение: обновляем бейдж и звучим уведомлением,
+  // когда приходит сообщение (напр. о назначении мастера на ремонт).
   useEffect(() => {
-    if (!ready || !canView(user?.role, "/chat")) return;
-    const tick = () =>
-      api.chatUnreadTotal().then((r) => setChatUnread(r.total)).catch(() => {});
-    tick();
-    const t = setInterval(tick, 20000);
-    return () => clearInterval(t);
-  }, [ready, user]);
+    if (!ready || !user || !canView(user.role, "/chat")) return;
+    const token = getToken();
+    if (!token) return;
+    connectChat(token);
+    const unsub = subscribeChat((event) => {
+      if (event?.type !== "chat.message") return;
+      const authorId = event?.message?.author?.id;
+      const isMine = authorId && authorId === user.id;
+      if (isMine) return;
+      // Если это сообщение в канал, который сейчас открыт у пользователя —
+      // не звучим (он его уже видит), чат-страница сама помечает прочитанным.
+      const active = (window as unknown as { __msbActiveChat?: string }).__msbActiveChat;
+      const onScreen = active && active === event.channel_id;
+      if (!onScreen) {
+        playNotify();
+      }
+      // Лёгкая задержка — чтобы сервер успел записать сообщение.
+      setTimeout(refreshUnread, 400);
+    });
+    refreshUnread();
+    // Периодическая сверка как fallback.
+    const t = setInterval(refreshUnread, 15000);
+    // Слушаем ручное обновление от чат-страницы (после прочтения канала).
+    const onUnreadRefresh = () => refreshUnread();
+    window.addEventListener("msb:unread-refresh", onUnreadRefresh);
+    return () => {
+      unsub();
+      clearInterval(t);
+      window.removeEventListener("msb:unread-refresh", onUnreadRefresh);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, user?.id]);
+
+  // Разблокируем аудио после первого клика по странице.
+  useEffect(() => {
+    const onFirst = () => primeAudio();
+    window.addEventListener("pointerdown", onFirst, { once: true });
+    return () => window.removeEventListener("pointerdown", onFirst);
+  }, []);
 
   function isActive(href: string) {
     if (href === "/repairs" && pathname === "/repairs") return true;
@@ -183,7 +231,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
                         {item.href === "/chat" && chatUnread > 0 && (
-                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
                             {chatUnread > 99 ? "99+" : chatUnread}
                           </span>
                         )}
@@ -252,7 +300,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                         <span className="text-base leading-none">{item.icon}</span>
                         <span>{item.label}</span>
                         {item.href === "/chat" && chatUnread > 0 && (
-                          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
                             {chatUnread > 99 ? "99+" : chatUnread}
                           </span>
                         )}

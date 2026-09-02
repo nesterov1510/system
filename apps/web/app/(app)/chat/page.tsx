@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, getToken, getStoredUser, type Channel } from "@/lib/api";
+import { api, getStoredUser, type Channel } from "@/lib/api";
+import { subscribeChat } from "@/lib/chatSocket";
+import { playNotify } from "@/lib/sound";
 
 interface Message {
   id: string;
@@ -45,7 +47,6 @@ export default function ChatPage() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   const [unread, setUnread] = useState<Record<string, number>>({});
-  const wsRef = useRef<WebSocket | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadChannels = useCallback(async () => {
@@ -71,38 +72,47 @@ export default function ChatPage() {
     setUnread((prev) => (prev[channelId] ? { ...prev, [channelId]: 0 } : prev));
   }, []);
 
+  const me = getStoredUser();
+  const markReadAndRefresh = useCallback((channelId: string) => {
+    api
+      .markChannelRead(channelId)
+      .then(() => window.dispatchEvent(new Event("msb:unread-refresh")))
+      .catch(() => {});
+  }, []);
+
+  // Открыли канал — грузим историю, помечаем прочитанным, говорим layout сбросить бейдж.
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      (window as unknown as { __msbActiveChat?: string }).__msbActiveChat = "";
+      return;
+    }
+    (window as unknown as { __msbActiveChat?: string }).__msbActiveChat = active;
     api
       .messages(active)
       .then((m) => setMessages(m as unknown as Message[]))
-      .catch((e) => setError(e.message));
-  }, [active]);
+      .catch((e) => setError(e.message))
+      .finally(() => markReadAndRefresh(active));
+  }, [active, markReadAndRefresh]);
 
+  // Реалтайм через общий сокет (подключён в layout на всех страницах).
   useEffect(() => {
-    const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsBase =
-      process.env.NEXT_PUBLIC_WS_URL || `${scheme}://${window.location.host}`;
-    const token = getToken();
-    if (!token) return;
-    const ws = new WebSocket(`${wsBase}/ws?token=${encodeURIComponent(token)}`);
-    ws.onmessage = (ev) => {
-      try {
-        const event = JSON.parse(ev.data);
-        if (event.type === "chat.message") {
-          const cid = event.channel_id as string;
-          if (cid === active) {
-            setMessages((prev) => [...prev, event.message as Message]);
-          } else {
-            // Сообщение в неактивном канале — прибавляем непрочитанное.
-            setUnread((prev) => ({ ...prev, [cid]: (prev[cid] ?? 0) + 1 }));
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    wsRef.current = ws;
-    return () => ws.close();
-  }, [active]);
+    const unsub = subscribeChat((event) => {
+      if (event?.type !== "chat.message") return;
+      const cid = event.channel_id as string;
+      const msg = event.message as Message;
+      if (cid === active) {
+        setMessages((prev) =>
+          prev.some((m) => m.id === msg.id) ? prev : [...prev, msg],
+        );
+        if (active) markReadAndRefresh(active);
+      } else {
+        // Сообщение в неактивном канале — прибавляем непрочитанное + звук.
+        setUnread((prev) => ({ ...prev, [cid]: (prev[cid] ?? 0) + 1 }));
+        if (msg.author?.id && msg.author.id !== me?.id) playNotify();
+      }
+    });
+    return unsub;
+  }, [active, markReadAndRefresh, me?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -136,7 +146,6 @@ export default function ChatPage() {
     }
   }
 
-  const me = getStoredUser();
   const publicChannels = channels.filter((c) => c.kind !== "direct");
   const directChannels = channels.filter((c) => c.kind === "direct");
   const activeChannel = channels.find((c) => c.id === active) || null;

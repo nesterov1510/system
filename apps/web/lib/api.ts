@@ -313,6 +313,10 @@ export const api = {
     request<Channel>(`/api/chat/direct/${userId}`, { method: "POST" }),
   chatUnreadTotal: () =>
     request<{ total: number }>("/api/chat/unread-total"),
+  markChannelRead: (channelId: string) =>
+    request<{ ok: boolean }>(`/api/chat/channels/${channelId}/read`, {
+      method: "POST",
+    }),
   messages: (channelId: string) =>
     request<Array<Record<string, unknown>>>(
       `/api/chat/channels/${channelId}/messages`,

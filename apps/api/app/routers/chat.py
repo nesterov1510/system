@@ -218,6 +218,19 @@ async def list_channels(db: DbSession, user: CurrentUser):
     return out
 
 
+@router.post("/channels/{channel_id}/read")
+async def mark_read(
+    channel_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    """Пометить канал прочитанным для текущего пользователя."""
+    channel = await db.get(ChatChannel, channel_id)
+    if channel is None:
+        raise HTTPException(404, "Канал не найден")
+    await _mark_read(db, channel_id, user.id)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/channels/{channel_id}/messages", response_model=list[MessageOut])
 async def list_messages(
     channel_id: uuid.UUID,
