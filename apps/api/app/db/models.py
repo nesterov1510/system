@@ -91,6 +91,7 @@ class User(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    telegram: Mapped[str | None] = mapped_column(String(128), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(32), default=UserRole.OPERATOR.value)
     city_id: Mapped[uuid.UUID | None] = mapped_column(

@@ -2,16 +2,20 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
 from app.db.models import (
     Client,
     City,
+    Notification,
+    Payment,
+    PrintJob,
     Repair,
     RepairEvent,
     RepairMaster,
+    RepairPart,
     RepairPartOrder,
     RepairPhoto,
     User,
@@ -142,7 +146,7 @@ async def lookup_client(
     # Сначала ищем по нормализованному номеру
     row = await db.execute(
         select(Client)
-        .where(Client.phone_norm == phone_norm)
+        .where(Client.phone_norm == phone_norm, Client.deleted_at.is_(None))
         .options(selectinload(Client.repairs))
     )
     client = row.scalar_one_or_none()
@@ -159,7 +163,7 @@ async def lookup_client(
                 func.count(Repair.id).label("repairs_count"),
             )
             .outerjoin(Repair, Repair.client_id == Client.id)
-            .where(Client.phone.ilike(like))
+            .where(Client.phone.ilike(like), Client.deleted_at.is_(None))
             .group_by(Client.id, Client.full_name, Client.phone)
             .limit(5)
         )
@@ -229,6 +233,7 @@ async def list_clients(
         .group_by(Client.id, Client.full_name, Client.phone, Client.phone_norm)
         .order_by(func.count(Repair.id).desc(), Client.full_name)
     )
+    q_stmt = q_stmt.where(Client.deleted_at.is_(None))
     if q:
         like = f"%{q.strip()}%"
         q_stmt = q_stmt.where(
@@ -272,6 +277,54 @@ async def client_repairs(
     r = await db.execute(repairs_q)
     return [_serialize(x) for x in r.scalars().all()]
 
+
+
+def _require_admin(user) -> None:
+    if user.role != UserRole.ADMIN.value:
+        raise HTTPException(403, "Только администратор")
+
+
+@router.delete("/clients/{client_id}")
+async def delete_client(
+    client_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    """Удалить клиента (мягкое удаление) — только админ."""
+    _require_admin(user)
+    from app.db.base import utcnow
+
+    row = await db.execute(select(Client).where(Client.id == client_id))
+    client = row.scalar_one_or_none()
+    if client is None or client.deleted_at is not None:
+        raise HTTPException(404, "Клиент не найден")
+    client.deleted_at = utcnow()
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{repair_id}")
+async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    """Полное удаление ремонта со всеми зависимостями — только админ."""
+    _require_admin(user)
+    repair = await db.get(Repair, repair_id)
+    if repair is None:
+        raise HTTPException(404, "Ремонт не найден")
+    for model in (
+        Notification,
+        PrintJob,
+        Payment,
+        RepairPart,
+        RepairPartOrder,
+        RepairPhoto,
+        RepairMaster,
+        RepairEvent,
+    ):
+        await db.execute(
+            delete(model).where(model.repair_id == repair_id)
+        )
+    await db.delete(repair)
+    await db.commit()
+    await manager.broadcast({"type": "repair.deleted", "repair": {"id": str(repair_id)}})
+    return {"ok": True}
 
 
 @router.post("", response_model=RepairOut, status_code=201)

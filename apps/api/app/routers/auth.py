@@ -9,10 +9,17 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
     verify_password,
 )
 from app.db.models import User
-from app.schemas.auth import LoginRequest, MeResponse, RefreshRequest, TokenResponse
+from app.schemas.auth import (
+    LoginRequest,
+    MeResponse,
+    ProfileUpdate,
+    RefreshRequest,
+    TokenResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -56,4 +63,40 @@ async def refresh(payload: RefreshRequest, db: DbSession):
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: CurrentUser):
+    return user
+
+
+@router.patch("/me", response_model=MeResponse)
+async def update_me(payload: ProfileUpdate, db: DbSession, user: CurrentUser):
+    """Обновление собственного профиля: имя, телефон, telegram, email, пароль."""
+    data = payload.model_dump(exclude_unset=True)
+
+    # Смена пароля — только при верном текущем.
+    new_password = data.pop("new_password", None)
+    current_password = data.pop("current_password", None)
+    if new_password:
+        if not current_password or not verify_password(
+            current_password, user.password_hash
+        ):
+            raise HTTPException(status_code=400, detail="Текущий пароль неверный")
+        user.password_hash = hash_password(new_password)
+
+    # Email — с проверкой уникальности (кроме себя).
+    email = data.pop("email", None)
+    if email is not None:
+        email = email.strip().lower()
+        if email and email != user.email:
+            row = await db.execute(
+                select(User).where(User.email == email, User.id != user.id)
+            )
+            if row.scalar_one_or_none() is not None:
+                raise HTTPException(status_code=409, detail="Email уже занят")
+            user.email = email
+
+    for field in ("name", "phone", "telegram"):
+        if field in data:
+            setattr(user, field, data[field])
+
+    await db.commit()
+    await db.refresh(user)
     return user

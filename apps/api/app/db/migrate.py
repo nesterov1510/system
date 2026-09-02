@@ -18,6 +18,9 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "work_done": "TEXT",
         "warranty_text": "VARCHAR(64)",
     },
+    "users": {
+        "telegram": "VARCHAR(128)",
+    },
 }
 
 

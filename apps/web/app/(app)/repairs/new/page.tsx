@@ -97,13 +97,7 @@ export default function NewRepairPage() {
     setLookingUp(true);
     const t = setTimeout(() => {
       api.lookupClient(phone)
-        .then((r) => {
-          setExistingClient(r);
-          // Если нашли ровно одного — подставим имя, если оно пустое
-          if (r.found && !r.multiple && r.client && !clientName.trim()) {
-            setClientName(r.client.full_name);
-          }
-        })
+        .then((r) => setExistingClient(r))
         .catch(() => setExistingClient(null))
         .finally(() => setLookingUp(false));
     }, 400);
@@ -301,16 +295,21 @@ export default function NewRepairPage() {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold text-emerald-700">
-                        ✅ Клиент найден
+                        Похожий контакт найден
                       </p>
                       <p className="text-sm font-medium text-emerald-900">
-                        {existingClient.client.full_name}
+                        {existingClient.client.full_name} · {existingClient.client.phone}
                       </p>
                     </div>
                     <span className="msb-badge-success">
                       {existingClient.repairs_count || 0} ремонт(ов)
                     </span>
                   </div>
+                  <button type="button"
+                    onClick={() => setClientName(existingClient.client!.full_name)}
+                    className="mt-2.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 transition-colors">
+                    ✓ Заполнить имя из контакта
+                  </button>
                   {existingClient.repairs && existingClient.repairs.length > 0 && (
                     <div className="mt-3 space-y-1.5 max-h-40 overflow-y-auto custom-scroll">
                       {existingClient.repairs.slice(0, 5).map((r) => (

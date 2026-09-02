@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import {
   api,
   downloadPdfBase64,
+  getStoredUser,
   mediaUrl,
   money,
   type Lookup,
@@ -17,31 +18,33 @@ import {
   type RepairPart,
 } from "@/lib/api";
 
-const STATUSES = [
-  "Принято",
-  "Диагностика",
-  "Согласование",
-  "Ожидание запчастей",
-  "В ремонте",
-  "Готово к выдаче",
-  "Выдано",
-  "Не забрано",
-  "Архив",
-  "Отказ",
+// Статус ремонта в карточке — только 4 этапа (как и на доске).
+const STAGES = [
+  { status: "Принято", label: "Новый ремонт", color: "msb-badge-info" },
+  { status: "Диагностика", label: "Диагностика", color: "msb-badge-warning" },
+  { status: "В ремонте", label: "В ремонте", color: "msb-badge-cyan" },
+  { status: "Готово к выдаче", label: "Закончен", color: "msb-badge-success" },
 ];
-
-const STATUS_COLORS: Record<string, string> = {
-  Принято: "msb-badge-info",
-  Диагностика: "msb-badge-warning",
-  Согласование: "msb-badge-purple",
-  "Ожидание запчастей": "bg-orange-100 text-orange-700",
-  "В ремонте": "msb-badge-cyan",
-  "Готово к выдаче": "msb-badge-success",
-  Выдано: "msb-badge-gray",
-  "Не забрано": "bg-rose-100 text-rose-700",
-  Архив: "msb-badge-gray",
-  Отказ: "msb-badge-danger",
+// Из какого «этапа» текущий статус (чтобы показать выбранную колонку).
+const STAGE_OF: Record<string, string> = {
+  Принято: "Принято",
+  Диагностика: "Диагностика",
+  Согласование: "В ремонте",
+  "Ожидание запчастей": "В ремонте",
+  "В ремонте": "В ремонте",
+  "Готово к выдаче": "Готово к выдаче",
+  Выдано: "Готово к выдаче",
+  "Не забрано": "Готово к выдаче",
+  Архив: "Готово к выдаче",
+  Отказ: "Готово к выдаче",
 };
+function stageRep(status: string): string {
+  return STAGE_OF[status] ?? "Принято";
+}
+function stageMeta(status: string) {
+  const rep = stageRep(status);
+  return STAGES.find((s) => s.status === rep) ?? STAGES[0];
+}
 
 const EVENT_LABELS: Record<string, string> = {
   status_change: "изменение статуса",
@@ -121,6 +124,8 @@ export default function RepairCardPage() {
 
   useEffect(load, [load]);
 
+  const currentUser = getStoredUser();
+
   async function changeStatus(status: string) {
     setBusy(true);
     setError(null);
@@ -130,6 +135,20 @@ export default function RepairCardPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeThis() {
+    if (!repair) return;
+    if (!confirm(`Удалить ремонт ${repair.number} и все его данные? Это действие необратимо.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteRepair(id);
+      window.location.href = "/repairs";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка удаления");
       setBusy(false);
     }
   }
@@ -368,6 +387,12 @@ export default function RepairCardPage() {
             className="msb-btn-secondary">
             🖨️ Печать
           </button>
+          {currentUser?.role === "admin" && (
+            <button onClick={removeThis} disabled={busy}
+              className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition-colors hover:bg-red-100">
+              🗑 Удалить
+            </button>
+          )}
         </div>
       </div>
 
@@ -379,13 +404,13 @@ export default function RepairCardPage() {
               <p className="text-sm font-medium text-msb-200">Ремонт</p>
               <h1 className="font-mono text-2xl font-extrabold text-white">{repair.number}</h1>
             </div>
-            <select value={repair.status} onChange={(e) => changeStatus(e.target.value)}
+            <select
+              value={stageRep(repair.status)}
+              onChange={(e) => changeStatus(e.target.value)}
               disabled={busy}
-              className={`rounded-xl border-0 px-4 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-white/50 ${
-                STATUS_COLORS[repair.status] ?? "msb-badge-gray"
-              }`}>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>{s}</option>
+              className={`rounded-xl border-0 px-4 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-white/50 ${stageMeta(repair.status).color}`}>
+              {STAGES.map((s) => (
+                <option key={s.status} value={s.status}>{s.label}</option>
               ))}
             </select>
           </div>

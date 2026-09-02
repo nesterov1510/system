@@ -18,6 +18,7 @@ const NAV_ITEMS = [
       { href: "/callcenter", label: "Call-центр", icon: "📞" },
       { href: "/chat", label: "Чат", icon: "💬" },
       { href: "/dashboard", label: "Курс", icon: "📊" },
+      { href: "/profile", label: "Профиль", icon: "👤" },
     ],
   },
   {
@@ -117,7 +118,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* User area */}
           <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 sm:flex">
+            <Link href="/profile" title="Профиль"
+              className="hidden items-center gap-2 sm:flex">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
                 {user.name.charAt(0).toUpperCase()}
               </div>
@@ -125,7 +127,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <div className="text-sm font-medium text-slate-800">{user.name}</div>
                 <div className="text-xs text-slate-500">{user.email}</div>
               </div>
-            </div>
+            </Link>
             <span className={`hidden rounded-full px-2.5 py-0.5 text-xs font-semibold sm:inline-block ${STATUS_BADGES[user.role] ?? "bg-slate-100 text-slate-600"}`}>
               {ROLE_LABELS[user.role] ?? user.role}
             </span>

@@ -39,17 +39,17 @@ export function classIcon(raw?: string | null): string {
 // --- Права доступа по ролям.
 const ROLE_ALL = "all";
 
-const MAIN_NAV = ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat", "/dashboard"] as const;
+const MAIN_NAV = ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat", "/dashboard", "/profile"] as const;
 type Href = (typeof MAIN_NAV)[number] | string;
 
 const ROLE_SCOPES: Record<string, Href[] | "all"> = {
   admin: ROLE_ALL,
-  manager: ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat", "/dashboard"],
+  manager: ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat", "/dashboard", "/profile"],
   // Оператор — всё, кроме аналитики («Курс»/dashboard) и админ-разделов.
-  operator: ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat"],
-  // Мастер — приёмка, свои ремонты и его чаты.
-  master: ["/repairs", "/repairs/new", "/chat"],
-  callcenter: ["/repairs", "/clients", "/callcenter", "/chat"],
+  operator: ["/repairs", "/repairs/new", "/clients", "/callcenter", "/chat", "/profile"],
+  // Мастер — приёмка, свои ремонты, его чаты и свой профиль.
+  master: ["/repairs", "/repairs/new", "/chat", "/profile"],
+  callcenter: ["/repairs", "/clients", "/callcenter", "/chat", "/profile"],
 };
 
 export function canView(role?: string | null, href?: string): boolean {

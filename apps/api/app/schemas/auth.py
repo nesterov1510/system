@@ -21,3 +21,13 @@ class TokenResponse(BaseModel):
 
 class MeResponse(UserOut):
     pass
+
+
+class ProfileUpdate(BaseModel):
+    """Пользователь правит свой профиль: имя, телефон, email, telegram, пароль."""
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    phone: str | None = None
+    telegram: str | None = None
+    email: str | None = None
+    current_password: str | None = None
+    new_password: str | None = Field(default=None, min_length=6)

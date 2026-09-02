@@ -11,6 +11,7 @@ export interface User {
   name: string;
   email: string;
   phone?: string | null;
+  telegram?: string | null;
   role: string;
   city_id?: string | null;
   branch_id?: string | null;
@@ -290,6 +291,11 @@ export const api = {
       { method: "POST", body: JSON.stringify({ email, password }) },
     ),
   me: () => request<User>("/api/auth/me"),
+  updateMe: (payload: Record<string, unknown>) =>
+    request<User>("/api/auth/me", {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
 
   // Lookups (для формы приёмки — доступны всем ролям)
   cities: () => request<Lookup[]>("/api/lookups/cities"),
@@ -341,6 +347,10 @@ export const api = {
   },
   clientRepairs: (clientId: string) =>
     request<Repair[]>(`/api/repairs/clients/${clientId}/repairs`),
+  deleteClient: (clientId: string) =>
+    request<{ ok: boolean }>(`/api/repairs/clients/${clientId}`, {
+      method: "DELETE",
+    }),
   createRepair: (payload: Record<string, unknown>) =>
     request<Repair>("/api/repairs", {
       method: "POST",
@@ -352,6 +362,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+  deleteRepair: (id: string) =>
+    request<{ ok: boolean }>(`/api/repairs/${id}`, { method: "DELETE" }),
   comment: (id: string, message: string) =>
     request<Repair>(`/api/repairs/${id}/events`, {
       method: "POST",
