@@ -397,6 +397,18 @@ export const api = {
     }),
   deleteRepair: (id: string) =>
     request<{ ok: boolean }>(`/api/repairs/${id}`, { method: "DELETE" }),
+  // «Ремонт закончен»: переводит в «Готово к выдаче» + шаблон SMS клиенту.
+  finishRepair: (id: string) =>
+    request<{ repair: Repair; sms: { to: string; text: string } }>(
+      `/api/repairs/${id}/finish`,
+      { method: "POST" },
+    ),
+  // Отправить клиенту SMS (текст из модалки — по шаблону или свой).
+  sendFinishSms: (id: string, text: string) =>
+    request<{ ok: boolean; to: string }>(`/api/repairs/${id}/finish-sms`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
   comment: (id: string, message: string) =>
     request<Repair>(`/api/repairs/${id}/events`, {
       method: "POST",

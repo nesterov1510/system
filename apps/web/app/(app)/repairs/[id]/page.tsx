@@ -111,6 +111,10 @@ export default function RepairCardPage() {
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("info");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Модалка SMS клиенту при «Ремонт закончен».
+  const [smsModal, setSmsModal] = useState<{ to: string; text: string } | null>(null);
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsMsg, setSmsMsg] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.repair(id).then(setRepair).catch((e) => setError(e.message));
@@ -347,6 +351,43 @@ export default function RepairCardPage() {
     }
   }
 
+  // --- «Ремонт закончен» + SMS клиенту ---
+  async function openFinish() {
+    if (!repair) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.finishRepair(id);
+      setRepair(res.repair);
+      setSmsMsg(null);
+      setSmsModal({ to: res.sms.to, text: res.sms.text });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function closeSmsModal() {
+    setSmsModal(null);
+    setSmsMsg(null);
+  }
+
+  async function sendSmsNow() {
+    if (!smsModal) return;
+    setSmsSending(true);
+    setSmsMsg(null);
+    try {
+      await api.sendFinishSms(id, smsModal.text.trim());
+      setSmsMsg("SMS отправлено клиенту ✓");
+      setRepair(await api.repair(id));
+    } catch (e) {
+      setSmsMsg(`Не удалось отправить SMS: ${e instanceof Error ? e.message : "Ошибка"}`);
+    } finally {
+      setSmsSending(false);
+    }
+  }
+
   if (!repair) {
     return (
       <div className="flex items-center justify-center py-24 text-slate-400">
@@ -387,6 +428,13 @@ export default function RepairCardPage() {
             className="msb-btn-secondary">
             🖨️ Печать
           </button>
+          {(currentUser?.role === "admin" || currentUser?.role === "operator") &&
+            !["Выдано", "Не забрано", "Архив", "Отказ"].includes(repair.status) && (
+              <button onClick={openFinish} disabled={busy}
+                className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700">
+                ✅ Ремонт закончен
+              </button>
+            )}
           {currentUser?.role === "admin" && (
             <button onClick={removeThis} disabled={busy}
               className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition-colors hover:bg-red-100">
@@ -847,6 +895,57 @@ export default function RepairCardPage() {
           </div>
         )}
       </div>
+
+      {/* SMS-модалка «Ремонт закончен» */}
+      {smsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={closeSmsModal} />
+          <div className="relative w-full max-w-md msb-card-solid p-6 animate-slide-up">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="msb-section-title">✅ Ремонт закончен</h3>
+              <button onClick={closeSmsModal} className="text-slate-400 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-600">
+              Ремонт переведён в статус «Готово к выдаче». Отправить уведомление
+              клиенту по SMS? Текст можно изменить или пропустить.
+            </p>
+            <div className="mb-3 flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-2.5 text-sm text-slate-600 ring-1 ring-slate-100">
+              <span>📞</span>
+              <span className="font-medium">{smsModal.to}</span>
+            </div>
+            <label className="msb-label">Текст SMS</label>
+            <textarea
+              value={smsModal.text}
+              onChange={(e) => setSmsModal({ ...smsModal, text: e.target.value })}
+              rows={4}
+              className="msb-input resize-y mb-4"
+            />
+            {smsMsg && (
+              <div className={`mb-4 rounded-xl px-4 py-2.5 text-sm ring-1 ${
+                smsMsg.startsWith("Не удалось")
+                  ? "bg-red-50 text-red-600 ring-red-100"
+                  : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+              }`}>
+                {smsMsg}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button onClick={sendSmsNow} disabled={smsSending || !smsModal.text.trim()}
+                className="msb-btn-primary flex-1">
+                {smsSending ? "Отправка…" : "📤 Отправить SMS"}
+              </button>
+              <button onClick={closeSmsModal} disabled={smsSending}
+                className="msb-btn-secondary">
+                Без SMS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Print message */}
       {printMsg && (

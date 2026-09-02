@@ -2,6 +2,7 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +35,11 @@ from app.schemas.repair import (
 )
 from app.services.chat import send_assignment_notice
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
+from app.services.sms import (
+    build_ready_sms,
+    send_master_assignment_sms,
+    send_sms,
+)
 from app.services.settings import get_storage_months
 from app.services.storage import object_key_for, public_url, save_object
 from app.ws.manager import manager
@@ -424,7 +430,8 @@ async def create_repair(
 
     repair = await _get_repair_or_404(db, repair.id)
 
-    # Если оператор/админ при приёмке сразу назначил мастера — сообщим ему в личку.
+    # Если оператор/админ при приёмке сразу назначил мастера — сообщим ему в личку
+    # и отправим авто-SMS (если у мастера указан номер).
     if (
         master_id
         and _is_assigner(user)
@@ -432,6 +439,7 @@ async def create_repair(
         and repair.master.id != user.id
     ):
         await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
+        await send_master_assignment_sms(repair.master, repair)
 
     # Notify the chat: new acceptance.
     await manager.broadcast(
@@ -684,7 +692,7 @@ async def update_repair(
     db.expire(repair)  # после expire нельзя трогать repair.* — берём id из пути
     repair = await _get_repair_or_404(db, repair_id)
 
-    # Уведомляем в личку мастеров, назначенных в этом запросе.
+    # Уведомляем в личку + авто-SMS мастерам, назначенным в этом запросе.
     if newly_assigned_ids and _is_assigner(user):
         rows = await db.execute(select(User).where(User.id.in_(newly_assigned_ids)))
         for master in rows.scalars().all():
@@ -692,6 +700,7 @@ async def update_repair(
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
+                await send_master_assignment_sms(master, repair)
 
     if payload.status and payload.status != old_status:
         await manager.broadcast(
@@ -701,6 +710,94 @@ async def update_repair(
             }
         )
     return _serialize(repair)
+
+
+# Кнопка «Ремонт закончен» доступна админу и оператору.
+_FINISH_ROLES = (UserRole.ADMIN.value, UserRole.OPERATOR.value)
+# Статусы, «после» готовности — назад в «Готово к выдаче» не переводим.
+_FINISH_TERMINAL = {"Выдано", "Не забрано", "Архив", "Отказ"}
+
+
+def _require_finisher(user) -> None:
+    if user.role not in _FINISH_ROLES:
+        raise HTTPException(403, "Только админ или оператор")
+
+
+class ReadySmsSend(BaseModel):
+    text: str = Field(min_length=1, max_length=480)
+
+
+@router.post("/{repair_id}/finish")
+async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    """«Ремонт закончен»: переводит в «Готово к выдаче» и возвращает шаблон SMS клиенту.
+
+    Отправка SMS — по желанию (следующим запросом /finish-sms или пропустить).
+    """
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+    _require_finisher(user)
+
+    from app.db.base import utcnow
+
+    old_status = repair.status
+    if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
+        repair.status = "Готово к выдаче"
+        repair.ready_at = utcnow()
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="status_change",
+                actor_id=user.id,
+                data={"from": old_status, "to": "Готово к выдаче"},
+            )
+        )
+        await db.commit()
+        db.expire(repair)
+        repair = await _get_repair_or_404(db, repair_id)
+        await manager.broadcast(
+            {
+                "type": "repair.status_changed",
+                "repair": {"number": repair.number, "status": "Готово к выдаче"},
+            }
+        )
+
+    text = build_ready_sms(repair)
+    return {
+        "repair": _serialize(repair),
+        "sms": {"to": repair.client.phone, "text": text},
+    }
+
+
+@router.post("/{repair_id}/finish-sms")
+async def finish_repair_send_sms(
+    repair_id: uuid.UUID,
+    payload: ReadySmsSend,
+    db: DbSession,
+    user: CurrentUser,
+):
+    """Отправить клиенту SMS (текст по шаблону или свой) о готовности ремонта."""
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+    _require_finisher(user)
+
+    result = await send_sms(repair.client.phone, payload.text)
+    if not result.get("ok"):
+        raise HTTPException(
+            502, f"Не удалось отправить SMS: {result.get('detail', 'ошибка шлюза')}"
+        )
+
+    repair.events.append(
+        RepairEvent(
+            repair_id=repair.id,
+            type="notify",
+            actor_id=user.id,
+            data={"message": "Клиенту отправлено SMS о готовности ремонта"},
+        )
+    )
+    await db.commit()
+    return {"ok": True, "to": repair.client.phone}
 
 
 @router.post("/{repair_id}/events", response_model=RepairOut)
