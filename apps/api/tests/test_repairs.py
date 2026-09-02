@@ -112,3 +112,67 @@ def test_update_status_timeline(client, admin_headers, created_repair):
     assert r.json()["status"] == "Диагностика"
     types = [e["type"] for e in r.json()["events"]]
     assert "status_change" in types
+
+
+def test_master_board_only_assigned(
+    client, admin_headers, operator_headers, city_id
+):
+    """Мастер на странице «Все ремонты» видит ТОЛЬКО ремонты, назначенные ему."""
+    # Два мастера.
+    m1 = client.post(
+        "/api/admin/users", headers=admin_headers,
+        json={"name": "Мастер У", "email": "mu@msb.local",
+              "password": "pass123", "role": "master"},
+    ).json()
+    m2 = client.post(
+        "/api/admin/users", headers=admin_headers,
+        json={"name": "Мастер Д", "email": "md@msb.local",
+              "password": "pass123", "role": "master"},
+    ).json()
+    h1 = {"Authorization": "Bearer " + client.post(
+        "/api/auth/login", json={"email": "mu@msb.local", "password": "pass123"}
+    ).json()["access_token"]}
+    h2 = {"Authorization": "Bearer " + client.post(
+        "/api/auth/login", json={"email": "md@msb.local", "password": "pass123"}
+    ).json()["access_token"]}
+
+    def mk(i):
+        return client.post(
+            "/api/repairs",
+            headers={**operator_headers, "Idempotency-Key": f"master-board-{i}"},
+            json={
+                "city_id": city_id,
+                "client": {"full_name": f"Клиент {i}",
+                           "phone": f"+79970{i:06d}0", "consent_pdn": True},
+                "device_type": "Телевизоры",
+                "brand": "Samsung",
+            },
+        ).json()
+
+    # 3 ремонта: первые 2 назначены МастерУ, третий — Мастеру Д.
+    r1 = mk(1); client.patch(f"/api/repairs/{r1['id']}", headers=operator_headers,
+                             json={"master_ids": [m1["id"]]})
+    r2 = mk(2); client.patch(f"/api/repairs/{r2['id']}", headers=operator_headers,
+                             json={"master_ids": [m1["id"]]})
+    r3 = mk(3); client.patch(f"/api/repairs/{r3['id']}", headers=operator_headers,
+                             json={"master_ids": [m2["id"]]})
+
+    ids1 = {x["id"] for x in client.get(
+        "/api/repairs", headers=h1, params={"stage": "all", "page_size": 50}
+    ).json()["items"]}
+    assert ids1 == {r1["id"], r2["id"]}, f"Мастер У видит лишнее: {ids1}"
+
+    ids2 = {x["id"] for x in client.get(
+        "/api/repairs", headers=h2, params={"stage": "all", "page_size": 50}
+    ).json()["items"]}
+    assert ids2 == {r3["id"]}, f"Мастер Д видит лишнее: {ids2}"
+
+    # Счётчики по этапам у мастера тоже только по его ремонтам.
+    sc1 = client.get("/api/repairs/stage-counts", headers=h1).json()
+    assert sc1["all"] == 2
+    sc2 = client.get("/api/repairs/stage-counts", headers=h2).json()
+    assert sc2["all"] == 1
+
+    # Чужой ремонт открыть напрямую мастер не может.
+    assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 403
+    assert client.get(f"/api/repairs/{r1['id']}", headers=h2).status_code == 403
