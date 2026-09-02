@@ -73,10 +73,31 @@ def test_master_sees_only_own_repairs(client, master_headers, created_repair):
     # created_repair без мастера -> мастер не должен его видеть.
     own = client.get("/api/repairs", headers=master_headers)
     assert own.status_code == 200
-    assert all(x["id"] != created_repair["id"] for x in own.json())
+    assert all(x["id"] != created_repair["id"] for x in own.json()["items"])
 
     get = client.get(f"/api/repairs/{created_repair['id']}", headers=master_headers)
     assert get.status_code == 403
+
+
+def test_repairs_list_paginated_with_stage(client, admin_headers, created_repair):
+    r = client.get(
+        "/api/repairs", headers=admin_headers,
+        params={"stage": "new", "page": 1, "page_size": 5},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] >= 1
+    assert body["page"] == 1
+    assert body["page_size"] == 5
+    assert body["items"], "ожидали как минимум один ремонт в «new»"
+    assert all(x["status"] == "Принято" for x in body["items"])
+    assert any(x["id"] == created_repair["id"] for x in body["items"])
+
+    done = client.get(
+        "/api/repairs", headers=admin_headers, params={"stage": "done"}
+    ).json()
+    # created_repair в статусе «Принято» в «done» попадать не должен.
+    assert all(x["id"] != created_repair["id"] for x in done["items"])
 
 
 def test_price_search_and_hint(client, admin_headers):

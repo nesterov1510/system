@@ -5,8 +5,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
-from app.db.models import ChatChannel, ChatMessage, Repair
-from app.schemas.chat import ChannelOut, MessageCreate, MessageOut
+from app.db.models import (
+    ChatChannel,
+    ChatChannelMember,
+    ChatMessage,
+    Repair,
+    User,
+)
+from app.schemas.chat import ChannelOut, ChatUser, MessageCreate, MessageOut
 from app.services.chat import extract_repair_ref
 from app.ws.manager import manager
 
@@ -36,11 +42,114 @@ async def _repair_preview(db, number: str) -> dict | None:
     }
 
 
+def _dm_slug(a: uuid.UUID, b: uuid.UUID) -> str:
+    return "dm-" + "-".join(sorted([str(a), str(b)]))
+
+
+async def _channel_member_ids(db, channel_id) -> list[uuid.UUID]:
+    row = await db.execute(
+        select(ChatChannelMember.user_id).where(ChatChannelMember.channel_id == channel_id)
+    )
+    return list(row.scalars().all())
+
+
+async def _require_access(db, user, channel: ChatChannel) -> None:
+    """Публичный канал открыт всем; в direct — только участники."""
+    if channel.kind == "direct":
+        ids = await _channel_member_ids(db, channel.id)
+        if user.id not in ids:
+            raise HTTPException(403, "Нет доступа к этому чату")
+
+
+@router.get("/users", response_model=list[ChatUser])
+async def list_users(db: DbSession, user: CurrentUser):
+    """Активные сотрудники (для личной переписки), кроме текущего."""
+    row = await db.execute(
+        select(User)
+        .where(User.active.is_(True), User.id != user.id)
+        .order_by(User.name)
+    )
+    return [
+        ChatUser(id=u.id, name=u.name, role=u.role) for u in row.scalars().all()
+    ]
+
+
+@router.post("/direct/{user_id}", response_model=ChannelOut)
+async def open_direct(db: DbSession, user: CurrentUser, user_id: uuid.UUID):
+    """Найти или создать личный чат с сотрудником."""
+    if user_id == user.id:
+        raise HTTPException(400, "Нельзя писать самому себе")
+    target = await db.get(User, user_id)
+    if target is None or not target.active:
+        raise HTTPException(404, "Сотрудник не найден")
+
+    slug = _dm_slug(user.id, user_id)
+    row = await db.execute(select(ChatChannel).where(ChatChannel.slug == slug))
+    channel = row.scalar_one_or_none()
+    if channel is None:
+        channel = ChatChannel(slug=slug, name=f"{target.name} (личный)", kind="direct")
+        db.add(channel)
+        await db.flush()
+        db.add_all(
+            [
+                ChatChannelMember(channel_id=channel.id, user_id=user.id),
+                ChatChannelMember(channel_id=channel.id, user_id=user_id),
+            ]
+        )
+        await db.commit()
+    return ChannelOut(
+        id=channel.id,
+        slug=channel.slug,
+        name=channel.name,
+        kind="direct",
+        peer=ChatUser(id=target.id, name=target.name, role=target.role),
+    )
+
+
 @router.get("/channels", response_model=list[ChannelOut])
 async def list_channels(db: DbSession, user: CurrentUser):
-    # MVP: public channels are open to everyone; members table is seeded.
-    row = await db.execute(select(ChatChannel).order_by(ChatChannel.name))
-    return row.scalars().all()
+    """Каналы, доступные пользователю: публичные + его личные чаты."""
+    out: list[ChannelOut] = []
+
+    pub = await db.execute(
+        select(ChatChannel)
+        .where(ChatChannel.kind == "public")
+        .order_by(ChatChannel.name)
+    )
+    for c in pub.scalars().all():
+        out.append(
+            ChannelOut(id=c.id, slug=c.slug, name=c.name, kind=c.kind, peer=None)
+        )
+
+    mine = await db.execute(
+        select(ChatChannelMember.channel_id).where(ChatChannelMember.user_id == user.id)
+    )
+    my_ids = list(mine.scalars().all())
+    if my_ids:
+        direct = await db.execute(
+            select(ChatChannel)
+            .where(ChatChannel.id.in_(my_ids), ChatChannel.kind == "direct")
+            .order_by(ChatChannel.created_at.desc())
+        )
+        for c in direct.scalars().all():
+            ids = await _channel_member_ids(db, c.id)
+            peer_ids = [x for x in ids if x != user.id]
+            peer = None
+            if peer_ids:
+                urow = await db.execute(select(User).where(User.id == peer_ids[0]))
+                u = urow.scalar_one_or_none()
+                if u is not None:
+                    peer = ChatUser(id=u.id, name=u.name, role=u.role)
+            out.append(
+                ChannelOut(
+                    id=c.id,
+                    slug=c.slug,
+                    name=peer.name if peer else c.name,
+                    kind=c.kind,
+                    peer=peer,
+                )
+            )
+    return out
 
 
 @router.get("/channels/{channel_id}/messages", response_model=list[MessageOut])
@@ -54,6 +163,7 @@ async def list_messages(
     channel = await db.get(ChatChannel, channel_id)
     if channel is None:
         raise HTTPException(404, "Канал не найден")
+    await _require_access(db, user, channel)
 
     q = (
         select(ChatMessage)
@@ -93,6 +203,7 @@ async def create_message(
     channel = await db.get(ChatChannel, channel_id)
     if channel is None:
         raise HTTPException(404, "Канал не найден")
+    await _require_access(db, user, channel)
 
     # Auto-detect repair mention if not explicitly provided.
     repair_ref = payload.repair_ref or extract_repair_ref(payload.text)
@@ -119,12 +230,15 @@ async def create_message(
         repair_preview=preview,
     )
 
-    # Realtime fan-out to the channel.
-    await manager.broadcast(
-        {
-            "type": "chat.message",
-            "channel_id": str(channel_id),
-            "message": out.model_dump(mode="json"),
-        }
-    )
+    event = {
+        "type": "chat.message",
+        "channel_id": str(channel_id),
+        "message": out.model_dump(mode="json"),
+    }
+    # В публичный канал — всем; в direct — только участникам диалога.
+    if channel.kind == "direct":
+        ids = await _channel_member_ids(db, channel.id)
+        await manager.send_to_users(ids, event)
+    else:
+        await manager.broadcast(event)
     return out

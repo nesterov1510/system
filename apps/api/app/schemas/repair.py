@@ -164,3 +164,12 @@ class PublicRepairOut(BaseModel):
     branch_name: str | None = None
     branch_phone: str | None = None
     city_stats: dict | None = None
+
+
+class RepairsPage(BaseModel):
+    """Пейджированный список ремонтов для страницы «Все ремонты»."""
+
+    items: list[RepairOut] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 20

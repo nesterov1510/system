@@ -23,6 +23,7 @@ export interface Channel {
   slug: string;
   name: string;
   kind: string;
+  peer?: { id: string; name: string; role: string } | null;
 }
 
 export interface Lookup {
@@ -305,6 +306,10 @@ export const api = {
 
   // Chat
   channels: () => request<Channel[]>("/api/chat/channels"),
+  chatUsers: () =>
+    request<Array<{ id: string; name: string; role: string }>>("/api/chat/users"),
+  openDirect: (userId: string) =>
+    request<Channel>(`/api/chat/direct/${userId}`, { method: "POST" }),
   messages: (channelId: string) =>
     request<Array<Record<string, unknown>>>(
       `/api/chat/channels/${channelId}/messages`,
@@ -315,8 +320,25 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
 
-  // Repairs
-  repairs: () => request<Repair[]>("/api/repairs"),
+  // Repairs — пейджированный список для страницы «Все ремонты»
+  repairs: (params: {
+    stage?: string;
+    q?: string;
+    page?: number;
+    page_size?: number;
+    master_id?: string;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.stage) qs.set("stage", params.stage);
+    if (params.q) qs.set("q", params.q);
+    if (params.page) qs.set("page", String(params.page));
+    if (params.page_size) qs.set("page_size", String(params.page_size));
+    if (params.master_id) qs.set("master_id", params.master_id);
+    const s = qs.toString();
+    return request<{ items: Repair[]; total: number; page: number; page_size: number }>(
+      `/api/repairs${s ? `?${s}` : ""}`,
+    );
+  },
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
   byNumber: (number: string) =>
     request<Repair>(`/api/repairs/by-number/${encodeURIComponent(number)}`),

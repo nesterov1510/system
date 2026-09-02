@@ -40,7 +40,7 @@ def test_public_page_not_found(client):
 def test_master_scoped_to_own(client, master_headers, created_repair):
     r = client.get("/api/repairs", headers=master_headers)
     assert r.status_code == 200
-    numbers = {x["number"] for x in r.json()}
+    numbers = {x["number"] for x in r.json()["items"]}
     # The operator-created repair has no master assigned, so master shouldn't see it.
     assert created_repair["number"] not in numbers
 

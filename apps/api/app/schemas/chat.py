@@ -4,6 +4,12 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ChatUser(BaseModel):
+    id: uuid.UUID
+    name: str
+    role: str
+
+
 class ChannelOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -11,6 +17,8 @@ class ChannelOut(BaseModel):
     slug: str
     name: str
     kind: str = "public"
+    # Для личного (direct) канала — собеседник текущего пользователя.
+    peer: ChatUser | None = None
 
 
 class MessageAuthor(BaseModel):

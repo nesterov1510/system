@@ -2,7 +2,7 @@ import uuid
 from datetime import timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
@@ -30,6 +30,7 @@ from app.schemas.repair import (
     RepairEventOut,
     RepairOut,
     RepairUpdate,
+    RepairsPage,
 )
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.settings import get_storage_months
@@ -423,41 +424,72 @@ async def create_repair(
     return _serialize(repair)
 
 
-@router.get("", response_model=list[RepairOut])
+# Группы-этапы для страницы «Все ремонты» (вкладки).
+STAGE_STATUSES: dict[str, list[str]] = {
+    "new": ["Принято"],
+    "diag": ["Диагностика"],
+    "work": ["Согласование", "Ожидание запчастей", "В ремонте"],
+    "done": ["Готово к выдаче", "Выдано", "Не забрано", "Архив", "Отказ"],
+}
+
+
+@router.get("", response_model=RepairsPage)
 async def list_repairs(
     db: DbSession,
     user: CurrentUser,
+    stage: str | None = Query(
+        None, pattern="^(new|diag|work|done|all)$", description="Фильтр по этапу"
+    ),
     status: str | None = None,
     master_id: uuid.UUID | None = None,
     q: str | None = None,
-    limit: int = Query(50, le=200),
-    offset: int = 0,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
 ):
+    from sqlalchemy import or_
+
+    filters = []
+    if stage and stage != "all" and stage in STAGE_STATUSES:
+        filters.append(Repair.status.in_(STAGE_STATUSES[stage]))
+    if status:
+        filters.append(Repair.status == status)
+    if master_id:
+        filters.append(Repair.master_id == master_id)
+    if q:
+        like = f"%{q.strip()}%"
+        filters.append(
+            or_(
+                Repair.client.has(Client.phone.ilike(like)),
+                Repair.client.has(Client.full_name.ilike(like)),
+                Repair.brand.ilike(like),
+                Repair.model.ilike(like),
+            )
+        )
+    # Мастера видят только свои ремонты (назначен напрямую или через список).
+    if user.role == UserRole.MASTER.value:
+        filters.append(_master_scope(user.id))
+
+    base = select(Repair).where(*filters)
+
+    total_row = await db.execute(
+        select(func.count()).select_from(base.subquery())
+    )
+    total = total_row.scalar() or 0
+
     q_stmt = (
-        select(Repair)
-        .options(
+        base.options(
             selectinload(Repair.client),
             selectinload(Repair.master),
             selectinload(Repair.events),
             selectinload(Repair.masters).selectinload(RepairMaster.user),
         )
         .order_by(Repair.accepted_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
-    if status:
-        q_stmt = q_stmt.where(Repair.status == status)
-    if master_id:
-        q_stmt = q_stmt.where(Repair.master_id == master_id)
-    if q:
-        like = f"%{q}%"
-        q_stmt = q_stmt.where(
-            (Repair.number.ilike(like)) | (Repair.client.has(Client.phone.ilike(like)))
-        )
-    # Masters are scoped to their own repairs (direct or via repair_masters).
-    if user.role == UserRole.MASTER.value:
-        q_stmt = q_stmt.where(_master_scope(user.id))
-    q_stmt = q_stmt.limit(limit).offset(offset)
     row = await db.execute(q_stmt)
-    return [_serialize(r) for r in row.scalars().all()]
+    items = [_serialize(r) for r in row.scalars().all()]
+    return RepairsPage(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/by-number/{number}", response_model=RepairOut)
