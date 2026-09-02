@@ -45,6 +45,14 @@ def _can_access(user, repair: Repair) -> bool:
     return True
 
 
+def _master_scope(user_id) -> "object":
+    """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters."""
+    from sqlalchemy import or_, select as _select
+
+    subq = _select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
+    return or_(Repair.master_id == user_id, Repair.id.in_(subq))
+
+
 def _serialize(repair: Repair) -> RepairOut:
     events = [
         RepairEventOut(
@@ -260,7 +268,7 @@ async def client_repairs(
         .order_by(Repair.accepted_at.desc())
     )
     if user.role == UserRole.MASTER.value:
-        repairs_q = repairs_q.where(Repair.master_id == user.id)
+        repairs_q = repairs_q.where(_master_scope(user.id))
     r = await db.execute(repairs_q)
     return [_serialize(x) for x in r.scalars().all()]
 
@@ -391,9 +399,9 @@ async def list_repairs(
         q_stmt = q_stmt.where(
             (Repair.number.ilike(like)) | (Repair.client.has(Client.phone.ilike(like)))
         )
-    # Masters are scoped to their own repairs (unless explicitly overridden by admin).
+    # Masters are scoped to their own repairs (direct or via repair_masters).
     if user.role == UserRole.MASTER.value:
-        q_stmt = q_stmt.where(Repair.master_id == user.id)
+        q_stmt = q_stmt.where(_master_scope(user.id))
     q_stmt = q_stmt.limit(limit).offset(offset)
     row = await db.execute(q_stmt)
     return [_serialize(r) for r in row.scalars().all()]

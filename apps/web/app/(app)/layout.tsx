@@ -4,13 +4,15 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { clearSession, getStoredUser, type User } from "@/lib/api";
+import { canView, isAdminRole } from "@/lib/catalog";
 import MobileNav from "@/components/MobileNav";
 
+// role  -> какие страницы доступны. См. lib/catalog.ts (canView).
 const NAV_ITEMS = [
   {
     group: "Основное",
     items: [
-      { href: "/repairs", label: "Доска", icon: "📋" },
+      { href: "/repairs", label: "Все ремонты", icon: "📋" },
       { href: "/repairs/new", label: "Приёмка", icon: "➕" },
       { href: "/clients", label: "Клиенты", icon: "👥" },
       { href: "/callcenter", label: "Call-центр", icon: "📞" },
@@ -155,7 +157,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -218,7 +220,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}

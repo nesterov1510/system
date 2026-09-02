@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { getStoredUser } from "@/lib/api";
+import { canView } from "@/lib/catalog";
 
 const ITEMS = [
-  { href: "/repairs", label: "Ремонты", icon: "📋" },
+  { href: "/repairs", label: "Все ремонты", icon: "📋" },
   { href: "/repairs/new", label: "Приёмка", icon: "➕" },
   { href: "/clients", label: "Клиенты", icon: "👥" },
   { href: "/chat", label: "Чат", icon: "💬" },
@@ -12,9 +14,12 @@ const ITEMS = [
 
 export default function MobileNav() {
   const pathname = usePathname();
+  const user = getStoredUser();
   const active = (href: string) => href === "/repairs"
     ? pathname === "/repairs"
     : pathname.startsWith(href);
+
+  const visible = ITEMS.filter((i) => canView(user?.role, i.href));
 
   return (
     <nav
@@ -22,7 +27,7 @@ export default function MobileNav() {
       aria-label="Основная навигация"
     >
       <div className="grid grid-cols-4 px-1 py-1">
-        {ITEMS.map((item) => (
+        {visible.map((item) => (
           <Link
             key={item.href}
             href={item.href}

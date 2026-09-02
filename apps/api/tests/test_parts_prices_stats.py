@@ -47,6 +47,38 @@ def test_operator_cannot_edit_parts(client, operator_headers):
     assert r.status_code == 403
 
 
+def test_analytics_closed_to_operator_and_master(
+    client, operator_headers, master_headers
+):
+    # Аналитика (статистика и AI-прогнозы) — только админ/менеджер.
+    for h in (operator_headers, master_headers):
+        r = client.get("/api/stats/overview", headers=h)
+        assert r.status_code == 403
+        r2 = client.post(
+            "/api/ai/predict-eta", headers=h,
+            json={"device_type": "Телевизоры", "brand": "Samsung"},
+        )
+        assert r2.status_code == 403
+
+
+def test_operator_sees_work_pages(client, operator_headers):
+    # Оператор — всё, кроме аналитики: очередь call-центра и список ремонтов.
+    r = client.get("/api/callcenter/queue", headers=operator_headers)
+    assert r.status_code == 200
+    r2 = client.get("/api/repairs", headers=operator_headers)
+    assert r2.status_code == 200
+
+
+def test_master_sees_only_own_repairs(client, master_headers, created_repair):
+    # created_repair без мастера -> мастер не должен его видеть.
+    own = client.get("/api/repairs", headers=master_headers)
+    assert own.status_code == 200
+    assert all(x["id"] != created_repair["id"] for x in own.json())
+
+    get = client.get(f"/api/repairs/{created_repair['id']}", headers=master_headers)
+    assert get.status_code == 403
+
+
 def test_price_search_and_hint(client, admin_headers):
     r = client.get("/api/prices", headers=admin_headers, params={"type": "ТВ", "brand": "Samsung"})
     assert r.status_code == 200
