@@ -50,6 +50,10 @@ docs/              kickoff-документ (ТЗ, ER, API, wireframes)
 > 🚀 **Запуск без Docker** — подробная пошаговая инструкция в файле
 > [`RUN_LOCAL.md`](RUN_LOCAL.md) (backend на `localhost:8085` + frontend на
 > `localhost:3030`, SQLite, ничего настраивать не нужно).
+>
+> 🖥️ **Production на `192.168.8.81`** — полная инструкция для каталога
+> `/home/windowrepair-ae/msb`, systemd, PostgreSQL и портов `3030`/`8085`:
+> [`DEPLOY.md`](DEPLOY.md).
 
 ### 1. Docker Compose (prod-подобный путь)
 

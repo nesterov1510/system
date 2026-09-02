@@ -107,7 +107,10 @@ if [ "$DO_WEB" = 1 ]; then
 
   # Чистая сборка: остатки прошлой сборки — частая причина 500 после замены файлов.
   rm -rf .next
-  run_as_owner npm run build || die "СБОРКА УПАЛА — ошибка выше, сайт остался на старой версии"
+  # Для native/systemd deployment браузер всегда использует same-origin.
+  # Пустые NEXT_PUBLIC_* не дают случайно зашить localhost/IP в JS-бандл.
+  run_as_owner env NEXT_PUBLIC_API_URL= NEXT_PUBLIC_WS_URL= npm run build \
+    || die "СБОРКА УПАЛА — Web не перезапущен; исправьте ошибку и повторите обновление"
   ok "next build выполнен"
 
   [ -d .next/standalone ] || die ".next/standalone не создан (проверьте output:'standalone' в next.config.mjs)"

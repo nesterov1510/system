@@ -1,36 +1,34 @@
 # /etc/systemd/system/msb-api.service
-# Systemd unit для FastAPI (бэкенд).
-# Расположение: /home/windowrepair-ae/msb/apps/api
-#
-# Установка:
-#   sudo cp deploy/msb-api.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now msb-api
+# MSB FastAPI backend: /home/windowrepair-ae/msb, port 8085.
+# Installation is documented in DEPLOY.md.
 
 [Unit]
 Description=MSB API (FastAPI backend)
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
 
 [Service]
 Type=simple
 User=windowrepair-ae
 Group=windowrepair-ae
 WorkingDirectory=/home/windowrepair-ae/msb/apps/api
-
-# Путь к .env в корне проекта (/home/windowrepair-ae/msb/.env)
 EnvironmentFile=/home/windowrepair-ae/msb/.env
+Environment=PYTHONUNBUFFERED=1
 
+# Один worker выбран намеренно: при lifespan приложение создаёт/обновляет схему
+# и выполняет seed. Несколько workers могут конкурировать при первом старте.
 ExecStart=/home/windowrepair-ae/msb/apps/api/.venv/bin/uvicorn app.main:app \
     --host 0.0.0.0 \
     --port 8085 \
-    --workers 2 \
+    --workers 1 \
     --log-level info
 
-Restart=always
+Restart=on-failure
 RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=30
+UMask=0027
 
-# Безопасность
 NoNewPrivileges=true
 ProtectHome=false
 ProtectSystem=full
