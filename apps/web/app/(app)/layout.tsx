@@ -64,6 +64,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Десктопная боковая панель по умолчанию свёрнута до узкой полосы с
+  // иконками — освобождает место под контент. Разворачивается по клику на
+  // стрелку и остаётся развёрнутой, пока пользователь сам её не свернёт.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatUnread, setChatUnread] = useState(0);
   // Внутренние уведомления админам (напр. эскалация ошибки печати — item 4).
   const [notifOpen, setNotifOpen] = useState(false);
@@ -194,8 +198,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
       {/* Desktop Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 lg:px-8">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 lg:px-6">
+          <div className="flex items-center gap-2 lg:gap-4">
             {/* Mobile menu toggle */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -208,6 +212,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 ) : (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 )}
+              </svg>
+            </button>
+
+            {/* Desktop sidebar collapse/expand toggle */}
+            <button
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="hidden lg:inline-flex msb-btn-ghost p-2 text-slate-500 hover:text-slate-700"
+              aria-label={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
+              title={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
 
@@ -296,36 +312,56 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex min-w-0 max-w-7xl">
-        {/* Desktop Sidebar */}
-        <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64">
-          <nav className="sticky top-16 space-y-6 overflow-y-auto px-4 py-6 lg:px-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
+      <div className="mx-auto flex min-w-0 max-w-[1600px]">
+        {/* Desktop Sidebar — по умолчанию свёрнута до узкой полосы с иконками,
+            разворачивается по кнопке в шапке (см. sidebarCollapsed). */}
+        <aside
+          className={`hidden shrink-0 border-r border-slate-200/70 transition-[width] duration-200 lg:block ${
+            sidebarCollapsed ? "lg:w-[68px]" : "lg:w-56 xl:w-64"
+          }`}
+        >
+          <nav
+            className={`sticky top-16 space-y-6 overflow-y-auto overflow-x-hidden py-6 ${
+              sidebarCollapsed ? "px-2" : "px-4 lg:px-6"
+            }`}
+            style={{ maxHeight: "calc(100vh - 4rem)" }}
+          >
             {NAV_ITEMS.map((group) => {
               if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
               return (
                 <div key={group.group}>
-                  <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                    {group.group}
-                  </div>
+                  {!sidebarCollapsed && (
+                    <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
+                      {group.group}
+                    </div>
+                  )}
                   <div className="space-y-0.5">
                     {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                        title={sidebarCollapsed ? item.label : undefined}
+                        className={`flex items-center rounded-xl text-sm font-medium transition-all duration-200 ${
+                          sidebarCollapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5"
+                        } ${
                           isActive(item.href)
                             ? "bg-gradient-to-r from-msb-50 to-msb-100/50 text-msb-700 shadow-sm"
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
                         }`}
                       >
-                        <span className="text-base leading-none">{item.icon}</span>
-                        <span>{item.label}</span>
-                        {item.href === "/chat" && chatUnread > 0 && (
+                        <span className="relative text-base leading-none">
+                          {item.icon}
+                          {sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
+                            <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-2 ring-white" />
+                          )}
+                        </span>
+                        {!sidebarCollapsed && <span>{item.label}</span>}
+                        {!sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
                           <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
                             {chatUnread > 99 ? "99+" : chatUnread}
                           </span>
                         )}
-                        {isActive(item.href) && item.href !== "/chat" && (
+                        {!sidebarCollapsed && isActive(item.href) && item.href !== "/chat" && (
                           <span className="ml-auto h-1.5 w-1.5 rounded-full bg-msb-600" />
                         )}
                       </Link>
@@ -427,8 +463,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* Main Content */}
-        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-8 lg:pb-6">
-          <div className="mx-auto min-w-0 max-w-5xl animate-fade-in">
+        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-6 lg:pb-6 xl:px-10">
+          {/* Не ограничиваем ширину искусственно узким контейнером — когда
+              панель слева свёрнута, страницы (таблицы, формы) используют
+              освободившееся место. Отдельные узкие формы (профиль и т.п.)
+              сами задают себе max-w на уровне страницы. */}
+          <div className="mx-auto min-w-0 max-w-[1400px] animate-fade-in">
             {children}
           </div>
         </main>
