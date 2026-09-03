@@ -19,7 +19,10 @@ const ROLE_COLORS: Record<string, string> = {
   callcenter: "bg-purple-100 text-purple-700 ring-purple-200",
 };
 
-const EMPTY_FORM = { name: "", email: "", phone: "", password: "", role: "operator" };
+// Один сотрудник может одновременно иметь несколько ролей (напр. admin,
+// который также работает мастером) — права считаются как объединение всех
+// назначенных ролей.
+const EMPTY_FORM = { name: "", email: "", phone: "", password: "", roles: ["operator"] as string[] };
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -41,16 +44,31 @@ export default function AdminUsersPage() {
     setShowForm(false);
   }
 
+  function toggleFormRole(role: string) {
+    setForm((prev) => {
+      const has = prev.roles.includes(role);
+      const roles = has ? prev.roles.filter((r) => r !== role) : [...prev.roles, role];
+      return { ...prev, roles: roles.length ? roles : prev.roles };
+    });
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setMsg(null);
+    if (!form.roles.length) {
+      setError("Выберите хотя бы одну роль");
+      return;
+    }
     try {
+      // Первая выбранная роль — основная (role), остальные — дополнительные.
+      const [primaryRole, ...rest] = form.roles;
       if (editing) {
         const patch: Record<string, unknown> = {
           name: form.name,
           phone: form.phone || null,
-          role: form.role,
+          role: primaryRole,
+          roles: rest,
         };
         if (form.password) patch.password = form.password;
         await api.updateUser(editing.id, patch);
@@ -61,7 +79,8 @@ export default function AdminUsersPage() {
           email: form.email,
           phone: form.phone || null,
           password: form.password,
-          role: form.role,
+          role: primaryRole,
+          roles: rest,
         });
         setMsg("Пользователь создан");
       }
@@ -95,12 +114,13 @@ export default function AdminUsersPage() {
 
   function startEdit(user: User) {
     setEditing(user);
+    const roles = Array.from(new Set([user.role, ...(user.roles ?? [])]));
     setForm({
       name: user.name,
       email: user.email,
       phone: user.phone ?? "",
       password: "",
-      role: user.role,
+      roles,
     });
     setShowForm(true);
   }
@@ -144,14 +164,21 @@ export default function AdminUsersPage() {
               <input className="msb-input" value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             </div>
-            <div>
-              <label className="msb-label">Роль</label>
-              <select className="msb-input" value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}>
+            <div className="sm:col-span-2 md:col-span-1">
+              <label className="msb-label">
+                Роли <span className="font-normal normal-case text-slate-400">(можно несколько)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
                 {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>{r.label}</option>
+                  <button key={r.value} type="button" onClick={() => toggleFormRole(r.value)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium ring-1 transition-all ${
+                      form.roles.includes(r.value)
+                        ? "bg-msb-600 text-white ring-msb-600"
+                        : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"}`}>
+                    {r.label}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
             <div>
               <label className="msb-label">Email *</label>
@@ -207,9 +234,14 @@ export default function AdminUsersPage() {
                     </div>
                   </td>
                   <td className="px-5 py-4">
-                    <span className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ${ROLE_COLORS[u.role] ?? "bg-slate-100 text-slate-600 ring-slate-200"}`}>
-                      {ROLES.find((r) => r.value === u.role)?.label ?? u.role}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {Array.from(new Set([u.role, ...(u.roles ?? [])])).map((role) => (
+                        <span key={role}
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ring-1 ${ROLE_COLORS[role] ?? "bg-slate-100 text-slate-600 ring-slate-200"}`}>
+                          {ROLES.find((r) => r.value === role)?.label ?? role}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="hidden sm:table-cell px-5 py-4 text-slate-600">{u.phone || "—"}</td>
                   <td className="px-5 py-4">

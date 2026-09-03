@@ -13,9 +13,20 @@ export interface User {
   phone?: string | null;
   telegram?: string | null;
   role: string;
+  // Полный список ролей пользователя (основная + дополнительные).
+  // Одному сотруднику можно назначить несколько ролей одновременно,
+  // например admin ещё и master.
+  roles?: string[];
   city_id?: string | null;
   branch_id?: string | null;
   active: boolean;
+}
+
+/** Есть ли у пользователя роль `role` (учитывая все назначенные роли). */
+export function hasRole(user: User | null | undefined, role: string): boolean {
+  if (!user) return false;
+  if (user.role === role) return true;
+  return Array.isArray(user.roles) && user.roles.includes(role);
 }
 
 export interface Channel {
@@ -178,6 +189,10 @@ export interface Repair {
   master_name?: string | null;
   master_ids?: string[];
   master_names?: string[];
+  helper_ids?: string[];
+  helper_names?: string[];
+  contact2_name?: string | null;
+  contact2_phone?: string | null;
   events: RepairEvent[];
 }
 
@@ -426,6 +441,13 @@ export const api = {
       pdf_base64: string;
       repair_url: string;
     }>(`/api/repairs/${repairId}/print-label`, { method: "POST" }),
+  // «Зарегистрировано без печати» — после 2 неудачных попыток печати бланка.
+  // Фиксирует событие в истории ремонта + уведомляет всех админов.
+  reportPrintFailure: (repairId: string, reason?: string) =>
+    request<{ ok: boolean; notified_admins: number }>(
+      `/api/repairs/${repairId}/print-failure`,
+      { method: "POST", body: JSON.stringify({ reason: reason || "" }) },
+    ),
 
   // Photos
   photos: (repairId: string) =>
@@ -554,6 +576,22 @@ export const api = {
     }),
   deactivateUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+
+  // Notifications (напр. уведомление админа об ошибке печати)
+  notifications: (unreadOnly = false) =>
+    request<
+      Array<{
+        id: string;
+        type: string;
+        title: string;
+        body?: string | null;
+        repair_id?: string | null;
+        read_at?: string | null;
+        created_at: string;
+      }>
+    >(`/api/notifications${unreadOnly ? "?unread_only=true" : ""}`),
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "POST" }),
 
   // Printer config (admin)
   getPrinter: () =>

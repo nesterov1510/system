@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, getStoredUser, money, type Repair } from "@/lib/api";
+import { api, getStoredUser, hasRole, money, type Repair } from "@/lib/api";
 import { classIcon, normalizeClass } from "@/lib/catalog";
 
 // Этапы (вкладки). Внутри каждого — список ремонтов таблицей.
@@ -61,7 +61,7 @@ export default function RepairsBoardPage() {
   const [error, setError] = useState<string | null>(null);
   const currentUser = getStoredUser();
   // Счётчики по этапам показывает админу/оператору.
-  const showCounts = currentUser?.role === "admin" || currentUser?.role === "operator";
+  const showCounts = hasRole(currentUser, "admin") || hasRole(currentUser, "operator");
 
   // Счётчики по этапам (сколько техники на каждом этапе)
   useEffect(() => {
@@ -205,7 +205,7 @@ export default function RepairsBoardPage() {
               <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
                 Оплата
               </th>
-              {currentUser?.role === "admin" && (
+              {hasRole(currentUser, "admin") && (
                 <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">
                   Действия
                 </th>
@@ -215,14 +215,14 @@ export default function RepairsBoardPage() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={currentUser?.role === "admin" ? 8 : 7} className="py-12 text-center text-sm text-slate-400">
+                <td colSpan={hasRole(currentUser, "admin") ? 8 : 7} className="py-12 text-center text-sm text-slate-400">
                   <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-msb-500 border-t-transparent align-middle" />
                   Загрузка…
                 </td>
               </tr>
             ) : data.items.length === 0 ? (
               <tr>
-                <td colSpan={currentUser?.role === "admin" ? 8 : 7} className="py-12 text-center text-sm text-slate-400">
+                <td colSpan={hasRole(currentUser, "admin") ? 8 : 7} className="py-12 text-center text-sm text-slate-400">
                   Ремонтов не найдено
                 </td>
               </tr>
@@ -278,7 +278,7 @@ export default function RepairsBoardPage() {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    {currentUser?.role === "admin" && (
+                    {hasRole(currentUser, "admin") && (
                       <td className="px-5 py-4 text-right">
                         <button onClick={() => removeRepair(r)}
                           title="Удалить ремонт"

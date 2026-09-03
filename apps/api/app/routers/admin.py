@@ -104,12 +104,14 @@ async def create_user(payload: UserCreate, db: DbSession):
     existing = await db.execute(select(User).where(User.email == payload.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Email уже занят")
+    extra_roles = [r for r in (payload.roles or []) if r and r != payload.role]
     user = User(
         name=payload.name,
         email=payload.email.lower(),
         phone=payload.phone,
         password_hash=hash_password(payload.password),
         role=payload.role,
+        extra_roles=extra_roles or None,
         city_id=payload.city_id,
         branch_id=payload.branch_id,
         active=payload.active,
@@ -127,8 +129,12 @@ async def update_user(user_id: uuid.UUID, payload: UserUpdate, db: DbSession):
         raise HTTPException(404, "Пользователь не найден")
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
+    roles = data.pop("roles", None)
     for field, value in data.items():
         setattr(user, field, value)
+    if roles is not None:
+        base_role = data.get("role", user.role)
+        user.extra_roles = [r for r in roles if r and r != base_role] or None
     if password:
         user.password_hash = hash_password(password)
     await db.commit()

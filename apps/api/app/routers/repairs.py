@@ -47,9 +47,16 @@ from app.ws.manager import manager
 router = APIRouter(prefix="/repairs", tags=["repairs"])
 
 
+def _is_master_only(user) -> bool:
+    """У пользователя есть роль мастера, но нет «старших» ролей с полным доступом."""
+    return user.has_role(UserRole.MASTER.value) and not user.has_role(
+        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
+    )
+
+
 def _can_access(user, repair: Repair) -> bool:
     """Masters see only their own repairs; others see all."""
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         if repair.master_id == user.id:
             return True
         # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
@@ -59,7 +66,7 @@ def _can_access(user, repair: Repair) -> bool:
 
 def _is_assigner(user) -> bool:
     """Кто может назначать мастеров на ремонт (не сам мастер)."""
-    return user.role in (
+    return user.has_role(
         UserRole.ADMIN.value,
         UserRole.MANAGER.value,
         UserRole.OPERATOR.value,
@@ -81,9 +88,13 @@ def _serialize(repair: Repair) -> RepairOut:
         )
         for e in repair.events
     ]
-    masters = list(repair.masters)
-    master_ids = [m.user_id for m in masters]
-    master_names = [m.user.name for m in masters if m.user]
+    all_links = list(repair.masters)
+    master_links = [m for m in all_links if (m.kind or "master") != "helper"]
+    helper_links = [m for m in all_links if (m.kind or "master") == "helper"]
+    master_ids = [m.user_id for m in master_links]
+    master_names = [m.user.name for m in master_links if m.user]
+    helper_ids = [m.user_id for m in helper_links]
+    helper_names = [m.user.name for m in helper_links if m.user]
     # Основной мастер всегда первым, даже если связей ещё нет (старые ремонты).
     if repair.master_id and repair.master_id not in master_ids:
         master_ids.insert(0, repair.master_id)
@@ -125,11 +136,15 @@ def _serialize(repair: Repair) -> RepairOut:
         print_count=repair.print_count,
         source=repair.source,
         events=events,
+        contact2_name=repair.contact2_name,
+        contact2_phone=repair.contact2_phone,
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         master_name=repair.master.name if repair.master else None,
         master_ids=master_ids,
         master_names=master_names,
+        helper_ids=helper_ids,
+        helper_names=helper_names,
     )
 
 
@@ -289,7 +304,7 @@ async def client_repairs(
         )
         .order_by(Repair.accepted_at.desc())
     )
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         repairs_q = repairs_q.where(_master_scope(user.id))
     r = await db.execute(repairs_q)
     return [_serialize(x) for x in r.scalars().all()]
@@ -297,7 +312,7 @@ async def client_repairs(
 
 
 def _require_admin(user) -> None:
-    if user.role != UserRole.ADMIN.value:
+    if not user.has_role(UserRole.ADMIN.value):
         raise HTTPException(403, "Только администратор")
 
 
@@ -388,7 +403,7 @@ async def create_repair(
 
     # Если приёмку ведёт мастер — он автоматически назначается исполнителем.
     master_id = payload.master_id
-    if master_id is None and user.role == UserRole.MASTER.value:
+    if master_id is None and user.has_role(UserRole.MASTER.value):
         master_id = user.id
 
     repair = Repair(
@@ -404,6 +419,8 @@ async def create_repair(
         complectation=payload.complectation,
         fault_client=payload.fault_client,
         condition_notes=payload.condition_notes,
+        contact2_name=payload.contact2_name,
+        contact2_phone=payload.contact2_phone,
         consent_repair_at=now if payload.consent_repair else None,
         accepted_by=user.id,
         master_id=master_id,
@@ -493,7 +510,7 @@ async def list_repairs(
             )
         )
     # Мастера видят только свои ремонты (назначен напрямую или через список).
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         filters.append(_master_scope(user.id))
 
     base = select(Repair).where(*filters)
@@ -523,7 +540,7 @@ async def list_repairs(
 async def stage_counts(db: DbSession, user: CurrentUser):
     """Сколько техники на каждом этапе — для бейджей на доске."""
     scope = []
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         scope.append(_master_scope(user.id))
     counts: dict[str, int] = {}
     for key, statuses in STAGE_STATUSES.items():
@@ -588,6 +605,7 @@ async def update_repair(
     old_status = repair.status
     data = payload.model_dump(exclude_unset=True)
     master_ids = data.pop("master_ids", None)
+    helper_ids = data.pop("helper_ids", None)
     for field, value in data.items():
         setattr(repair, field, value)
 
@@ -647,6 +665,57 @@ async def update_repair(
                 RepairMaster(user_id=data["master_id"], position=len(repair.masters))
             )
             newly_assigned_ids.append(data["master_id"])
+
+    # Помощники мастера (в бланке — «Inžiner (kömekçi)»). Хранятся в той же
+    # таблице repair_masters с kind="helper", чтобы не плодить лишние сущности.
+    if helper_ids is not None:
+        ordered_helper_ids: list[uuid.UUID] = []
+        for hid in helper_ids:
+            if hid not in ordered_helper_ids:
+                ordered_helper_ids.append(hid)
+
+        if ordered_helper_ids:
+            rows = await db.execute(select(User).where(User.id.in_(ordered_helper_ids)))
+            found = {u.id for u in rows.scalars().all()}
+            missing = [str(h) for h in ordered_helper_ids if h not in found]
+            if missing:
+                raise HTTPException(404, f"Помощник не найден: {', '.join(missing)}")
+
+        existing_helpers = {
+            m.user_id: m for m in repair.masters if (m.kind or "master") == "helper"
+        }
+        new_helper_ids = [
+            hid for hid in ordered_helper_ids if hid not in existing_helpers
+        ]
+        for link in list(repair.masters):
+            if (link.kind or "master") == "helper" and link.user_id not in ordered_helper_ids:
+                repair.masters.remove(link)
+        base_position = len(
+            [m for m in repair.masters if (m.kind or "master") != "helper"]
+        )
+        for offset, hid in enumerate(ordered_helper_ids):
+            link = existing_helpers.get(hid)
+            if link is None:
+                repair.masters.append(
+                    RepairMaster(
+                        user_id=hid,
+                        position=base_position + offset,
+                        kind="helper",
+                    )
+                )
+        if new_helper_ids:
+            newly_assigned_ids.extend(new_helper_ids)
+            repair.events.append(
+                RepairEvent(
+                    repair_id=repair.id,
+                    type="assign",
+                    actor_id=user.id,
+                    data={
+                        "message": "Назначен помощник мастера",
+                        "count": len(ordered_helper_ids),
+                    },
+                )
+            )
 
     if payload.status and payload.status != old_status:
         repair.events.append(
@@ -719,7 +788,7 @@ _FINISH_TERMINAL = {"Выдано", "Не забрано", "Архив", "Отк
 
 
 def _require_finisher(user) -> None:
-    if user.role not in _FINISH_ROLES:
+    if not user.has_role(*_FINISH_ROLES):
         raise HTTPException(403, "Только админ или оператор")
 
 

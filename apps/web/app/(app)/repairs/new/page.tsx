@@ -7,11 +7,17 @@ import {
   api,
   downloadPdfBase64,
   getStoredUser,
+  hasRole,
   money,
   type Lookup,
   type PriceHint,
   type Repair,
 } from "@/lib/api";
+import { checkPhone } from "@/lib/phone";
+import DeviceCombinedField, {
+  joinDeviceCombined,
+  splitDeviceCombined,
+} from "@/components/DeviceCombinedField";
 
 // Техника делится на классы: телевизоры / компьютеры / бытовая техника / другое.
 const DEVICE_TYPES = ["Телевизоры", "Компьютеры", "Бытовая техника", "Другое"];
@@ -45,6 +51,13 @@ interface ClientLookup {
   repairs_count?: number;
 }
 
+interface ClientRow {
+  id: string;
+  full_name: string;
+  phone: string;
+  repairs_count: number;
+}
+
 export default function NewRepairPage() {
   const router = useRouter();
   const [cities, setCities] = useState<Lookup[]>([]);
@@ -54,12 +67,26 @@ export default function NewRepairPage() {
   const [cityId, setCityId] = useState("");
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [existingClient, setExistingClient] = useState<ClientLookup | null>(null);
   const [lookingUp, setLookingUp] = useState(false);
+
+  // 1) Выбор контакта из уже существующих в системе (не из контактов телефона).
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickerResults, setPickerResults] = useState<ClientRow[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+
+  // 6) Второй контакт по ремонту (напр. владелец техники ≠ доставивший).
+  const [contact2Open, setContact2Open] = useState(false);
+  const [contact2Name, setContact2Name] = useState("");
+  const [contact2Phone, setContact2Phone] = useState("");
+  const [contact2Error, setContact2Error] = useState<string | null>(null);
+
   const [deviceType, setDeviceType] = useState("Телевизоры");
-  const [brand, setBrand] = useState("");
-  const [model, setModel] = useState("");
-  const [serial, setSerial] = useState("");
+  // 3) Марка + модель + серийный номер — одно поле, сегменты через двойной пробел.
+  const [deviceCombined, setDeviceCombined] = useState("");
+  const { brand, model, serial } = splitDeviceCombined(deviceCombined);
   const [complect, setComplect] = useState<string[]>([]);
   const [conditions, setConditions] = useState<string[]>([]);
   const [conditionOther, setConditionOther] = useState("");
@@ -80,7 +107,20 @@ export default function NewRepairPage() {
   const [priceHint, setPriceHint] = useState<PriceHint | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 4) Печать бланка: спрашиваем «успешно?» и предлагаем повтор / регистрацию без печати.
+  const [printAttempts, setPrintAttempts] = useState(0);
+  const [printAsking, setPrintAsking] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
+  const [printPdf, setPrintPdf] = useState<string | null>(null);
+  const [printMsg, setPrintMsg] = useState<string | null>(null);
+  const [registeredWithoutPrint, setRegisteredWithoutPrint] = useState(false);
+
   const currentUser = getStoredUser();
+  const isMasterOnly =
+    hasRole(currentUser, "master") &&
+    !hasRole(currentUser, "admin") &&
+    !hasRole(currentUser, "manager") &&
+    !hasRole(currentUser, "operator");
 
   useEffect(() => {
     Promise.all([
@@ -92,10 +132,11 @@ export default function NewRepairPage() {
       setMasters(m);
       setItems(it);
       if (c[0]) setCityId(c[0].id);
-      if (currentUser?.role === "master" && currentUser.id) {
+      if (isMasterOnly && currentUser?.id) {
         setMasterId(currentUser.id);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Поиск существующего клиента по телефону
@@ -129,6 +170,28 @@ export default function NewRepairPage() {
     return () => clearTimeout(t);
   }, [deviceType, brand]);
 
+  // Поиск по контактам, уже сохранённым в системе (не из контактов телефона).
+  useEffect(() => {
+    if (!pickerOpen) return;
+    setPickerLoading(true);
+    const t = setTimeout(() => {
+      api
+        .listClients(pickerQuery.trim() || undefined)
+        .then(setPickerResults)
+        .catch(() => setPickerResults([]))
+        .finally(() => setPickerLoading(false));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [pickerOpen, pickerQuery]);
+
+  function pickContact(c: ClientRow) {
+    setClientName(c.full_name);
+    setClientPhone(c.phone);
+    setPhoneError(null);
+    setPickerOpen(false);
+    setPickerQuery("");
+  }
+
   function toggleComplect(item: string) {
     setComplect((prev) =>
       prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item],
@@ -147,14 +210,30 @@ export default function NewRepairPage() {
     return parts.join(", ");
   }
 
+  function validatePhoneField(phone: string, setter: (m: string | null) => void): boolean {
+    const result = checkPhone(phone);
+    if (!result.valid) {
+      setter(result.message || "Некорректный номер телефона");
+      alert(result.message || "Некорректный номер телефона. Исправьте номер телефона.");
+      return false;
+    }
+    setter(null);
+    return true;
+  }
+
   const canProceedStep0 = clientName.trim() && clientPhone.trim() && consentRepair;
   const canProceedStep1 = deviceType && brand;
 
   async function submit() {
+    if (!validatePhoneField(clientPhone, setPhoneError)) return;
+    if (contact2Phone.trim() && !validatePhoneField(contact2Phone, setContact2Error)) return;
+
     setLoading(true);
     setError(null);
-    setLabelMessage(null);
-    setLabelPdf(null);
+    setPrintMsg(null);
+    setPrintPdf(null);
+    setPrintAttempts(0);
+    setRegisteredWithoutPrint(false);
     try {
       const repair = await api.createRepair({
         city_id: cityId,
@@ -164,6 +243,8 @@ export default function NewRepairPage() {
           consent_pdn: consent,
           consent_storage: consent,
         },
+        contact2_name: contact2Name || null,
+        contact2_phone: contact2Phone || null,
         device_type: deviceType,
         brand: brand || null,
         model: model || null,
@@ -203,6 +284,54 @@ export default function NewRepairPage() {
       setLabelMessage(e instanceof Error ? e.message : "Ошибка печати этикетки");
     } finally {
       setLabelBusy(false);
+    }
+  }
+
+  // 4) Печать бланка A4: после печати спрашиваем «успешно ли напечатано?».
+  // Если нет — предлагаем напечатать заново; если и вторая попытка не удалась —
+  // третий вариант «зарегистрирован без печати» + сообщение об ошибке админу.
+  async function printBlank() {
+    if (!done) return;
+    setPrintBusy(true);
+    setPrintMsg(null);
+    try {
+      const res = await api.print(done.id);
+      setPrintPdf(res.pdf_base64);
+      setPrintAttempts((n) => n + 1);
+      setPrintAsking(true);
+    } catch (e) {
+      setPrintMsg(e instanceof Error ? e.message : "Ошибка печати");
+      setPrintAttempts((n) => n + 1);
+      setPrintAsking(true);
+    } finally {
+      setPrintBusy(false);
+    }
+  }
+
+  function confirmPrintSuccess() {
+    setPrintAsking(false);
+    setPrintMsg("✅ Бланк напечатан успешно.");
+  }
+
+  async function confirmPrintFailed() {
+    setPrintAsking(false);
+    if (printAttempts >= 2) {
+      // Третья функция: «зарегистрирован без печати» + сообщение об ошибке разработчику/админу.
+      if (!done) return;
+      try {
+        await api.reportPrintFailure(done.id, "Печать не удалась дважды подряд");
+        setRegisteredWithoutPrint(true);
+        setPrintMsg(
+          "⚠ Зарегистрировано без печати. Об ошибке уведомлён администратор/разработчик.",
+        );
+      } catch (e) {
+        setPrintMsg(
+          e instanceof Error ? e.message : "Не удалось отправить сообщение об ошибке",
+        );
+      }
+    } else {
+      // Предлагаем напечатать заново.
+      await printBlank();
     }
   }
 
@@ -250,17 +379,53 @@ export default function NewRepairPage() {
               </div>
             )}
 
-            <button
-              onClick={async () => {
-                try {
-                  await api.print(done.id);
-                  alert("✅ Бланк отправлен на печать");
-                } catch { alert("Ошибка печати"); }
-              }}
-              className="msb-btn-secondary w-full"
-            >
-              🖨️ Печатать бланк A4
-            </button>
+            {!registeredWithoutPrint && (
+              <button
+                onClick={printBlank}
+                disabled={printBusy || printAsking}
+                className="msb-btn-secondary w-full"
+              >
+                {printBusy ? "Печатаем…" : "🖨️ Печатать бланк A4"}
+              </button>
+            )}
+
+            {/* Вопрос «успешно ли напечатано?» после каждой попытки печати бланка */}
+            {printAsking && (
+              <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-amber-200 text-left">
+                <p className="font-semibold text-amber-800">
+                  Бланк A4 распечатан успешно?
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button onClick={confirmPrintSuccess}
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
+                    ✓ Да, напечатано
+                  </button>
+                  <button onClick={confirmPrintFailed}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">
+                    ✗ Нет{printAttempts >= 2 ? " — зарегистрировать без печати" : ", напечатать заново"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {printMsg && (
+              <div className={`rounded-xl px-4 py-3 text-sm ring-1 text-left ${
+                printMsg.startsWith("⚠")
+                  ? "bg-amber-50 text-amber-800 ring-amber-200"
+                  : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+              }`}>
+                <p>{printMsg}</p>
+                {printPdf && (
+                  <button
+                    onClick={() => downloadPdfBase64(printPdf, `blank-${done.number}.pdf`)}
+                    className="mt-2 text-xs font-semibold underline"
+                  >
+                    Скачать PDF бланка
+                  </button>
+                )}
+              </div>
+            )}
+
             <button
               onClick={() => router.push(`/repairs/${done.id}`)}
               className="msb-btn-secondary w-full"
@@ -272,7 +437,13 @@ export default function NewRepairPage() {
                 setDone(null);
                 setClientName("");
                 setClientPhone("");
+                setPhoneError(null);
                 setExistingClient(null);
+                setContact2Name("");
+                setContact2Phone("");
+                setContact2Error(null);
+                setContact2Open(false);
+                setDeviceCombined("");
                 setComplect([]);
                 setConditions([]);
                 setConditionOther("");
@@ -282,6 +453,11 @@ export default function NewRepairPage() {
                 setEtaDays("");
                 setLabelMessage(null);
                 setLabelPdf(null);
+                setPrintMsg(null);
+                setPrintPdf(null);
+                setPrintAttempts(0);
+                setPrintAsking(false);
+                setRegisteredWithoutPrint(false);
                 setStep(0);
               }}
               className="msb-btn-ghost w-full text-slate-600"
@@ -331,20 +507,29 @@ export default function NewRepairPage() {
               <span>👤</span> Данные клиента
             </h2>
             <div className="mt-4 space-y-4">
-              <div>
-                <label className="msb-label">Телефон *</label>
-                <div className="relative">
-                  <input className="msb-input pr-10" value={clientPhone}
-                    onChange={(e) => setClientPhone(e.target.value)}
-                    inputMode="tel" placeholder="+993 61 000000" />
-                  {lookingUp && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-msb-500 border-t-transparent" />
-                  )}
-                </div>
+              <div className="flex items-center justify-between">
+                <label className="msb-label mb-0">Телефон *</label>
+                <button type="button" onClick={() => setPickerOpen(true)}
+                  className="mb-1.5 text-xs font-semibold text-msb-600 hover:text-msb-700">
+                  👥 Выбрать из контактов
+                </button>
+              </div>
+              <div className="relative -mt-3">
+                <input className="msb-input pr-10" value={clientPhone}
+                  onChange={(e) => { setClientPhone(e.target.value); setPhoneError(null); }}
+                  onBlur={() => clientPhone.trim() && validatePhoneField(clientPhone, setPhoneError)}
+                  inputMode="tel" placeholder="+993 61 000000" />
+                {lookingUp && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-msb-500 border-t-transparent" />
+                )}
+              </div>
+              {phoneError ? (
+                <p className="mt-1 text-xs font-medium text-red-600">⚠ {phoneError}</p>
+              ) : (
                 <p className="mt-1 text-xs text-slate-400">
                   Введите телефон — если клиент уже обращался, мы покажем его историю
                 </p>
-              </div>
+              )}
 
               {/* Подсказка по существующему клиенту */}
               {existingClient?.found && !existingClient.multiple && existingClient.client && (
@@ -419,6 +604,48 @@ export default function NewRepairPage() {
                   placeholder="Иванов Иван Иванович" />
               </div>
 
+              {/* 6) Второй контакт: напр. владелец техники и тот, кто её доставил — разные люди. */}
+              {!contact2Open ? (
+                <button type="button" onClick={() => setContact2Open(true)}
+                  className="text-sm font-medium text-msb-600 hover:text-msb-700">
+                  ＋ Добавить второй номер телефона (например, доставщика)
+                </button>
+              ) : (
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Второй контакт
+                    </p>
+                    <button type="button"
+                      onClick={() => {
+                        setContact2Open(false);
+                        setContact2Name("");
+                        setContact2Phone("");
+                        setContact2Error(null);
+                      }}
+                      className="text-xs text-slate-400 hover:text-red-500">
+                      Убрать
+                    </button>
+                  </div>
+                  <div>
+                    <label className="msb-label">Имя</label>
+                    <input className="msb-input" value={contact2Name}
+                      onChange={(e) => setContact2Name(e.target.value)}
+                      placeholder="Напр. курьер / доставщик" />
+                  </div>
+                  <div>
+                    <label className="msb-label">Телефон</label>
+                    <input className="msb-input" value={contact2Phone}
+                      onChange={(e) => { setContact2Phone(e.target.value); setContact2Error(null); }}
+                      onBlur={() => contact2Phone.trim() && validatePhoneField(contact2Phone, setContact2Error)}
+                      inputMode="tel" placeholder="+993 61 000000" />
+                    {contact2Error && (
+                      <p className="mt-1 text-xs font-medium text-red-600">⚠ {contact2Error}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="rounded-xl bg-blue-50/50 p-4 ring-1 ring-blue-100 space-y-3">
                 <label className="flex items-start gap-3 text-sm text-slate-700">
                   <input type="checkbox" checked={consent}
@@ -467,10 +694,11 @@ export default function NewRepairPage() {
             </div>
 
             <div className="mt-4">
-              <label className="msb-label">Бренд</label>
+              <label className="msb-label">Бренд (быстрый выбор)</label>
               <div className="flex flex-wrap gap-2">
                 {BRAND_CHIPS.map((b) => (
-                  <button key={b} onClick={() => setBrand(b)}
+                  <button key={b}
+                    onClick={() => setDeviceCombined(joinDeviceCombined(b, model, serial))}
                     className={`rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
                       brand === b
                         ? "bg-msb-600 text-white shadow-sm"
@@ -479,20 +707,26 @@ export default function NewRepairPage() {
                   </button>
                 ))}
               </div>
-              <input className="msb-input mt-2" placeholder="Или введите вручную…"
-                value={brand} onChange={(e) => setBrand(e.target.value)} />
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="msb-label">Модель</label>
-                <input className="msb-input" placeholder="UE55" value={model}
-                  onChange={(e) => setModel(e.target.value)} />
-              </div>
-              <div>
-                <label className="msb-label">Серийный номер</label>
-                <input className="msb-input" placeholder="SN…" value={serial}
-                  onChange={(e) => setSerial(e.target.value)} />
+            {/* 3) Марка + модель + серийный номер — одно поле, сегменты через
+                двойной пробел. Двойной пробел подсвечивается зелёным. */}
+            <div className="mt-4">
+              <label className="msb-label">
+                Марка  Модель  Серийный номер
+                <span className="ml-1 font-normal normal-case text-slate-400">
+                  (разделяйте двойным пробелом — авто-Заглавные)
+                </span>
+              </label>
+              <DeviceCombinedField
+                value={deviceCombined}
+                onChange={setDeviceCombined}
+                placeholder="Samsung␣␣UE55␣␣SN1234567"
+              />
+              <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-500">
+                <span>Марка: <b className="text-slate-700">{brand || "—"}</b></span>
+                <span>Модель: <b className="text-slate-700">{model || "—"}</b></span>
+                <span>С/н: <b className="text-slate-700">{serial || "—"}</b></span>
               </div>
             </div>
 
@@ -577,7 +811,7 @@ export default function NewRepairPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="msb-label">Мастер</label>
-                {currentUser?.role === "master" ? (
+                {isMasterOnly ? (
                   <div className="flex items-center gap-2 rounded-xl bg-msb-50 px-4 py-2.5 text-sm font-medium text-msb-700 ring-1 ring-msb-100">
                     <span>✓</span> Вы (приёмку ведёте сами)
                   </div>
@@ -655,6 +889,41 @@ export default function NewRepairPage() {
           </div>
         )}
       </div>
+
+      {/* 1) Выбор контакта из уже существующих в системе (не из контактов телефона) */}
+      {pickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setPickerOpen(false)} />
+          <div className="relative w-full max-w-md msb-card-solid p-6 animate-slide-up">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="msb-section-title">👥 Контакты в системе</h3>
+              <button onClick={() => setPickerOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <input className="msb-input mt-4" value={pickerQuery}
+              onChange={(e) => setPickerQuery(e.target.value)}
+              placeholder="Поиск по имени или телефону…" autoFocus />
+            <div className="mt-3 max-h-72 space-y-1.5 overflow-y-auto custom-scroll">
+              {pickerLoading && (
+                <p className="py-6 text-center text-sm text-slate-400">Загрузка…</p>
+              )}
+              {!pickerLoading && pickerResults.length === 0 && (
+                <p className="py-6 text-center text-sm text-slate-400">Контакты не найдены</p>
+              )}
+              {pickerResults.map((c) => (
+                <button key={c.id} type="button" onClick={() => pickContact(c)}
+                  className="flex w-full items-center justify-between rounded-lg bg-slate-50 px-3 py-2.5 text-left text-sm hover:bg-msb-50 transition-colors">
+                  <span className="font-medium text-slate-800">{c.full_name}</span>
+                  <span className="font-mono text-xs text-slate-500">{c.phone}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

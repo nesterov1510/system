@@ -55,7 +55,7 @@ async def callcenter_queue(
 ):
     # Очередь видит callcenter + админ + менеджер + оператор (оператор — всё
     # кроме аналитики). Мастер остаётся на своей доске /repairs.
-    if user.role not in (
+    if not user.has_role(
         UserRole.CALLCENTER.value,
         UserRole.ADMIN.value,
         UserRole.MANAGER.value,

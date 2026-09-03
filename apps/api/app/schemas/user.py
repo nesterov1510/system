@@ -13,6 +13,9 @@ class UserOut(BaseModel):
     phone: str | None = None
     telegram: str | None = None
     role: str
+    # Дополнительные роли (помимо основной `role`). Одному сотруднику можно
+    # назначить несколько ролей: напр. admin ещё и master.
+    roles: list[str] = []
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool = True
@@ -26,6 +29,7 @@ class UserCreate(BaseModel):
     telegram: str | None = None
     password: str = Field(min_length=6)
     role: str = "operator"
+    roles: list[str] | None = None
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool = True
@@ -36,6 +40,7 @@ class UserUpdate(BaseModel):
     phone: str | None = None
     telegram: str | None = None
     role: str | None = None
+    roles: list[str] | None = None
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool | None = None

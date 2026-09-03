@@ -51,7 +51,9 @@ PRINT_QUEUE_ROLES = {
 
 def _can_print(user, repair: Repair) -> bool:
     """Мастер может печатать только назначенный ему ремонт."""
-    if user.role != UserRole.MASTER.value:
+    if user.has_role(
+        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
+    ) or not user.has_role(UserRole.MASTER.value):
         return True
     return repair.master_id == user.id or any(
         link.user_id == user.id for link in repair.masters
@@ -134,9 +136,17 @@ async def build_context(db, repair: Repair) -> dict:
     symbol = currency.get("symbol", "ман.")
 
     # Мастера ремонта (Inžiner 1..4): сначала список, иначе основной мастер.
-    master_names = [m.user.name for m in repair.masters if m.user]
+    master_links = [m for m in repair.masters if (m.kind or "master") != "helper"]
+    helper_links = [m for m in repair.masters if (m.kind or "master") == "helper"]
+    master_names = [m.user.name for m in master_links if m.user]
     if not master_names and repair.master:
         master_names = [repair.master.name]
+    helper_names = [m.user.name for m in helper_links if m.user]
+    # Помощники печатаются в тех же строках «Inžiner», но с пометкой
+    # «(kömekçi)», чтобы отличать от основных мастеров.
+    master_names_for_print = list(master_names) + [
+        f"{name} (kömekçi)" for name in helper_names
+    ]
 
     # Неисправности (Kemçilik): найденные мастером, иначе со слов клиента.
     faults = _split_lines(repair.fault_master) or _split_lines(repair.fault_client)
@@ -190,7 +200,7 @@ async def build_context(db, repair: Repair) -> dict:
         "master": master,
         "eta_days": str(repair.eta_days) if repair.eta_days else "",
         # --- данные, которые оператор/мастер заполняет для бланка ---
-        "master_names": master_names,
+        "master_names": master_names_for_print,
         "faults": faults,
         "parts_used": parts_used,
         "parts_ordered": parts_ordered,
@@ -344,6 +354,60 @@ async def create_label_print_job(
     }
 
 
+@router.post("/repairs/{repair_id}/print-failure")
+async def report_print_failure(
+    repair_id: uuid.UUID, db: DbSession, user: CurrentUser, body: dict | None = None
+):
+    """Мастер/оператор нажал «Зарегистрировано без печати» после двух неудачных
+
+    попыток печати. Фиксируем событие в истории ремонта и создаём уведомления
+    для всех администраторов, чтобы они видели проблему с принтером.
+    """
+    from app.db.models import Notification, User, UserRole as _UserRole
+
+    row = await db.execute(
+        select(Repair)
+        .where(Repair.id == repair_id)
+        .options(selectinload(Repair.client))
+    )
+    repair = row.scalar_one_or_none()
+    if repair is None:
+        raise HTTPException(404, "Ремонт не найден")
+
+    reason = (body or {}).get("reason") or "Печать не удалась дважды подряд"
+
+    db.add(
+        RepairEvent(
+            repair_id=repair.id,
+            type="print",
+            actor_id=user.id,
+            data={
+                "kind": "print_failure",
+                "message": f"Зарегистрировано без печати: {reason}",
+            },
+        )
+    )
+
+    admins_row = await db.execute(select(User).where(User.active.is_(True)))
+    admins = [u for u in admins_row.scalars().all() if u.has_role(_UserRole.ADMIN.value)]
+    for admin in admins:
+        db.add(
+            Notification(
+                user_id=admin.id,
+                type="print_failure",
+                title=f"Ошибка печати · ремонт {repair.number}",
+                body=(
+                    f"{user.name} зарегистрировал(а) ремонт {repair.number} без "
+                    f"печати бланка. Причина: {reason}"
+                ),
+                repair_id=repair.id,
+            )
+        )
+
+    await db.commit()
+    return {"ok": True, "notified_admins": len(admins)}
+
+
 @router.get("/print/jobs")
 async def list_print_jobs(
     db: DbSession,
@@ -351,7 +415,7 @@ async def list_print_jobs(
     status: str | None = None,
     branch_id: uuid.UUID | None = None,
 ):
-    if user.role not in PRINT_QUEUE_ROLES:
+    if not user.has_role(*PRINT_QUEUE_ROLES):
         raise HTTPException(403, "Нет доступа к очереди печати")
     q = select(PrintJob).order_by(PrintJob.created_at.desc())
     if status:
@@ -366,7 +430,7 @@ async def list_print_jobs(
 async def update_print_job(
     job_id: uuid.UUID, db: DbSession, user: CurrentUser, body: dict
 ):
-    if user.role not in PRINT_QUEUE_ROLES:
+    if not user.has_role(*PRINT_QUEUE_ROLES):
         raise HTTPException(403, "Нет доступа к очереди печати")
     job = await db.get(PrintJob, job_id)
     if job is None:

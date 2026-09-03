@@ -64,6 +64,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
+  // Внутренние уведомления админам (напр. эскалация ошибки печати — item 4).
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifItems, setNotifItems] = useState<
+    Array<{ id: string; title: string; body?: string | null; read_at?: string | null; created_at: string }>
+  >([]);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -84,10 +89,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
+  // Уведомления видны только тем, кто имеет роль admin (item 4: эскалация
+  // ошибки печати главному разработчику через внутреннее уведомление).
+  useEffect(() => {
+    if (!ready || !user || !isAdminRole(user.role, user.roles)) return;
+    const load = () => api.notifications().then(setNotifItems).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [ready, user]);
+
+  const unreadNotifCount = notifItems.filter((n) => !n.read_at).length;
+
+  async function openNotif(n: { id: string; read_at?: string | null }) {
+    if (!n.read_at) {
+      await api.markNotificationRead(n.id).catch(() => {});
+      setNotifItems((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)),
+      );
+    }
+  }
+
   // Единый WebSocket на всё приложение: обновляем бейдж и звучим уведомлением,
   // когда приходит сообщение (напр. о назначении мастера на ремонт).
   useEffect(() => {
-    if (!ready || !user || !canView(user.role, "/chat")) return;
+    if (!ready || !user || !canView(user.role, "/chat", user.roles)) return;
     const token = getToken();
     if (!token) return;
     connectChat(token);
@@ -125,6 +151,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const onFirst = () => primeAudio();
     window.addEventListener("pointerdown", onFirst, { once: true });
     return () => window.removeEventListener("pointerdown", onFirst);
+  }, []);
+
+  // На мобильных экранная клавиатура часто перекрывает поле, которое человек
+  // заполняет (особенно у нижней части формы). Прокручиваем сфокусированное
+  // поле в видимую область с запасом, когда клавиатура уже открылась.
+  useEffect(() => {
+    function onFocusIn(e: FocusEvent) {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      const tag = el.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
+      // Небольшая задержка — ждём анимацию появления клавиатуры на iOS/Android,
+      // иначе scrollIntoView сработает до того, как вьюпорт уменьшится.
+      window.setTimeout(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 300);
+    }
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
 
   function isActive(href: string) {
@@ -179,6 +224,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* User area */}
           <div className="flex items-center gap-3">
+            {isAdminRole(user.role, user.roles) && (
+              <div className="relative">
+                <button
+                  onClick={() => setNotifOpen((v) => !v)}
+                  className="msb-btn-ghost relative p-2 text-slate-500 hover:text-slate-700"
+                  title="Уведомления"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  {unreadNotifCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                      {unreadNotifCount > 9 ? "9+" : unreadNotifCount}
+                    </span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 z-40 mt-2 w-80 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-slate-200 animate-slide-up">
+                    <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Уведомления
+                    </p>
+                    <div className="max-h-80 space-y-1 overflow-y-auto custom-scroll">
+                      {notifItems.length === 0 && (
+                        <p className="px-3 py-4 text-center text-sm text-slate-400">Пусто</p>
+                      )}
+                      {notifItems.map((n) => (
+                        <button key={n.id} onClick={() => openNotif(n)}
+                          className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                            n.read_at ? "text-slate-500 hover:bg-slate-50" : "bg-amber-50 text-slate-800 hover:bg-amber-100"}`}>
+                          <div className="font-medium">{n.title}</div>
+                          {n.body && <div className="mt-0.5 text-xs text-slate-500">{n.body}</div>}
+                          <div className="mt-1 text-[10px] text-slate-400">
+                            {new Date(n.created_at).toLocaleString("ru")}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <Link href="/profile" title="Профиль"
               className="hidden items-center gap-2 sm:flex">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
@@ -213,14 +300,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64">
           <nav className="sticky top-16 space-y-6 overflow-y-auto px-4 py-6 lg:px-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
               return (
                 <div key={group.group}>
                   <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -281,14 +368,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <nav className="space-y-6 overflow-y-auto px-4 py-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
               return (
                 <div key={group.group}>
                   <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
