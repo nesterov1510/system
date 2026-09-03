@@ -93,6 +93,29 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         },
         "description": "CUPS-принтер этикеток 58×38 мм",
     },
+    "sms_server": {
+        "value": {
+            "enabled": False,
+            "url": "https://192.168.5.238/api/3rdparty/v1/messages",
+            "username": "",
+            "password": "",
+            "verify_ssl": False,
+            "timeout_sec": 10.0,
+        },
+        "description": "SMS-шлюз: адрес, логин/пароль, таймаут",
+    },
+    "sms_templates": {
+        "value": {
+            "master_assign": "",
+            "ready": "",
+        },
+        "description": (
+            "Шаблоны текстов SMS (пусто = использовать текст по умолчанию). "
+            "Доступные плейсхолдеры для шаблона мастеру: {master_name} {number} "
+            "{device} {serial} {client_name} {client_phone} {fault} {eta_days}. "
+            "Для шаблона клиенту о готовности: {client_name} {number} {device}."
+        ),
+    },
 }
 
 
@@ -164,4 +187,22 @@ async def get_label_printer(db: AsyncSession) -> dict:
     if saved:
         value.update(saved)
     value.update(mode="cups_remote", width_mm=58, height_mm=38)
+    return value
+
+
+async def get_sms_server(db: AsyncSession) -> dict:
+    """Настройки SMS-шлюза (URL, логин/пароль, таймаут)."""
+    value = dict(DEFAULT_SETTINGS["sms_server"]["value"])
+    saved = await get_setting(db, "sms_server")
+    if saved:
+        value.update(saved)
+    return value
+
+
+async def get_sms_templates(db: AsyncSession) -> dict:
+    """Шаблоны текстов SMS (пустая строка = использовать текст по умолчанию)."""
+    value = dict(DEFAULT_SETTINGS["sms_templates"]["value"])
+    saved = await get_setting(db, "sms_templates")
+    if saved:
+        value.update(saved)
     return value

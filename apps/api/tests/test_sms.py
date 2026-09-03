@@ -112,7 +112,7 @@ def test_finish_forbidden_for_master(
 def test_finish_sms_send(client, operator_headers, city_id, monkeypatch):
     repair = _mk_repair_via_api(client, operator_headers, city_id, "sms-finish-3")
     sent = {}
-    async def _fake_send(phone, text):
+    async def _fake_send(phone, text, db=None):
         sent["phone"] = phone
         sent["text"] = text
         return {"ok": True, "detail": "http_200"}
@@ -134,7 +134,7 @@ def test_finish_sms_send(client, operator_headers, city_id, monkeypatch):
 
 def test_finish_sms_send_failure(client, operator_headers, city_id, monkeypatch):
     repair = _mk_repair_via_api(client, operator_headers, city_id, "sms-finish-4")
-    async def _fake_fail(phone, text):
+    async def _fake_fail(phone, text, db=None):
         return {"ok": False, "detail": "http_500"}
     monkeypatch.setattr("app.routers.repairs.send_sms", _fake_fail)
     r = client.post(
@@ -160,7 +160,7 @@ def test_auto_sms_to_master_on_assignment(
     repair = _mk_repair_via_api(client, operator_headers, city_id, "sms-assign-1")
 
     calls = []
-    async def _fake_sms(m, rp):
+    async def _fake_sms(m, rp, db=None):
         calls.append((str(m.id), str(rp.id)))
         return {"ok": True}
     monkeypatch.setattr("app.routers.repairs.send_master_assignment_sms", _fake_sms)
@@ -180,7 +180,7 @@ def test_master_sms_skipped_without_phone(monkeypatch):
         name = "Мастер"
         phone = None
     hit = []
-    async def _fake_send(phone, text):
+    async def _fake_send(phone, text, db=None):
         hit.append(phone)
         return {"ok": True}
     monkeypatch.setattr("app.services.sms.send_sms", _fake_send)
@@ -190,13 +190,187 @@ def test_master_sms_skipped_without_phone(monkeypatch):
     assert hit == []
 
 
+# --- admin: настройки SMS-шлюза + шаблоны ---------------------------------------
+
+def test_admin_sms_config_default(client, admin_headers):
+    r = client.get("/api/admin/sms", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "server" in body and "templates" in body
+    assert body["server"]["enabled"] is False
+    assert body["templates"]["master_assign"] == ""
+    assert body["templates"]["ready"] == ""
+    assert "master_name" in body["template_fields"]["master_assign"]
+    assert "client_name" in body["template_fields"]["ready"]
+
+
+def test_admin_sms_config_forbidden_for_operator(client, operator_headers):
+    r = client.get("/api/admin/sms", headers=operator_headers)
+    assert r.status_code == 403
+
+
+def test_admin_sms_config_save_and_mask_password(client, admin_headers):
+    r = client.put(
+        "/api/admin/sms",
+        headers=admin_headers,
+        json={
+            "enabled": True,
+            "url": "https://192.168.5.238/api/3rdparty/v1/messages",
+            "username": "56FNPL",
+            "password": "uv9bmvwgdrcs5z",
+            "verify_ssl": False,
+            "timeout_sec": 8,
+        },
+    )
+    assert r.status_code == 200, r.text
+    saved = r.json()["server"]
+    assert saved["url"] == "https://192.168.5.238/api/3rdparty/v1/messages"
+    assert saved["username"] == "56FNPL"
+    assert saved["password"] == "•" * 8  # пароль маскируется в ответе
+
+    # Повторный GET подтверждает, что значения реально сохранились в БД.
+    r2 = client.get("/api/admin/sms", headers=admin_headers)
+    cfg = r2.json()["server"]
+    assert cfg["enabled"] is True
+    assert cfg["username"] == "56FNPL"
+
+    # PUT без пароля (или с маской) не должен затирать сохранённый пароль —
+    # проверяем это косвенно через успешную реальную отправку теста ниже.
+
+
+def test_admin_sms_config_save_keeps_password_when_masked(client, admin_headers):
+    client.put(
+        "/api/admin/sms",
+        headers=admin_headers,
+        json={"enabled": True, "url": "https://gw.example", "username": "u", "password": "secret123"},
+    )
+    r = client.put(
+        "/api/admin/sms",
+        headers=admin_headers,
+        json={"enabled": True, "url": "https://gw.example", "username": "u", "password": "••••••••"},
+    )
+    assert r.status_code == 200, r.text
+
+    # send_sms достаёт пароль из настроек — подменим httpx, чтобы убедиться,
+    # что реально ушёл "secret123", а не маска.
+    import app.services.sms as sms_module
+
+    captured = {}
+
+    class _FakeResp:
+        status_code = 200
+        text = "ok"
+
+    class _FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None, auth=None):
+            captured["auth"] = auth
+            captured["url"] = url
+            return _FakeResp()
+
+    monkeypatch_target = sms_module.httpx
+    orig_async_client = monkeypatch_target.AsyncClient
+    sms_module.httpx.AsyncClient = _FakeClient
+    try:
+        import asyncio
+
+        from app.db.session import async_session_factory
+
+        async def _run():
+            async with async_session_factory() as db:
+                return await sms_module.send_sms("+99361000000", "тест", db=db)
+
+        result = asyncio.run(_run())
+    finally:
+        sms_module.httpx.AsyncClient = orig_async_client
+
+    assert result["ok"] is True
+    assert captured["auth"] == ("u", "secret123")
+
+
+def test_admin_sms_config_requires_url_when_enabled(client, admin_headers):
+    r = client.put(
+        "/api/admin/sms",
+        headers=admin_headers,
+        json={"enabled": True, "url": "", "username": "u", "password": "p"},
+    )
+    assert r.status_code == 400
+
+
+def test_admin_sms_templates_save_and_use(
+    client, admin_headers, operator_headers, city_id, monkeypatch
+):
+    r = client.put(
+        "/api/admin/sms/templates",
+        headers=admin_headers,
+        json={
+            "master_assign": "Мастер {master_name}, ремонт {number}, {device}",
+            "ready": "Клиент {client_name}, заказ {number} готов",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["templates"]["ready"].startswith("Клиент")
+
+    repair = _mk_repair_via_api(
+        client, operator_headers, city_id, "sms-tpl-1", name="Пётр"
+    )
+    r2 = client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
+    assert r2.status_code == 200, r2.text
+    text = r2.json()["sms"]["text"]
+    assert text == f"Клиент Пётр, заказ {repair['number']} готов"
+
+
+def test_admin_sms_templates_forbidden_for_operator(client, operator_headers):
+    r = client.put(
+        "/api/admin/sms/templates",
+        headers=operator_headers,
+        json={"master_assign": "x", "ready": "y"},
+    )
+    assert r.status_code == 403
+
+
+def test_admin_sms_test_endpoint(client, admin_headers, monkeypatch):
+    async def _fake_send(phone, text, db=None):
+        return {"ok": True, "detail": "http_200"}
+
+    monkeypatch.setattr("app.services.sms.send_sms", _fake_send)
+    r = client.post(
+        "/api/admin/sms/test",
+        headers=admin_headers,
+        json={"phone": "+993 61 000000"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+
+def test_admin_sms_test_endpoint_failure(client, admin_headers, monkeypatch):
+    async def _fake_fail(phone, text, db=None):
+        return {"ok": False, "detail": "http_500"}
+
+    monkeypatch.setattr("app.services.sms.send_sms", _fake_fail)
+    r = client.post(
+        "/api/admin/sms/test",
+        headers=admin_headers,
+        json={"phone": "+993 61 000000"},
+    )
+    assert r.status_code == 502
+
+
 def test_master_sms_sent_with_phone(monkeypatch):
     """При наличии номера шлём SMS по шаблону на нормализованный телефон."""
     class _M:
         name = "Мастер Анна"
         phone = "+993 62 333444"
     sent = {}
-    async def _fake_send(phone, text):
+    async def _fake_send(phone, text, db=None):
         sent["phone"] = phone
         sent["text"] = text
         return {"ok": True}

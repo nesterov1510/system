@@ -33,6 +33,10 @@ from app.services.print import (
     render_blank_pdf,
     template_to_body,
 )
+from app.services.sms import (
+    AVAILABLE_MASTER_FIELDS as AVAILABLE_SMS_MASTER_FIELDS,
+    AVAILABLE_READY_FIELDS as AVAILABLE_SMS_READY_FIELDS,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminOnly])
 
@@ -333,6 +337,92 @@ async def test_label_print(db: DbSession):
     await db.commit()
     await db.refresh(job)
     return {"job_id": job.id, "status": job.status}
+
+
+# --- SMS gateway settings ---
+@router.get("/sms")
+async def get_sms_config(db: DbSession):
+    """Настройки SMS-шлюза + текущие тексты шаблонов (для формы в админке)."""
+    from app.services.settings import get_sms_server, get_sms_templates
+
+    server = await get_sms_server(db)
+    server = dict(server)
+    server["password"] = "•" * 8 if server.get("password") else ""
+    templates = await get_sms_templates(db)
+    return {
+        "server": server,
+        "templates": templates,
+        "template_fields": {
+            "master_assign": AVAILABLE_SMS_MASTER_FIELDS,
+            "ready": AVAILABLE_SMS_READY_FIELDS,
+        },
+    }
+
+
+@router.put("/sms")
+async def set_sms_config(db: DbSession, body: dict):
+    """Сохранить настройки SMS-шлюза (URL, логин/пароль, вкл/выкл)."""
+    from app.services.settings import get_sms_server, set_setting
+
+    current = await get_sms_server(db)
+    password = body.get("password")
+    # Пустая/маскированная строка пароля из формы — не затираем сохранённый.
+    if password is None or (isinstance(password, str) and password.strip("•") == ""):
+        password = current.get("password", "")
+
+    try:
+        timeout_sec = float(body.get("timeout_sec", current.get("timeout_sec", 10.0)))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Таймаут должен быть числом")
+
+    value = {
+        "enabled": bool(body.get("enabled", current.get("enabled", False))),
+        "url": str(body.get("url", current.get("url", ""))).strip(),
+        "username": str(body.get("username", current.get("username", ""))).strip(),
+        "password": password,
+        "verify_ssl": bool(body.get("verify_ssl", current.get("verify_ssl", False))),
+        "timeout_sec": timeout_sec,
+    }
+    if value["enabled"] and not value["url"]:
+        raise HTTPException(400, "Укажите адрес SMS-шлюза")
+
+    await set_setting(db, "sms_server", value, "SMS-шлюз: адрес, логин/пароль, таймаут")
+    out = dict(value)
+    out["password"] = "•" * 8 if out.get("password") else ""
+    return {"server": out}
+
+
+@router.put("/sms/templates")
+async def set_sms_templates(db: DbSession, body: dict):
+    """Сохранить редактируемые шаблоны текстов SMS (мастеру / клиенту)."""
+    from app.services.settings import get_sms_templates, set_setting
+
+    current = await get_sms_templates(db)
+    value = {
+        "master_assign": str(
+            body.get("master_assign", current.get("master_assign", ""))
+        ).strip(),
+        "ready": str(body.get("ready", current.get("ready", ""))).strip(),
+    }
+    await set_setting(db, "sms_templates", value, "Шаблоны текстов SMS")
+    return {"templates": value}
+
+
+@router.post("/sms/test")
+async def test_sms(db: DbSession, body: dict):
+    """Отправить тестовое SMS на указанный номер — проверка шлюза из админки."""
+    from app.services.sms import send_sms
+
+    phone = str(body.get("phone", "")).strip()
+    if not phone:
+        raise HTTPException(400, "Укажите номер телефона для теста")
+    text = str(body.get("text") or "Тестовое сообщение MSB: шлюз SMS настроен верно.")
+    result = await send_sms(phone, text, db=db)
+    if not result.get("ok"):
+        raise HTTPException(
+            502, f"Не удалось отправить тестовое SMS: {result.get('detail', 'ошибка шлюза')}"
+        )
+    return {"ok": True, "detail": result.get("detail")}
 
 
 # --- Print templates (бланк) ---

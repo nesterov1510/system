@@ -37,6 +37,7 @@ const NAV_ITEMS = [
       { href: "/admin/users", label: "Сотрудники", icon: "👥" },
       { href: "/admin/print-templates", label: "Шаблоны", icon: "🖨️" },
       { href: "/admin/printer", label: "Принтер", icon: "🖨️" },
+      { href: "/admin/sms", label: "SMS", icon: "✉️" },
     ],
   },
 ];

@@ -456,7 +456,7 @@ async def create_repair(
         and repair.master.id != user.id
     ):
         await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
-        await send_master_assignment_sms(repair.master, repair)
+        await send_master_assignment_sms(repair.master, repair, db=db)
 
     # Notify the chat: new acceptance.
     await manager.broadcast(
@@ -782,7 +782,7 @@ async def update_repair(
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
-                await send_master_assignment_sms(master, repair)
+                await send_master_assignment_sms(master, repair, db=db)
 
     if repair.status != old_status:
         await manager.broadcast(
@@ -844,7 +844,10 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
             }
         )
 
-    text = build_ready_sms(repair)
+    from app.services.settings import get_sms_templates
+
+    tpl = await get_sms_templates(db)
+    text = build_ready_sms(repair, template=tpl.get("ready") or None)
     return {
         "repair": _serialize(repair),
         "sms": {"to": repair.client.phone, "text": text},
@@ -864,7 +867,7 @@ async def finish_repair_send_sms(
         raise HTTPException(403, "Нет доступа к этому ремонту")
     _require_finisher(user)
 
-    result = await send_sms(repair.client.phone, payload.text)
+    result = await send_sms(repair.client.phone, payload.text, db=db)
     if not result.get("ok"):
         raise HTTPException(
             502, f"Не удалось отправить SMS: {result.get('detail', 'ошибка шлюза')}"

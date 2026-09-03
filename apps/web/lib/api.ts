@@ -690,6 +690,43 @@ export const api = {
     if (!res.ok) throw new Error(`Ошибка превью: ${res.status}`);
     return res.blob();
   },
+
+  // SMS gateway + templates (admin)
+  getSmsConfig: () =>
+    request<{
+      server: {
+        enabled: boolean;
+        url: string;
+        username: string;
+        password: string;
+        verify_ssl: boolean;
+        timeout_sec: number;
+      };
+      templates: { master_assign: string; ready: string };
+      template_fields: { master_assign: string[]; ready: string[] };
+    }>("/api/admin/sms"),
+  saveSmsConfig: (payload: {
+    enabled: boolean;
+    url: string;
+    username: string;
+    password?: string;
+    verify_ssl: boolean;
+    timeout_sec: number;
+  }) =>
+    request<{ server: Record<string, unknown> }>("/api/admin/sms", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  saveSmsTemplates: (payload: { master_assign: string; ready: string }) =>
+    request<{ templates: Record<string, unknown> }>("/api/admin/sms/templates", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  testSms: (phone: string, text?: string) =>
+    request<{ ok: boolean; detail?: string }>("/api/admin/sms/test", {
+      method: "POST",
+      body: JSON.stringify({ phone, text }),
+    }),
 };
 
 export function mediaUrl(path: string): string {

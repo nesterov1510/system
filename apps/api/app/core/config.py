@@ -48,9 +48,10 @@ class Settings(BaseSettings):
     AI_BASE_URL: str = ""
     AI_MODEL: str = ""
 
-    # --- SMS gateway (сервер 192.168.8.81) ---
-    # Параметры заданы дефолтом прямо в коде (см. задачу), но их можно
-    # переопределить через env без правки кода.
+    # --- SMS gateway ---
+    # Реальные значения (URL/логин/пароль/вкл-выкл) настраиваются в админке
+    # (Admin → SMS, хранится в БД как Setting["sms_server"]). Поля ниже — это
+    # только запасной дефолт для окружений без БД (юнит-тесты и т.п.).
     SMS_ENABLED: bool = True
     SMS_GATEWAY_URL: str = "https://192.168.8.81/api/3rdparty/v1/messages"
     SMS_GATEWAY_USERNAME: str = "KJV7XJ"
