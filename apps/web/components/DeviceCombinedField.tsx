@@ -1,15 +1,18 @@
 "use client";
 
 // Поле «Марка + Модель + Серийный номер» в одну строку.
-// Три сегмента разделяются ДВОЙНЫМ пробелом: «Марка  Модель  Серийный номер».
-// Каждый двойной пробел подсвечивается зелёным прямо в поле — так мастер
-// видит, что он всё делает правильно. Первая буква каждого слова
-// капитализируется автоматически.
+// Три сегмента разделяются ДВУМЯ ТОЧКАМИ подряд: «Марка..Модель..Серийный номер».
+// Раньше разделителем был двойной пробел, но на телефонах автокорректор
+// подменяет два пробела на «. » (точка+пробел), что ломало разбиение —
+// поэтому разделитель теперь «..», который автокоррекция не трогает.
+// Каждый разделитель подсвечивается зелёным прямо в поле — так видно, что
+// всё введено правильно. Текст автоматически приводится к ЗАГЛАВНЫМ буквам
+// (марка, модель, серийный номер печатаются в бланке заглавными).
 import { useCallback, useEffect, useRef } from "react";
 
-/** Капитализировать первую букву каждого «слова» (после начала строки или пробела). */
+/** Привести текст к ЗАГЛАВНЫМ буквам (марка/модель/серийный номер — капсом). */
 export function capitalizeWords(s: string): string {
-  return s.replace(/(^|\s)(\S)/g, (_m, sep: string, ch: string) => sep + ch.toUpperCase());
+  return s.toUpperCase();
 }
 
 function escapeHtml(s: string): string {
@@ -19,31 +22,34 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+// Разделитель сегментов: ровно две (и более) точки подряд, без пробелов.
+const SEGMENT_SEPARATOR = /\.{2,}/g;
+
 function buildHighlightedHtml(text: string): string {
   if (!text) return "";
   const escaped = escapeHtml(text);
-  // Двойной (и более) пробел — граница сегмента, подсвечиваем зелёным.
-  return escaped.replace(/ {2,}/g, (m) => `<span class="msb-devicefield-sep">${m}</span>`);
+  return escaped.replace(SEGMENT_SEPARATOR, (m) => `<span class="msb-devicefield-sep">${m}</span>`);
 }
 
-/** Разбить объединённый текст на марку / модель / серийный номер по двойным пробелам. */
+/** Разбить объединённый текст на марку / модель / серийный номер по «..». */
 export function splitDeviceCombined(raw: string): {
   brand: string;
   model: string;
   serial: string;
 } {
-  const parts = (raw || "").split(/ {2,}/).map((p) => p.trim());
+  const parts = (raw || "").split(SEGMENT_SEPARATOR).map((p) => p.trim());
   return {
     brand: parts[0] || "",
     model: parts[1] || "",
-    serial: parts.slice(2).join(" ").trim(),
+    serial: parts.slice(2).join("..").trim(),
   };
 }
 
 /** Собрать объединённый текст из марки / модели / серийного номера. */
 export function joinDeviceCombined(brand: string, model: string, serial: string): string {
-  return [brand, model, serial].filter((p) => p).join("  ");
+  return [brand, model, serial].filter((p) => p).join("..");
 }
+
 
 function getCaretOffset(el: HTMLElement): number {
   const sel = window.getSelection();

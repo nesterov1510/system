@@ -84,7 +84,7 @@ export default function NewRepairPage() {
   const [contact2Error, setContact2Error] = useState<string | null>(null);
 
   const [deviceType, setDeviceType] = useState("Телевизоры");
-  // 3) Марка + модель + серийный номер — одно поле, сегменты через двойной пробел.
+  // 3) Марка + модель + серийный номер — одно поле, сегменты через «..».
   const [deviceCombined, setDeviceCombined] = useState("");
   const { brand, model, serial } = splitDeviceCombined(deviceCombined);
   const [complect, setComplect] = useState<string[]>([]);
@@ -279,7 +279,10 @@ export default function NewRepairPage() {
     try {
       const result = await api.printLabel(done.id);
       setLabelPdf(result.pdf_base64);
-      setLabelMessage("Этикетка 58×38 поставлена в очередь печати.");
+      setLabelMessage("Этикетка 58×38 поставлена в очередь печати. Переходим в главное меню…");
+      // После печати этикетки приёмка завершена — сразу возвращаемся в
+      // главное меню (доска «Все ремонты»), не заставляя ждать бланк A4.
+      setTimeout(() => router.push("/repairs"), 900);
     } catch (e) {
       setLabelMessage(e instanceof Error ? e.message : "Ошибка печати этикетки");
     } finally {
@@ -710,18 +713,19 @@ export default function NewRepairPage() {
             </div>
 
             {/* 3) Марка + модель + серийный номер — одно поле, сегменты через
-                двойной пробел. Двойной пробел подсвечивается зелёным. */}
+                две точки подряд «..» (не через пробелы — их «съедает» автокоррекция
+                на телефонах). Разделитель подсвечивается зелёным, текст — заглавными. */}
             <div className="mt-4">
               <label className="msb-label">
-                Марка  Модель  Серийный номер
+                Марка..Модель..Серийный номер
                 <span className="ml-1 font-normal normal-case text-slate-400">
-                  (разделяйте двойным пробелом — авто-Заглавные)
+                  (разделяйте двумя точками «..» — автоматически ЗАГЛАВНЫМИ)
                 </span>
               </label>
               <DeviceCombinedField
                 value={deviceCombined}
                 onChange={setDeviceCombined}
-                placeholder="Samsung␣␣UE55␣␣SN1234567"
+                placeholder="SAMSUNG..UE55..SN1234567"
               />
               <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-500">
                 <span>Марка: <b className="text-slate-700">{brand || "—"}</b></span>
