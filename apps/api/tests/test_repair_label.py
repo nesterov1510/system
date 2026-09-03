@@ -76,6 +76,7 @@ def test_repair_label_pdf_and_queue(
     assert "Линии на экране" in text
     assert "Царапины" in text
     assert "Скол корпуса" in text
+    assert "MERYOSAB electronics" in text
 
     jobs = client.get(
         "/api/print/jobs?status=queued",

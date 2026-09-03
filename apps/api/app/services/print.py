@@ -263,6 +263,10 @@ def render_repair_label_pdf(
         if index == 0:
             details_y -= 0.35 * mm
 
+    # Постоянная подпись сервисного центра в самом низу этикетки.
+    c.setFont(FONT_BOLD, 4.2)
+    c.drawCentredString(w / 2, 1.8 * mm, "MERYOSAB electronics")
+
     c.showPage()
     c.save()
     return buf.getvalue()
