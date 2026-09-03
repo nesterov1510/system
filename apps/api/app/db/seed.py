@@ -60,9 +60,13 @@ async def seed(db: AsyncSession) -> None:
         db.add(branch)
         await db.flush()
 
-    # --- Admin user (только один) ---
-    row = await db.execute(select(User).where(User.role == UserRole.ADMIN.value))
-    if row.scalar_one_or_none() is None:
+    # --- Admin user (создаём только если администраторов ещё нет) ---
+    # В рабочей системе администраторов может быть несколько. `first()` здесь
+    # намеренно не требует единственности и делает повторный seed безопасным.
+    row = await db.execute(
+        select(User.id).where(User.role == UserRole.ADMIN.value).limit(1)
+    )
+    if row.scalars().first() is None:
         if settings.ENV == "prod" and (
             not settings.SEED_ADMIN_PASSWORD
             or settings.SEED_ADMIN_PASSWORD.startswith("CHANGE_ME")
