@@ -237,6 +237,9 @@ class Repair(Base, TimestampMixin):
     contact2_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact2_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # Заказ доставлен курьером / забран с адреса (не принесён лично в сервис).
+    is_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+
     client: Mapped["Client"] = relationship(back_populates="repairs")
     accepted_by_user: Mapped["User"] = relationship(foreign_keys=[accepted_by])
     # Основной мастер (для совместимости: фильтры, доска, права доступа).

@@ -95,6 +95,8 @@ export default function NewRepairPage() {
   const [etaDays, setEtaDays] = useState("");
   const [consent, setConsent] = useState(true);
   const [consentRepair, setConsentRepair] = useState(true);
+  // Заказ доставлен курьером / забран с адреса клиента (а не принесён лично).
+  const [isDelivery, setIsDelivery] = useState(false);
   const [photos, setPhotos] = useState<File[]>([]);
   const [step, setStep] = useState(0);
 
@@ -256,6 +258,7 @@ export default function NewRepairPage() {
         eta_days: etaDays ? parseInt(etaDays, 10) : null,
         eta_source: etaDays ? "manual" : null,
         consent_repair: consentRepair,
+        is_delivery: isDelivery,
       });
 
       if (photos.length) {
@@ -446,6 +449,7 @@ export default function NewRepairPage() {
                 setContact2Phone("");
                 setContact2Error(null);
                 setContact2Open(false);
+                setIsDelivery(false);
                 setDeviceCombined("");
                 setComplect([]);
                 setConditions([]);
@@ -648,6 +652,19 @@ export default function NewRepairPage() {
                   </div>
                 </div>
               )}
+
+              {/* Заказ с доставкой: техника не принесена лично, а доставлена
+                  курьером / забрана с адреса клиента. */}
+              <label className="flex items-center gap-3 rounded-xl bg-amber-50/60 p-4 text-sm text-slate-700 ring-1 ring-amber-100">
+                <input type="checkbox" checked={isDelivery}
+                  onChange={(e) => setIsDelivery(e.target.checked)}
+                  className="h-5 w-5 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
+                <span className="flex items-center gap-1.5">
+                  <span>🚚</span>
+                  <b>Заказ с доставкой</b>
+                  <span className="text-slate-400">(доставлен курьером / забран с адреса)</span>
+                </span>
+              </label>
 
               <div className="rounded-xl bg-blue-50/50 p-4 ring-1 ring-blue-100 space-y-3">
                 <label className="flex items-start gap-3 text-sm text-slate-700">

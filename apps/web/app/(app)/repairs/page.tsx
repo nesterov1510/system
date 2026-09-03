@@ -238,8 +238,11 @@ export default function RepairsBoardPage() {
                           {classIcon(r.device_type)}
                         </span>
                         <span>
-                          <span className="block text-[11px] font-medium uppercase tracking-wide text-msb-600">
+                          <span className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-msb-600">
                             {normalizeClass(r.device_type)}
+                            {r.is_delivery && (
+                              <span title="Заказ с доставкой" className="text-sm normal-case">🚚</span>
+                            )}
                           </span>
                           <span className="block text-sm font-bold text-slate-900">
                             {[r.brand, r.model].filter(Boolean).join(" ") || "Без модели"}

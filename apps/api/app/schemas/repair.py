@@ -33,6 +33,8 @@ class RepairCreate(BaseModel):
     eta_source: str | None = None
     source: str = "walkin"
     consent_repair: bool = False
+    # Заказ доставлен курьером / забран с адреса клиента.
+    is_delivery: bool = False
 
 
 class RepairUpdate(BaseModel):
@@ -57,6 +59,7 @@ class RepairUpdate(BaseModel):
     warranty_text: str | None = None
     contact2_name: str | None = None
     contact2_phone: str | None = None
+    is_delivery: bool | None = None
 
 
 class RepairEventOut(BaseModel):
@@ -118,6 +121,7 @@ class RepairOut(BaseModel):
     events: list[RepairEventOut] = []
     contact2_name: str | None = None
     contact2_phone: str | None = None
+    is_delivery: bool = False
 
     # denormalized client info for list/card rendering
     client_name: str | None = None

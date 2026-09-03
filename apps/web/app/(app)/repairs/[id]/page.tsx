@@ -160,6 +160,21 @@ export default function RepairCardPage() {
     }
   }
 
+  // Заказ с доставкой: можно включить/выключить прямо на карточке ремонта.
+  async function toggleDelivery(value: boolean) {
+    if (!repair) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateRepair(id, { is_delivery: value });
+      setRepair(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function removeThis() {
     if (!repair) return;
     if (!confirm(`Удалить ремонт ${repair.number} и все его данные? Это действие необратимо.`)) return;
@@ -662,6 +677,15 @@ export default function RepairCardPage() {
               {repair.contact2_name || repair.contact2_phone ? "✏️ Изменить" : "＋ Добавить"}
             </button>
           </div>
+          {/* Заказ с доставкой — редактируется прямо на карточке. */}
+          <label className="mt-3 flex items-center gap-2.5 rounded-xl bg-amber-50/60 px-4 py-2.5 text-sm text-slate-700 ring-1 ring-amber-100 w-fit">
+            <input type="checkbox" checked={!!repair.is_delivery} disabled={busy}
+              onChange={(e) => toggleDelivery(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
+            <span className="flex items-center gap-1.5">
+              <span>🚚</span> <b>Заказ с доставкой</b>
+            </span>
+          </label>
           {complect && complect.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {complect.map((item) => (

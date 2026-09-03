@@ -193,6 +193,7 @@ export interface Repair {
   helper_names?: string[];
   contact2_name?: string | null;
   contact2_phone?: string | null;
+  is_delivery?: boolean;
   events: RepairEvent[];
 }
 

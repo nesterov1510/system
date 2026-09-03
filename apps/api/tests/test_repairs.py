@@ -99,6 +99,65 @@ def test_repair_created_with_master_by_operator_is_diag(
     assert r.json()["status"] == "Диагностика"
 
 
+def test_is_delivery_flag_default_and_set_on_intake(client, operator_headers, city_id):
+    """Чекбокс «Заказ с доставкой» на приёмке — по умолчанию выключен, можно включить."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-default-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Без доставки", "phone": "+993 61 444555"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["is_delivery"] is False
+
+    r2 = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-set-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "С доставкой", "phone": "+993 61 444556"},
+            "device_type": "ТВ",
+            "is_delivery": True,
+        },
+    )
+    assert r2.status_code == 201
+    assert r2.json()["is_delivery"] is True
+
+
+def test_is_delivery_flag_editable_via_patch(client, operator_headers, city_id):
+    """Флаг доставки можно включить/выключить на карточке ремонта после приёмки."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-patch-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Доставка потом", "phone": "+993 61 444557"},
+            "device_type": "ТВ",
+        },
+    )
+    repair = r.json()
+    assert repair["is_delivery"] is False
+
+    r2 = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"is_delivery": True},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["is_delivery"] is True
+
+    r3 = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"is_delivery": False},
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["is_delivery"] is False
+
+
 def test_consent_repair_recorded(client, operator_headers, city_id):
     """Согласие на ремонт фиксируется в договоре (consent_repair_at)."""
     r = client.post(
