@@ -68,6 +68,14 @@ def test_repair_label_pdf_and_queue(
     assert created_repair["number"] in text
     assert "Тест Тестов" in text
     assert "+79998887766" in text
+    assert "Комплектация:" in text
+    assert "Пульт" in text
+    assert "Шнур питания" in text
+    assert "Ножки" in text
+    assert "Дефекты:" in text
+    assert "Линии на экране" in text
+    assert "Царапины" in text
+    assert "Скол корпуса" in text
 
     jobs = client.get(
         "/api/print/jobs?status=queued",

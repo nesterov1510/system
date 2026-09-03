@@ -58,6 +58,23 @@ def _can_print(user, repair: Repair) -> bool:
     )
 
 
+def _label_complectation(value: dict | None) -> str:
+    """Собрать отмеченные пункты комплектации в строку для этикетки."""
+    if not isinstance(value, dict):
+        return ""
+    items = value.get("items")
+    if isinstance(items, str):
+        return items.strip()
+    if not isinstance(items, list):
+        return ""
+    parts: list[str] = []
+    for item in items:
+        text = str(item).strip()
+        if text:
+            parts.append(text)
+    return ", ".join(parts)
+
+
 def _fmt(dt) -> str:
     return dt.strftime("%d.%m.%Y %H:%M") if dt else "—"
 
@@ -284,6 +301,8 @@ async def create_label_print_job(
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         repair_url=repair_url,
+        complectation=_label_complectation(repair.complectation),
+        defects=repair.condition_notes or "",
         width_mm=width_mm,
         height_mm=height_mm,
     )

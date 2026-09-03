@@ -114,16 +114,45 @@ def _ellipsis(c, text: str, font: str, size: float, max_width: float) -> str:
     return text + "…"
 
 
+def _label_lines(
+    c,
+    text: str,
+    *,
+    font: str,
+    size: float,
+    max_width: float,
+    max_lines: int,
+) -> list[str]:
+    """Перенести короткое поле этикетки и явно отметить обрезанный хвост."""
+    normalized = " ".join(str(text or "—").split())
+    all_lines = simpleSplit(normalized, font, size, max_width) or ["—"]
+    lines = [
+        _ellipsis(c, line, font, size, max_width)
+        for line in all_lines[:max_lines]
+    ]
+    if len(all_lines) > max_lines:
+        lines[-1] = _ellipsis(
+            c,
+            lines[-1].rstrip("…") + "…",
+            font,
+            size,
+            max_width,
+        )
+    return lines
+
+
 def render_repair_label_pdf(
     *,
     repair_number: str,
     client_name: str,
     client_phone: str,
     repair_url: str,
+    complectation: str = "",
+    defects: str = "",
     width_mm: float = 58,
     height_mm: float = 38,
 ) -> bytes:
-    """Сформировать PDF-этикетку с QR на внутреннюю карточку ремонта.
+    """Сформировать PDF-этикетку с данными приёмки и QR на карточку ремонта.
 
     Размер страницы PDF совпадает с физической этикеткой. Это позволяет CUPS
     отправить документ в термопринтер без промежуточной раскладки на A4.
@@ -140,16 +169,18 @@ def render_repair_label_pdf(
     c = canvas.Canvas(buf, pagesize=page, pageCompression=1)
     c.setTitle(f"MSB label {repair_number}")
     c.setAuthor("MSB")
+    c.setFillColorRGB(0, 0, 0)
 
     margin = 2 * mm
-    # QR занимает правую часть этикетки; слева остаётся место для ФИО/телефона.
-    qr_size = min((height_mm - 6) * mm, width_mm * 0.48 * mm)
+    # Нижняя полоса по всей ширине отдана комплектации и дефектам. QR остаётся
+    # достаточно крупным для термопринтера 203 dpi и короткого внутреннего URL.
+    qr_size = min(22 * mm, (height_mm - 8) * mm, width_mm * 0.42 * mm)
     qr_x = w - margin - qr_size
-    qr_y = (h - qr_size) / 2
+    qr_y = h - margin - qr_size
     text_right = qr_x - 1.5 * mm
     text_width = max(12 * mm, text_right - margin)
 
-    # Для маленькой физической этикетки оставляем стандартное quiet zone.
+    # Quiet zone входит внутрь qr_size и обязателен для уверенного сканирования.
     qr_buf = _qr_png(repair_url, border=4)
     c.drawImage(
         ImageReader(qr_buf),
@@ -161,8 +192,6 @@ def render_repair_label_pdf(
         mask="auto",
     )
 
-    y = h - 3.2 * mm
-    c.setFillColorRGB(0, 0, 0)
     number = f"№ {repair_number}"
     number_size = 6.2
     while number_size > 4.2 and c.stringWidth(
@@ -172,32 +201,27 @@ def render_repair_label_pdf(
     c.setFont(FONT_BOLD, number_size)
     c.drawString(
         margin,
-        y,
+        h - 3.2 * mm,
         _ellipsis(c, number, FONT_BOLD, number_size, text_width),
     )
 
-    y -= 4.8 * mm
-    name_size = 7.2
-    all_name_lines = simpleSplit(
-        client_name or "—", FONT_BOLD, name_size, text_width
+    name_size = 6.6
+    name_lines = _label_lines(
+        c,
+        client_name,
+        font=FONT_BOLD,
+        size=name_size,
+        max_width=text_width,
+        max_lines=2,
     )
-    name_lines = all_name_lines[:3] or ["—"]
-    if len(all_name_lines) > 3:
-        name_lines[-1] = _ellipsis(
-            c, name_lines[-1] + "…", FONT_BOLD, name_size, text_width
-        )
+    name_y = h - 7.5 * mm
     c.setFont(FONT_BOLD, name_size)
     for line in name_lines:
-        c.drawString(
-            margin,
-            y,
-            _ellipsis(c, line, FONT_BOLD, name_size, text_width),
-        )
-        y -= 3.7 * mm
+        c.drawString(margin, name_y, line)
+        name_y -= 3.35 * mm
 
-    # Телефон прижимаем к нижней части, чтобы он не пропал при длинном имени.
-    c.setFont(FONT, 4.8)
-    c.drawString(margin, 7.8 * mm, "Телефон")
+    c.setFont(FONT, 4.4)
+    c.drawString(margin, 22.2 * mm, "Телефон")
     phone = client_phone or "—"
     phone_size = 7.0
     while phone_size > 4.8 and c.stringWidth(
@@ -207,12 +231,37 @@ def render_repair_label_pdf(
     c.setFont(FONT_BOLD, phone_size)
     c.drawString(
         margin,
-        4.2 * mm,
+        18.2 * mm,
         _ellipsis(c, phone, FONT_BOLD, phone_size, text_width),
     )
 
-    c.setFont(FONT, 4.2)
-    c.drawCentredString(qr_x + qr_size / 2, 1.6 * mm, "Открыть ремонт")
+    # Отделяем контактную часть от данных, отмеченных оператором при приёмке.
+    c.setStrokeColorRGB(0.55, 0.55, 0.55)
+    c.setLineWidth(0.25)
+    c.line(margin, 12.8 * mm, w - margin, 12.8 * mm)
+
+    details_width = w - 2 * margin
+    details_y = 11.15 * mm
+    detail_size = 4.5
+    detail_leading = 1.85 * mm
+    detail_fields = (
+        f"Комплектация: {complectation or '—'}",
+        f"Дефекты: {defects or '—'}",
+    )
+    c.setFont(FONT_BOLD, detail_size)
+    for index, text in enumerate(detail_fields):
+        for line in _label_lines(
+            c,
+            text,
+            font=FONT_BOLD,
+            size=detail_size,
+            max_width=details_width,
+            max_lines=2,
+        ):
+            c.drawString(margin, details_y, line)
+            details_y -= detail_leading
+        if index == 0:
+            details_y -= 0.35 * mm
 
     c.showPage()
     c.save()

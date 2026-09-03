@@ -307,6 +307,8 @@ async def test_label_print(db: DbSession):
         client_name="Тестовый клиент",
         client_phone="+993 61 000000",
         repair_url=repair_url,
+        complectation="Пульт, Шнур питания",
+        defects="Царапины, Линии на экране",
         width_mm=printer.get("width_mm", 58),
         height_mm=printer.get("height_mm", 38),
     )
