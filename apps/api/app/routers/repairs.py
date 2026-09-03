@@ -603,6 +603,7 @@ async def update_repair(
     from app.db.base import utcnow
 
     old_status = repair.status
+    old_master_id = repair.master_id
     data = payload.model_dump(exclude_unset=True)
     master_ids = data.pop("master_ids", None)
     helper_ids = data.pop("helper_ids", None)
@@ -717,18 +718,30 @@ async def update_repair(
                 )
             )
 
-    if payload.status and payload.status != old_status:
+    # Как только у ремонта появился основной мастер — он сам начинает работу,
+    # поэтому «Принято» автоматически переходит в «Диагностика» (если статус
+    # не задан явно в этом же запросе и мастер назначается впервые).
+    had_master_before = bool(old_master_id)
+    if (
+        payload.status is None
+        and old_status == "Принято"
+        and repair.master_id
+        and not had_master_before
+    ):
+        repair.status = "Диагностика"
+
+    if repair.status != old_status:
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
                 actor_id=user.id,
-                data={"from": old_status, "to": payload.status},
+                data={"from": old_status, "to": repair.status},
             )
         )
-        if payload.status == "Готово к выдаче":
+        if repair.status == "Готово к выдаче":
             repair.ready_at = utcnow()
-        if payload.status == "Выдано":
+        if repair.status == "Выдано":
             repair.issued_at = utcnow()
 
     # Финализация починки: оператор указал расходы/цену/оплату.
@@ -771,11 +784,11 @@ async def update_repair(
                 )
                 await send_master_assignment_sms(master, repair)
 
-    if payload.status and payload.status != old_status:
+    if repair.status != old_status:
         await manager.broadcast(
             {
                 "type": "repair.status_changed",
-                "repair": {"number": repair.number, "status": payload.status},
+                "repair": {"number": repair.number, "status": repair.status},
             }
         )
     return _serialize(repair)
