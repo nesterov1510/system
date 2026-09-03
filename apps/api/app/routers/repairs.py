@@ -406,6 +406,11 @@ async def create_repair(
     if master_id is None and user.has_role(UserRole.MASTER.value):
         master_id = user.id
 
+    # Как только у ремонта есть основной мастер — он сразу начинает работу,
+    # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято» (даже
+    # если мастер сам принял заявку на себя).
+    initial_status = "Диагностика" if master_id else "Принято"
+
     repair = Repair(
         number=number,
         public_token=new_public_token(),
@@ -424,7 +429,7 @@ async def create_repair(
         consent_repair_at=now if payload.consent_repair else None,
         accepted_by=user.id,
         master_id=master_id,
-        status="Принято",
+        status=initial_status,
         eta_days=payload.eta_days,
         eta_source=payload.eta_source,
         accepted_at=now,
@@ -443,19 +448,28 @@ async def create_repair(
             data={"to": "Принято", "from": None},
         )
     )
+    if initial_status != "Принято":
+        db.add(
+            RepairEvent(
+                repair_id=repair.id,
+                type="status_change",
+                actor_id=user.id,
+                data={"to": initial_status, "from": "Принято"},
+            )
+        )
     await db.commit()
 
     repair = await _get_repair_or_404(db, repair.id)
 
-    # Если оператор/админ при приёмке сразу назначил мастера — сообщим ему в личку
-    # и отправим авто-SMS (если у мастера указан номер).
-    if (
-        master_id
-        and _is_assigner(user)
-        and repair.master is not None
-        and repair.master.id != user.id
-    ):
-        await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
+    # Мастеру назначен ремонт (сразу при приёмке): в личку сообщаем только
+    # если назначил кто-то другой, а вот SMS на телефон мастера (если указан
+    # в профиле) уходит в любом случае — даже когда мастер принял заявку сам.
+    if repair.master is not None:
+        if (
+            _is_assigner(user)
+            and repair.master.id != user.id
+        ):
+            await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
         await send_master_assignment_sms(repair.master, repair, db=db)
 
     # Notify the chat: new acceptance.
@@ -775,14 +789,17 @@ async def update_repair(
     repair = await _get_repair_or_404(db, repair_id)
 
     # Уведомляем в личку + авто-SMS мастерам, назначенным в этом запросе.
-    if newly_assigned_ids and _is_assigner(user):
+    # В личку сообщаем, только если назначил кто-то другой (не сам мастер) и
+    # это сделал оператор/менеджер/админ. А вот SMS на телефон мастера (если
+    # указан в его профиле) уходит всегда — даже если мастер назначил себя сам.
+    if newly_assigned_ids:
         rows = await db.execute(select(User).where(User.id.in_(newly_assigned_ids)))
         for master in rows.scalars().all():
-            if master.id != user.id:
+            if master.id != user.id and _is_assigner(user):
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
-                await send_master_assignment_sms(master, repair, db=db)
+            await send_master_assignment_sms(master, repair, db=db)
 
     if repair.status != old_status:
         await manager.broadcast(

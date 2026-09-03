@@ -174,6 +174,107 @@ def test_auto_sms_to_master_on_assignment(
     assert (master["id"], repair["id"]) in calls
 
 
+def test_auto_sms_to_master_on_intake_with_master(
+    client, admin_headers, operator_headers, city_id, monkeypatch
+):
+    """Оператор при приёмке сразу указал мастера — авто-SMS уходит тоже."""
+    master = client.post(
+        "/api/admin/users", headers=admin_headers,
+        json={"name": "Мастер Приёмка", "email": "masterintake@msb.local",
+              "password": "pass123", "role": "master", "phone": "+993 62 555000"},
+    ).json()
+
+    calls = []
+    async def _fake_sms(m, rp, db=None):
+        calls.append((str(m.id), str(rp.id)))
+        return {"ok": True}
+    monkeypatch.setattr("app.routers.repairs.send_master_assignment_sms", _fake_sms)
+
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "sms-intake-master-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Клиент приёмка", "phone": "+993 71 000111", "consent_pdn": True},
+            "device_type": "ТВ",
+            "master_id": master["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "Диагностика"
+    assert (master["id"], r.json()["id"]) in calls
+
+
+def test_auto_sms_to_master_self_accept(
+    client, admin_headers, city_id, monkeypatch
+):
+    """Мастер сам принял заявку на себя — SMS всё равно должно уйти ему."""
+    login = client.post(
+        "/api/admin/users", headers=admin_headers,
+        json={"name": "Мастер Сам", "email": "masterself@msb.local",
+              "password": "pass123", "role": "master", "phone": "+993 62 666000"},
+    ).json()
+    token = client.post(
+        "/api/auth/login",
+        json={"email": "masterself@msb.local", "password": "pass123"},
+    ).json()["access_token"]
+    self_headers = {"Authorization": f"Bearer {token}"}
+
+    calls = []
+    async def _fake_sms(m, rp, db=None):
+        calls.append((str(m.id), str(rp.id)))
+        return {"ok": True}
+    monkeypatch.setattr("app.routers.repairs.send_master_assignment_sms", _fake_sms)
+
+    r = client.post(
+        "/api/repairs",
+        headers={**self_headers, "Idempotency-Key": "sms-self-accept-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Клиент сам мастер", "phone": "+993 71 000222", "consent_pdn": True},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["master_id"] == login["id"]
+    assert r.json()["status"] == "Диагностика"
+    assert (login["id"], r.json()["id"]) in calls
+
+
+def test_auto_sms_to_master_when_admin_assigns_self_via_patch(
+    client, admin_headers, operator_headers, city_id, monkeypatch
+):
+    """Мультиролевой пользователь (админ, также мастер) назначает ремонт сам
+    себе через PATCH — уведомление в личку не нужно (сам себе), но SMS на его
+    телефон (если указан в профиле) всё равно должно уйти.
+    """
+    # Обновим у самого админа телефон и добавим ему роль master (union прав).
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    admin_user = next(u for u in users if u["email"] == "admin@msb.local")
+    r = client.patch(
+        f"/api/admin/users/{admin_user['id']}",
+        headers=admin_headers,
+        json={"phone": "+993 62 888000", "roles": ["admin", "master"]},
+    )
+    assert r.status_code == 200, r.text
+
+    repair = _mk_repair_via_api(client, operator_headers, city_id, "sms-self-patch-1")
+
+    calls = []
+    async def _fake_sms(m, rp, db=None):
+        calls.append((str(m.id), str(rp.id)))
+        return {"ok": True}
+    monkeypatch.setattr("app.routers.repairs.send_master_assignment_sms", _fake_sms)
+
+    r = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=admin_headers,
+        json={"master_ids": [admin_user["id"]]},
+    )
+    assert r.status_code == 200, r.text
+    assert (admin_user["id"], repair["id"]) in calls
+
+
 def test_master_sms_skipped_without_phone(monkeypatch):
     """send_master_assignment_sms не звонит на шлюз, если у мастера нет номера."""
     class _M:

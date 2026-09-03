@@ -58,6 +58,45 @@ def test_master_auto_assigned_on_intake(client, master_headers, city_id):
     )
     assert r.status_code == 201
     assert r.json()["master_id"] is not None
+    # Мастер уже назначен при создании — статус сразу «Диагностика», минуя
+    # «Принято» (даже когда мастер сам себя назначил на приёмке).
+    assert r.json()["status"] == "Диагностика"
+
+
+def test_repair_without_master_stays_new(client, operator_headers, city_id):
+    """Без мастера при приёмке ремонт остаётся в «Принято», как раньше."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "no-master-intake-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Без мастера", "phone": "+993 61 888888"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["master_id"] is None
+    assert r.json()["status"] == "Принято"
+
+
+def test_repair_created_with_master_by_operator_is_diag(
+    client, admin_headers, operator_headers, city_id
+):
+    """Оператор при приёмке сразу указал мастера — статус тоже «Диагностика»."""
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    master = next(u for u in users if u["email"] == "master@msb.local")
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "operator-intake-master-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "С мастером сразу", "phone": "+993 61 777333"},
+            "device_type": "ТВ",
+            "master_id": master["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "Диагностика"
 
 
 def test_consent_repair_recorded(client, operator_headers, city_id):
