@@ -6,9 +6,9 @@
 #
 # Запуск (на сервере):
 #   cd /home/windowrepair-ae/msb
-#   sudo bash deploy/update.sh              # обновить web + api
+#   sudo bash deploy/update.sh              # web + api + активный print-agent
 #   sudo bash deploy/update.sh --web-only   # только фронтенд
-#   sudo bash deploy/update.sh --api-only   # только backend
+#   sudo bash deploy/update.sh --api-only   # backend + активный print-agent
 #
 # Можно запускать и без sudo — права администратора будут запрошены сами
 # (для systemctl). Каталог проекта берётся из MSB_ROOT (по умолчанию —
@@ -107,7 +107,10 @@ if [ "$DO_WEB" = 1 ]; then
 
   # Чистая сборка: остатки прошлой сборки — частая причина 500 после замены файлов.
   rm -rf .next
-  run_as_owner npm run build || die "СБОРКА УПАЛА — ошибка выше, сайт остался на старой версии"
+  # Для native/systemd deployment браузер всегда использует same-origin.
+  # Пустые NEXT_PUBLIC_* не дают случайно зашить localhost/IP в JS-бандл.
+  run_as_owner env NEXT_PUBLIC_API_URL= NEXT_PUBLIC_WS_URL= npm run build \
+    || die "СБОРКА УПАЛА — Web не перезапущен; исправьте ошибку и повторите обновление"
   ok "next build выполнен"
 
   [ -d .next/standalone ] || die ".next/standalone не создан (проверьте output:'standalone' в next.config.mjs)"
@@ -123,6 +126,20 @@ if [ "$DO_WEB" = 1 ]; then
   fi
 
   restart_unit msb-web
+fi
+
+# ---------------------------------------------------------- PRINT AGENT
+# Агент читает формат задания из payload. Если он уже запущен, обязательно
+# перезапускаем его вместе с backend, чтобы новые типы заданий не ушли не туда.
+if [ "$DO_API" = 1 ] && have_systemd \
+   && $SUDO systemctl is-active --quiet msb-print-agent.service; then
+  step "Print-agent"
+  if [ -x "$ROOT/apps/print-agent/.venv/bin/pip" ]; then
+    run_as_owner "$ROOT/apps/print-agent/.venv/bin/pip" install -q \
+      -r "$ROOT/apps/print-agent/requirements.txt" \
+      || warn "не удалось обновить зависимости print-agent"
+  fi
+  restart_unit msb-print-agent
 fi
 
 # ---------------------------------------------------------------- проверки

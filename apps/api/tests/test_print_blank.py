@@ -22,7 +22,9 @@ def _pdf_text(client, headers, repair_id: str) -> str:
     pdf = base64.b64decode(r.json()["pdf_base64"])
     with open("/tmp/test_blank.pdf", "wb") as f:
         f.write(pdf)
-    return PdfReader("/tmp/test_blank.pdf").pages[0].extract_text()
+    page = PdfReader("/tmp/test_blank.pdf").pages[0]
+    assert page["/Resources"].get("/XObject"), "QR должен быть встроен в A4 PDF"
+    return page.extract_text()
 
 
 def _new_repair(client, headers, city_id: str, key: str) -> dict:

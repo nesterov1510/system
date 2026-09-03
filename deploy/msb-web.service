@@ -1,42 +1,30 @@
 # /etc/systemd/system/msb-web.service
-# Systemd unit для Next.js (фронтенд).
-# Расположение: /home/windowrepair-ae/msb/apps/web
-#
-# ВАЖНО: перед запуском выполните сборку:
-#   cd /home/windowrepair-ae/msb/apps/web
-#   npm ci
-#   npm run build
-#   cp -r .next/static .next/standalone/.next/static
-#
-# Установка:
-#   sudo cp deploy/msb-web.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now msb-web
+# MSB Next.js standalone frontend: /home/windowrepair-ae/msb, port 3030.
+# Build and installation are documented in DEPLOY.md.
 
 [Unit]
 Description=MSB Web (Next.js frontend)
-After=network.target msb-api.service
-Wants=msb-api.service
+After=network-online.target msb-api.service
+Wants=network-online.target msb-api.service
 
 [Service]
 Type=simple
 User=windowrepair-ae
 Group=windowrepair-ae
 WorkingDirectory=/home/windowrepair-ae/msb/apps/web
-
-# Путь к .env в корне проекта (/home/windowrepair-ae/msb/.env)
 EnvironmentFile=/home/windowrepair-ae/msb/.env
 
-# Next.js в standalone-режиме — запускаем собранный сервер
 ExecStart=/usr/bin/node /home/windowrepair-ae/msb/apps/web/.next/standalone/server.js
 
-# Переменные, необходимые Next.js standalone-серверу
 Environment=NODE_ENV=production
 Environment=PORT=3030
-Environment=HOST=0.0.0.0
+Environment=HOSTNAME=0.0.0.0
 
-Restart=always
+Restart=on-failure
 RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+UMask=0027
 
 NoNewPrivileges=true
 ProtectHome=false

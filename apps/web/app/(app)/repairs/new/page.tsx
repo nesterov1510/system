@@ -3,7 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, getStoredUser, money, type Lookup, type PriceHint, type Repair } from "@/lib/api";
+import {
+  api,
+  downloadPdfBase64,
+  getStoredUser,
+  money,
+  type Lookup,
+  type PriceHint,
+  type Repair,
+} from "@/lib/api";
 
 // Техника делится на классы: телевизоры / компьютеры / бытовая техника / другое.
 const DEVICE_TYPES = ["Телевизоры", "Компьютеры", "Бытовая техника", "Другое"];
@@ -66,6 +74,9 @@ export default function NewRepairPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Repair | null>(null);
+  const [labelBusy, setLabelBusy] = useState(false);
+  const [labelMessage, setLabelMessage] = useState<string | null>(null);
+  const [labelPdf, setLabelPdf] = useState<string | null>(null);
   const [priceHint, setPriceHint] = useState<PriceHint | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -142,6 +153,8 @@ export default function NewRepairPage() {
   async function submit() {
     setLoading(true);
     setError(null);
+    setLabelMessage(null);
+    setLabelPdf(null);
     try {
       const repair = await api.createRepair({
         city_id: cityId,
@@ -177,6 +190,22 @@ export default function NewRepairPage() {
     }
   }
 
+  async function printLabel() {
+    if (!done) return;
+    setLabelBusy(true);
+    setLabelMessage(null);
+    setLabelPdf(null);
+    try {
+      const result = await api.printLabel(done.id);
+      setLabelPdf(result.pdf_base64);
+      setLabelMessage("Этикетка 58×38 поставлена в очередь печати.");
+    } catch (e) {
+      setLabelMessage(e instanceof Error ? e.message : "Ошибка печати этикетки");
+    } finally {
+      setLabelBusy(false);
+    }
+  }
+
   if (done) {
     return (
       <div className="mx-auto max-w-md animate-slide-up">
@@ -196,15 +225,41 @@ export default function NewRepairPage() {
 
           <div className="mt-8 space-y-3">
             <button
+              onClick={printLabel}
+              disabled={labelBusy}
+              className="msb-btn-primary w-full"
+            >
+              {labelBusy ? "Отправляем…" : "🏷️ Печатать этикетку 58×38"}
+            </button>
+
+            {labelMessage && (
+              <div className={`rounded-xl px-4 py-3 text-sm ring-1 ${
+                labelPdf
+                  ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                  : "bg-red-50 text-red-600 ring-red-100"
+              }`}>
+                <p>{labelPdf ? "✅ " : "⚠ "}{labelMessage}</p>
+                {labelPdf && (
+                  <button
+                    onClick={() => downloadPdfBase64(labelPdf, `label-${done.number}.pdf`)}
+                    className="mt-2 text-xs font-semibold underline"
+                  >
+                    Скачать PDF этикетки
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
               onClick={async () => {
                 try {
                   await api.print(done.id);
                   alert("✅ Бланк отправлен на печать");
                 } catch { alert("Ошибка печати"); }
               }}
-              className="msb-btn-primary w-full"
+              className="msb-btn-secondary w-full"
             >
-              🖨️ Печатать бланк
+              🖨️ Печатать бланк A4
             </button>
             <button
               onClick={() => router.push(`/repairs/${done.id}`)}
@@ -225,6 +280,8 @@ export default function NewRepairPage() {
                 setPhotos([]);
                 setMasterId("");
                 setEtaDays("");
+                setLabelMessage(null);
+                setLabelPdf(null);
                 setStep(0);
               }}
               className="msb-btn-ghost w-full text-slate-600"
@@ -590,7 +647,7 @@ export default function NewRepairPage() {
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
-                    <span>✓</span> Принять и печатать
+                    <span>✓</span> Принять технику
                   </span>
                 )}
               </button>

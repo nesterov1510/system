@@ -135,6 +135,10 @@ def created_repair(client, operator_headers, city_id):
             "device_type": "ТВ",
             "brand": "Samsung",
             "model": "UE55",
+            "complectation": {
+                "items": ["Пульт", "Шнур питания", "Ножки"],
+            },
+            "condition_notes": "Линии на экране, Царапины, Скол корпуса",
             "fault_client": "не включается",
         },
     )

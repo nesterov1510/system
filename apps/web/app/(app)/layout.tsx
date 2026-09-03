@@ -68,12 +68,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const u = getStoredUser();
     if (!u) {
-      router.replace("/login");
+      // QR на этикетке ведёт прямо в карточку. После входа возвращаем мастера
+      // именно в отсканированный ремонт, а не на общий список.
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
       return;
     }
     setUser(u);
     setReady(true);
-  }, [router]);
+  }, [pathname, router]);
 
   const refreshUnread = useCallback(() => {
     api

@@ -16,7 +16,7 @@ import os
 
 from reportlab.lib.pagesizes import A4, A5
 from reportlab.lib.units import mm
-from reportlab.lib.utils import simpleSplit
+from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfgen import canvas
 
 # Cyrillic-capable font.
@@ -94,10 +94,10 @@ def _register_fonts() -> None:
         pdfmetrics.registerFont(TTFont(FONT_BOLD, FONT_PATH_BOLD))
 
 
-def _qr_png(data: str) -> io.BytesIO:
+def _qr_png(data: str, *, border: int = 1) -> io.BytesIO:
     import qrcode
 
-    img = qrcode.make(data, box_size=4, border=1)
+    img = qrcode.make(data, box_size=4, border=border)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -112,6 +112,164 @@ def _ellipsis(c, text: str, font: str, size: float, max_width: float) -> str:
     while text and c.stringWidth(text + "…", font, size) > max_width:
         text = text[:-1]
     return text + "…"
+
+
+def _label_lines(
+    c,
+    text: str,
+    *,
+    font: str,
+    size: float,
+    max_width: float,
+    max_lines: int,
+) -> list[str]:
+    """Перенести короткое поле этикетки и явно отметить обрезанный хвост."""
+    normalized = " ".join(str(text or "—").split())
+    all_lines = simpleSplit(normalized, font, size, max_width) or ["—"]
+    lines = [
+        _ellipsis(c, line, font, size, max_width)
+        for line in all_lines[:max_lines]
+    ]
+    if len(all_lines) > max_lines:
+        lines[-1] = _ellipsis(
+            c,
+            lines[-1].rstrip("…") + "…",
+            font,
+            size,
+            max_width,
+        )
+    return lines
+
+
+def render_repair_label_pdf(
+    *,
+    repair_number: str,
+    client_name: str,
+    client_phone: str,
+    repair_url: str,
+    complectation: str = "",
+    defects: str = "",
+    width_mm: float = 58,
+    height_mm: float = 38,
+) -> bytes:
+    """Сформировать PDF-этикетку с данными приёмки и QR на карточку ремонта.
+
+    Размер страницы PDF совпадает с физической этикеткой. Это позволяет CUPS
+    отправить документ в термопринтер без промежуточной раскладки на A4.
+    """
+    _register_fonts()
+
+    # Не даём ошибочной настройке создать гигантскую/нулевую PDF-страницу.
+    width_mm = min(100.0, max(30.0, float(width_mm)))
+    height_mm = min(100.0, max(20.0, float(height_mm)))
+    page = (width_mm * mm, height_mm * mm)
+    w, h = page
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=page, pageCompression=1)
+    c.setTitle(f"MSB label {repair_number}")
+    c.setAuthor("MSB")
+    c.setFillColorRGB(0, 0, 0)
+
+    margin = 2 * mm
+    # Нижняя полоса по всей ширине отдана комплектации и дефектам. QR остаётся
+    # достаточно крупным для термопринтера 203 dpi и короткого внутреннего URL.
+    qr_size = min(22 * mm, (height_mm - 8) * mm, width_mm * 0.42 * mm)
+    qr_x = w - margin - qr_size
+    qr_y = h - margin - qr_size
+    text_right = qr_x - 1.5 * mm
+    text_width = max(12 * mm, text_right - margin)
+
+    # Quiet zone входит внутрь qr_size и обязателен для уверенного сканирования.
+    qr_buf = _qr_png(repair_url, border=4)
+    c.drawImage(
+        ImageReader(qr_buf),
+        qr_x,
+        qr_y,
+        width=qr_size,
+        height=qr_size,
+        preserveAspectRatio=True,
+        mask="auto",
+    )
+
+    number = f"№ {repair_number}"
+    number_size = 6.2
+    while number_size > 4.2 and c.stringWidth(
+        number, FONT_BOLD, number_size
+    ) > text_width:
+        number_size -= 0.2
+    c.setFont(FONT_BOLD, number_size)
+    c.drawString(
+        margin,
+        h - 3.2 * mm,
+        _ellipsis(c, number, FONT_BOLD, number_size, text_width),
+    )
+
+    name_size = 6.6
+    name_lines = _label_lines(
+        c,
+        client_name,
+        font=FONT_BOLD,
+        size=name_size,
+        max_width=text_width,
+        max_lines=2,
+    )
+    name_y = h - 7.5 * mm
+    c.setFont(FONT_BOLD, name_size)
+    for line in name_lines:
+        c.drawString(margin, name_y, line)
+        name_y -= 3.35 * mm
+
+    c.setFont(FONT, 4.4)
+    c.drawString(margin, 22.2 * mm, "Телефон")
+    phone = client_phone or "—"
+    phone_size = 7.0
+    while phone_size > 4.8 and c.stringWidth(
+        phone, FONT_BOLD, phone_size
+    ) > text_width:
+        phone_size -= 0.2
+    c.setFont(FONT_BOLD, phone_size)
+    c.drawString(
+        margin,
+        18.2 * mm,
+        _ellipsis(c, phone, FONT_BOLD, phone_size, text_width),
+    )
+
+    # Отделяем контактную часть от данных, отмеченных оператором при приёмке.
+    c.setStrokeColorRGB(0.55, 0.55, 0.55)
+    c.setLineWidth(0.25)
+    c.line(margin, 12.8 * mm, w - margin, 12.8 * mm)
+
+    details_width = w - 2 * margin
+    details_y = 11.15 * mm
+    detail_size = 4.5
+    detail_leading = 1.85 * mm
+    detail_fields = (
+        f"Комплектация: {complectation or '—'}",
+        f"Дефекты: {defects or '—'}",
+    )
+    c.setFont(FONT_BOLD, detail_size)
+    for index, text in enumerate(detail_fields):
+        for line in _label_lines(
+            c,
+            text,
+            font=FONT_BOLD,
+            size=detail_size,
+            max_width=details_width,
+            max_lines=2,
+        ):
+            c.drawString(margin, details_y, line)
+            details_y -= detail_leading
+        if index == 0:
+            details_y -= 0.35 * mm
+
+    # Постоянная подпись сервисного центра в самом низу этикетки.
+    c.setFont(FONT_BOLD, 4.2)
+    c.drawCentredString(w / 2, 1.8 * mm, "MERYOSAB electronics")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
 
 
 def _render_turkmen_form(
@@ -210,7 +368,7 @@ def _render_turkmen_form(
         qr_size = 20 * mm
         qr_x = right_margin - qr_size - 2 * mm
         qr_y = y - qr_size
-        c.drawImage(qr_buf, qr_x, qr_y, width=qr_size, height=qr_size)
+        c.drawImage(ImageReader(qr_buf), qr_x, qr_y, width=qr_size, height=qr_size)
         draw("QR", qr_x + qr_size / 2, qr_y - 3 * mm, 5, align="center")
     except Exception:
         pass
@@ -505,7 +663,7 @@ def render_blank_pdf(
             qr_size = 26 * mm * s
             qr_x = w - left - qr_size
             qr_y = top - 6 * mm * s - qr_size
-            c.drawImage(qr_buf, qr_x, qr_y, width=qr_size, height=qr_size)
+            c.drawImage(ImageReader(qr_buf), qr_x, qr_y, width=qr_size, height=qr_size)
             draw("QR статус", qr_x, qr_y - 3.5 * mm * s, 6 * s)
         except Exception:
             pass

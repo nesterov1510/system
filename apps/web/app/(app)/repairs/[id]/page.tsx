@@ -109,6 +109,7 @@ export default function RepairCardPage() {
   const [busy, setBusy] = useState(false);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
   const [pdfBase64, setPdfBase64] = useState<string | null>(null);
+  const [pdfFilename, setPdfFilename] = useState("blank.pdf");
   const [activeTab, setActiveTab] = useState("info");
   const fileRef = useRef<HTMLInputElement>(null);
   // Модалка SMS клиенту при «Ремонт закончен».
@@ -161,13 +162,33 @@ export default function RepairCardPage() {
     setBusy(true);
     setPrintMsg(null);
     setPdfBase64(null);
+    setError(null);
     try {
       const res = await api.print(id);
       setPdfBase64(res.pdf_base64);
-      setPrintMsg("Задание отправлено принтеру.");
+      setPdfFilename(`blank-${repair?.number || id}.pdf`);
+      setPrintMsg("Бланк A4 поставлен в очередь печати.");
       load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка печати");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doPrintLabel() {
+    setBusy(true);
+    setPrintMsg(null);
+    setPdfBase64(null);
+    setError(null);
+    try {
+      const res = await api.printLabel(id);
+      setPdfBase64(res.pdf_base64);
+      setPdfFilename(`label-${repair?.number || id}.pdf`);
+      setPrintMsg("Этикетка 58×38 поставлена в очередь печати.");
+      load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка печати этикетки");
     } finally {
       setBusy(false);
     }
@@ -423,10 +444,14 @@ export default function RepairCardPage() {
           </svg>
           К доске
         </Link>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button onClick={doPrintLabel} disabled={busy}
+            className="msb-btn-primary">
+            🏷️ Этикетка 58×38
+          </button>
           <button onClick={doPrint} disabled={busy}
             className="msb-btn-secondary">
-            🖨️ Печать
+            🖨️ Бланк A4
           </button>
           {(currentUser?.role === "admin" || currentUser?.role === "operator") &&
             !["Выдано", "Не забрано", "Архив", "Отказ"].includes(repair.status) && (
@@ -716,7 +741,7 @@ export default function RepairCardPage() {
                 <span className="text-sm font-medium text-emerald-600">✓ Сохранено</span>
               )}
               <button onClick={doPrint} disabled={busy} className="msb-btn-secondary ml-auto">
-                🖨️ Печать
+                🖨️ Печать A4
               </button>
             </div>
 
@@ -954,9 +979,9 @@ export default function RepairCardPage() {
           <div className="flex-1">
             <p className="text-sm font-medium text-emerald-800">{printMsg}</p>
             {pdfBase64 && (
-              <button onClick={() => downloadPdfBase64(pdfBase64, `blank-${repair.number}.pdf`)}
+              <button onClick={() => downloadPdfBase64(pdfBase64, pdfFilename)}
                 className="mt-2 msb-btn-secondary text-xs">
-                ⬇ Скачать PDF бланка
+                ⬇ Скачать PDF
               </button>
             )}
           </div>

@@ -2,8 +2,9 @@
 """MSB print-agent — печать бланков из очереди на принтер.
 
 Режимы (настраиваются в админке «Принтер»):
-  - mode=agent : печать через драйвер ОС (рекомендуется для Epson L3250).
-  - mode=ipp   : прямая печать по AirPrint/IPP на http://IP:631/ipp/print.
+  - mode=agent      : печать через локальный драйвер ОС (Epson L3250).
+  - mode=cups_remote: печать в CUPS-очередь на другом Linux-компьютере.
+  - mode=ipp        : прямая печать по AirPrint/IPP на http://IP:631/ipp/print.
 
 ВАЖНО для Windows:
   - для тихой печати PDF нужен SumatraPDF (бесплатный, portable):
@@ -214,6 +215,55 @@ def print_via_os(pdf_bytes: bytes, printer: dict | None) -> None:
 
 
 # --------------------------------------------------------------------------
+# Режим cups_remote: очередь расшарена CUPS на другом Linux-компьютере.
+# --------------------------------------------------------------------------
+def _remote_cups_command(printer: dict, pdf_path: str) -> list[str]:
+    host = str(printer.get("ip") or "").strip()
+    name = str(printer.get("name") or "").strip()
+    if not host:
+        raise RuntimeError("Не задан IP компьютера с CUPS")
+    if not name:
+        raise RuntimeError("Не задано имя удалённой CUPS-очереди")
+    try:
+        port = int(printer.get("port", 631))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Некорректный порт удалённого CUPS") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError("Некорректный порт удалённого CUPS")
+
+    cmd = ["lp", "-h", f"{host}:{port}", "-d", name]
+    media = str(printer.get("media") or "").strip()
+    if media:
+        cmd.extend(["-o", f"media={media}"])
+    cmd.append(pdf_path)
+    return cmd
+
+
+def print_via_remote_cups(pdf_bytes: bytes, printer: dict) -> None:
+    tmp = _write_temp_pdf(pdf_bytes)
+    try:
+        cmd = _remote_cups_command(printer, tmp)
+        log("печать через удалённый CUPS: " + " ".join(cmd[:-1]))
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "неизвестная ошибка").strip()
+            raise RuntimeError(f"Удалённый CUPS отклонил задание: {detail}")
+        response = (result.stdout or "").strip()
+        suffix = f": {response}" if response else ""
+        log(f"удалённый CUPS принял задание{suffix}")
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
 # Режим ipp: прямая печать PDF через AirPrint/IPP (порт 631).
 # --------------------------------------------------------------------------
 def _ipp_attribute(tag: int, name: str, value: bytes) -> bytes:
@@ -318,11 +368,16 @@ def print_via_ipp(pdf_bytes: bytes, printer: dict) -> None:
 
 
 def print_pdf(pdf_bytes: bytes, printer: dict | None) -> str:
-    mode = (printer or {}).get("mode", "agent")
+    config = printer or {}
+    mode = config.get("mode", "agent")
     if mode == "ipp":
-        print_via_ipp(pdf_bytes, printer or {})
+        print_via_ipp(pdf_bytes, config)
+    elif mode == "cups_remote":
+        # Важно: этот режим не использует глобальный MSB_PRINT_CMD основного
+        # принтера — адрес и очередь берутся из самого задания.
+        print_via_remote_cups(pdf_bytes, config)
     else:
-        print_via_os(pdf_bytes, printer or {})
+        print_via_os(pdf_bytes, config)
     return mode
 
 

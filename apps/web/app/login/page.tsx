@@ -10,6 +10,19 @@ import {
   setSession,
 } from "@/lib/api";
 
+function destinationAfterLogin(): string {
+  const candidate = new URLSearchParams(window.location.search).get("next");
+  if (!candidate?.startsWith("/")) return "/repairs";
+  // Разрешаем только URL этого же origin, чтобы next не стал open redirect.
+  try {
+    const target = new URL(candidate, window.location.origin);
+    if (target.origin !== window.location.origin) return "/repairs";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/repairs";
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -40,7 +53,7 @@ export default function LoginPage() {
       } else {
         clearRememberedLogin();
       }
-      router.push("/repairs");
+      router.push(destinationAfterLogin());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
     } finally {

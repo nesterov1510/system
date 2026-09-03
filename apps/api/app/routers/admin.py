@@ -171,9 +171,10 @@ async def upsert_setting(key: str, payload: SettingIn, db: DbSession):
 # --- Printer settings ---
 @router.get("/printer")
 async def get_printer_config(db: DbSession):
-    from app.services.settings import get_printer
+    from app.services.settings import get_label_printer, get_printer
 
     printer = await get_printer(db)
+    label_printer = await get_label_printer(db)
     row = await db.execute(
         select(PrintJob).order_by(PrintJob.created_at.desc()).limit(10)
     )
@@ -183,10 +184,16 @@ async def get_printer_config(db: DbSession):
             "status": j.status,
             "error": j.error,
             "created_at": j.created_at,
+            "template_id": j.template_id,
+            "printer_name": ((j.payload or {}).get("printer") or {}).get("name"),
         }
         for j in row.scalars().all()
     ]
-    return {"printer": printer, "recent_jobs": jobs}
+    return {
+        "printer": printer,
+        "label_printer": label_printer,
+        "recent_jobs": jobs,
+    }
 
 
 @router.put("/printer")
@@ -201,6 +208,42 @@ async def set_printer_config(db: DbSession, body: dict):
     }
     await set_setting(db, "printer", value, "Принтер: IP, порт, режим печати (agent|ipp)")
     return {"printer": value}
+
+
+@router.put("/printer/label")
+async def set_label_printer_config(db: DbSession, body: dict):
+    """Настроить CUPS-очередь для этикеток ремонта."""
+    from app.services.settings import set_setting
+
+    try:
+        port = int(body.get("port", 631))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Порт CUPS должен быть числом")
+
+    if not 1 <= port <= 65535:
+        raise HTTPException(400, "Некорректный порт CUPS")
+
+    value = {
+        "ip": str(body.get("ip", "")).strip(),
+        "port": port,
+        "mode": "cups_remote",
+        "name": str(body.get("name", "3B-350B")).strip(),
+        "width_mm": 58,
+        "height_mm": 38,
+        "media": str(body.get("media", "")).strip(),
+    }
+    if not value["name"]:
+        raise HTTPException(400, "Укажите имя очереди принтера")
+    if not value["ip"]:
+        raise HTTPException(400, "Укажите IP компьютера с CUPS")
+
+    await set_setting(
+        db,
+        "label_printer",
+        value,
+        "CUPS-принтер этикеток ремонта",
+    )
+    return {"label_printer": value}
 
 
 @router.post("/printer/test")
@@ -237,6 +280,46 @@ async def test_print(db: DbSession):
         payload={
             "pdf_base64": base64.b64encode(pdf).decode("ascii"),
             "printer": printer,
+        },
+        status="queued",
+    )
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return {"job_id": job.id, "status": job.status}
+
+
+@router.post("/printer/label/test")
+async def test_label_print(db: DbSession):
+    """Поставить в очередь тестовую этикетку заданного физического размера."""
+    import base64
+
+    from app.services.print import render_repair_label_pdf
+    from app.services.settings import get_label_printer
+
+    printer = await get_label_printer(db)
+    if not printer.get("name") or not printer.get("ip"):
+        raise HTTPException(400, "Не настроен удалённый CUPS-принтер этикеток")
+
+    repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs"
+    pdf = render_repair_label_pdf(
+        repair_number="ТЕСТ-58x38",
+        client_name="Тестовый клиент",
+        client_phone="+993 61 000000",
+        repair_url=repair_url,
+        complectation="Пульт, Шнур питания",
+        defects="Царапины, Линии на экране",
+        width_mm=printer.get("width_mm", 58),
+        height_mm=printer.get("height_mm", 38),
+    )
+    job = PrintJob(
+        repair_id=None,
+        template_id="label-test",
+        payload={
+            "document_kind": "repair_label",
+            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "printer": printer,
+            "repair_url": repair_url,
         },
         status="queued",
     )

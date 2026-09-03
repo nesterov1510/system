@@ -1,36 +1,27 @@
 # /etc/systemd/system/msb-print-agent.service
-# Systemd unit для print-agent (опрос очереди печати).
-# Расположение: /home/windowrepair-ae/msb/apps/print-agent
-#
-# Может работать как на сервере, так и на отдельном ПК (у принтера).
-# На ПК замените MSB_API_URL на http://192.168.8.81:8085.
-#
-# Установка:
-#   sudo cp deploy/msb-print-agent.service /etc/systemd/system/
-#   sudo systemctl daemon-reload
-#   sudo systemctl enable --now msb-print-agent
+# Optional MSB print queue agent. Configure CUPS and .env before enabling it;
+# see DEPLOY.md. All MSB_* values come from the root .env file.
 
 [Unit]
 Description=MSB Print Agent (printer queue poller)
-After=network.target msb-api.service
-Wants=msb-api.service
+After=network-online.target msb-api.service cups.service
+Wants=network-online.target msb-api.service
 
 [Service]
 Type=simple
 User=windowrepair-ae
 Group=windowrepair-ae
 WorkingDirectory=/home/windowrepair-ae/msb/apps/print-agent
-
 EnvironmentFile=/home/windowrepair-ae/msb/.env
-Environment=MSB_API_URL=http://192.168.8.81:8085
-Environment=MSB_PRINT_CMD=lp -d EPSON_L3250 {file}
-Environment=MSB_POLL_SECONDS=3
-Environment=MSB_SAVE_DIR=./printed
+Environment=PYTHONUNBUFFERED=1
 
 ExecStart=/home/windowrepair-ae/msb/apps/print-agent/.venv/bin/python agent.py
 
-Restart=always
+Restart=on-failure
 RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=30
+UMask=0027
 
 NoNewPrivileges=true
 ProtectHome=false
