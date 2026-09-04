@@ -118,11 +118,9 @@ export default function NewRepairPage() {
   const [registeredWithoutPrint, setRegisteredWithoutPrint] = useState(false);
 
   const currentUser = getStoredUser();
-  const isMasterOnly =
-    hasRole(currentUser, "master") &&
-    !hasRole(currentUser, "admin") &&
-    !hasRole(currentUser, "manager") &&
-    !hasRole(currentUser, "operator");
+  // Назначать мастера на ремонт могут только admin и operator.
+  const canAssign =
+    hasRole(currentUser, "admin") || hasRole(currentUser, "operator");
 
   useEffect(() => {
     Promise.all([
@@ -134,9 +132,6 @@ export default function NewRepairPage() {
       setMasters(m);
       setItems(it);
       if (c[0]) setCityId(c[0].id);
-      if (isMasterOnly && currentUser?.id) {
-        setMasterId(currentUser.id);
-      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -383,16 +378,6 @@ export default function NewRepairPage() {
                   </button>
                 )}
               </div>
-            )}
-
-            {!registeredWithoutPrint && (
-              <button
-                onClick={printBlank}
-                disabled={printBusy || printAsking}
-                className="msb-btn-secondary w-full"
-              >
-                {printBusy ? "Печатаем…" : "🖨️ Печатать бланк A4"}
-              </button>
             )}
 
             {/* Вопрос «успешно ли напечатано?» после каждой попытки печати бланка */}
@@ -832,9 +817,12 @@ export default function NewRepairPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="msb-label">Мастер</label>
-                {isMasterOnly ? (
-                  <div className="flex items-center gap-2 rounded-xl bg-msb-50 px-4 py-2.5 text-sm font-medium text-msb-700 ring-1 ring-msb-100">
-                    <span>✓</span> Вы (приёмку ведёте сами)
+                {!canAssign ? (
+                  <div
+                    title="Назначает администратор или оператор"
+                    className="flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-500 ring-1 ring-slate-100"
+                  >
+                    <span>🔒</span> Назначает администратор или оператор
                   </div>
                 ) : (
                   <select className="msb-input" value={masterId}

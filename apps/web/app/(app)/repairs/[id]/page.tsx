@@ -92,6 +92,7 @@ export default function RepairCardPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("cash");
   const [finalCost, setFinalCost] = useState("");
+  const [finalPayout, setFinalPayout] = useState("");
   const [finalPrice, setFinalPrice] = useState("");
   const [finalPaid, setFinalPaid] = useState(false);
   const [comment, setComment] = useState("");
@@ -336,6 +337,7 @@ export default function RepairCardPage() {
   useEffect(() => {
     if (repair) {
       setFinalCost(repair.cost_amount?.toString() ?? "");
+      setFinalPayout(repair.master_payout?.toString() ?? "");
       setFinalPrice(repair.price_final?.toString() ?? "");
       setFinalPaid(repair.paid);
       setBlankMasters(repair.master_ids ?? []);
@@ -414,14 +416,18 @@ export default function RepairCardPage() {
     setError(null);
     setBlankSaved(false);
     try {
-      const updated = await api.updateRepair(id, {
-        master_ids: blankMasters,
+      const payload: Record<string, unknown> = {
         fault_master: blankFault.trim() || null,
         work_done: blankWork.trim() || null,
         warranty_text: blankWarranty.trim() || null,
         eta_days: blankEta ? Number(blankEta) : null,
         price_final: blankPrice ? Number(blankPrice) : null,
-      });
+      };
+      // Мастера менять может только admin/operator — иначе сервер вернёт 403.
+      if (canAssignMaster) {
+        payload.master_ids = blankMasters;
+      }
+      const updated = await api.updateRepair(id, payload);
       setRepair(updated);
       setBlankSaved(true);
       setTimeout(() => setBlankSaved(false), 2500);
@@ -475,6 +481,8 @@ export default function RepairCardPage() {
     try {
       const payload: Record<string, unknown> = {
         cost_amount: finalCost ? Number(finalCost) : null,
+        // Сколько выплачено мастерам по этому ремонту (вручную).
+        master_payout: finalPayout ? Number(finalPayout) : null,
         price_final: finalPrice ? Number(finalPrice) : null,
         paid: finalPaid,
       };
@@ -608,11 +616,15 @@ export default function RepairCardPage() {
               </div>
             )}
           </div>
-          {canAssignMaster && (
+          {canAssignMaster ? (
             <button onClick={() => setTopMasterOpen((v) => !v)}
               className="msb-btn-secondary text-xs py-2 px-4">
               {topMasterOpen ? "Свернуть" : "✏️ Сменить / назначить"}
             </button>
+          ) : (
+            <span className="text-xs italic text-slate-400">
+              Назначает администратор или оператор
+            </span>
           )}
         </div>
 
@@ -778,11 +790,17 @@ export default function RepairCardPage() {
 
             {/* Оформление починки */}
             <h2 className="msb-section-title mt-8 mb-4">📋 Оформление починки</h2>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="msb-label">Расходы (себестоимость), ман.</label>
                 <input type="number" value={finalCost}
                   onChange={(e) => setFinalCost(e.target.value)} placeholder="0"
+                  className="msb-input" />
+              </div>
+              <div>
+                <label className="msb-label">Мастерам выплачено, ман.</label>
+                <input type="number" value={finalPayout}
+                  onChange={(e) => setFinalPayout(e.target.value)} placeholder="0"
                   className="msb-input" />
               </div>
               <div>
@@ -909,11 +927,13 @@ export default function RepairCardPage() {
                 const active = idx >= 0;
                 return (
                   <button key={m.id} type="button" onClick={() => toggleMaster(m.id)}
-                    disabled={busy}
+                    disabled={busy || !canAssignMaster}
+                    title={canAssignMaster ? undefined : "Назначает администратор или оператор"}
                     className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 transition-all ${
                       active
                         ? "bg-msb-600 text-white ring-msb-600"
-                        : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"}`}>
+                        : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"
+                    } ${!canAssignMaster ? "cursor-not-allowed opacity-60" : ""}`}>
                     {active && <span className="mr-1 font-bold">{idx + 1}.</span>}
                     {m.name}
                   </button>
@@ -923,6 +943,7 @@ export default function RepairCardPage() {
             <p className="mt-2 text-xs text-slate-400">
               Можно выбрать нескольких — в бланке они встанут в строки «Inžiner» по порядку.
               Первый считается основным мастером ремонта.
+              {!canAssignMaster && " Назначает администратор или оператор."}
             </p>
 
             <div className="mt-5 grid gap-4 sm:grid-cols-3">

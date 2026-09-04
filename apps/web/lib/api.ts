@@ -207,6 +207,8 @@ export interface Repair {
   client_name?: string | null;
   client_phone?: string | null;
   accepted_at: string;
+  /** Когда стало «Готово к выдаче» (закрытие). */
+  ready_at?: string | null;
   storage_until?: string | null;
   master_id?: string | null;
   eta_days?: number | null;
@@ -215,6 +217,8 @@ export interface Repair {
   price_max?: number | null;
   price_final?: number | null;
   cost_amount?: number | null;
+  /** Сколько выплачено мастерам по этому ремонту (вручную). */
+  master_payout?: number | null;
   paid: boolean;
   work_done?: string | null;
   warranty_text?: string | null;
@@ -228,6 +232,20 @@ export interface Repair {
   contact2_phone?: string | null;
   is_delivery?: boolean;
   events: RepairEvent[];
+  /** Кто принял технику (список ремонтов). */
+  accepted_by_name?: string | null;
+  /** Сумма запчастей ремонта и строки «название ×кол-во» (список). */
+  parts_cost?: number | null;
+  parts_names?: string[];
+}
+
+/** Карточки-суммарики вкладки «Ремонты» (по текущему срезу). */
+export interface RepairsStats {
+  total_sum: number;
+  parts_cost: number;
+  master_payout: number;
+  profit: number;
+  clients_unique: number;
 }
 
 const TOKEN_KEY = "msb_token";
@@ -383,6 +401,11 @@ export const api = {
     page?: number;
     page_size?: number;
     master_id?: string;
+    master_ids?: string;
+    date_from?: string;
+    date_to?: string;
+    date_field?: "accepted" | "ready";
+    unassigned?: boolean;
   } = {}) => {
     const qs = new URLSearchParams();
     if (params.stage) qs.set("stage", params.stage);
@@ -390,10 +413,38 @@ export const api = {
     if (params.page) qs.set("page", String(params.page));
     if (params.page_size) qs.set("page_size", String(params.page_size));
     if (params.master_id) qs.set("master_id", params.master_id);
+    if (params.master_ids) qs.set("master_ids", params.master_ids);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    if (params.date_field) qs.set("date_field", params.date_field);
+    if (params.unassigned) qs.set("unassigned", "true");
     const s = qs.toString();
     return request<{ items: Repair[]; total: number; page: number; page_size: number }>(
       `/api/repairs${s ? `?${s}` : ""}`,
     );
+  },
+  // Суммарики по тому же срезу, что и список (карточки на вкладке).
+  repairsStats: (params: {
+    stage?: string;
+    q?: string;
+    master_id?: string;
+    master_ids?: string;
+    date_from?: string;
+    date_to?: string;
+    date_field?: "accepted" | "ready";
+    unassigned?: boolean;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.stage) qs.set("stage", params.stage);
+    if (params.q) qs.set("q", params.q);
+    if (params.master_id) qs.set("master_id", params.master_id);
+    if (params.master_ids) qs.set("master_ids", params.master_ids);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    if (params.date_field) qs.set("date_field", params.date_field);
+    if (params.unassigned) qs.set("unassigned", "true");
+    const s = qs.toString();
+    return request<RepairsStats>(`/api/repairs/stats${s ? `?${s}` : ""}`);
   },
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
   stageCounts: () =>

@@ -219,6 +219,8 @@ class Repair(Base, TimestampMixin):
     warranty_text: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Расходы (себестоимость) — сколько потратили на ремонт.
     cost_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Сколько выплачено мастерам по этому ремонту (заводится вручную).
+    master_payout: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Отметка «оплачено» оператором при оформлении починки.
     paid: Mapped[bool] = mapped_column(Boolean, default=False)
 

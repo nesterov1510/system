@@ -8,7 +8,7 @@ import { canView } from "@/lib/catalog";
 const ITEMS = [
   { href: "/repairs", label: "Все ремонты", icon: "📋" },
   { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-  { href: "/clients", label: "Клиенты", icon: "👥" },
+  { href: "/clients", label: "Контакты", icon: "👥" },
   { href: "/chat", label: "Чат", icon: "💬" },
 ];
 

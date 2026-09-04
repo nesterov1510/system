@@ -20,6 +20,7 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "contact2_name": "VARCHAR(255)",
         "contact2_phone": "VARCHAR(32)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
+        "master_payout": "NUMERIC(12, 2)",
     },
     "users": {
         "telegram": "VARCHAR(128)",
