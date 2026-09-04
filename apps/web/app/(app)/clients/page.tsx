@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, getStoredUser, type Repair } from "@/lib/api";
+import { api, getStoredUser, hasRole, type Repair } from "@/lib/api";
 
 interface ClientRow {
   id: string;
@@ -177,7 +177,7 @@ export default function ClientsPage() {
                         className="text-sm font-medium text-msb-600 hover:text-msb-700 transition-colors disabled:opacity-50">
                         {loadingClientId === c.id ? "Загрузка…" : "Открыть →"}
                       </button>
-                      {currentUser?.role === "admin" && (
+                      {hasRole(currentUser, "admin") && (
                         <button onClick={() => removeClient(c)}
                           className="text-sm font-medium text-red-500 hover:text-red-700 transition-colors">
                           Удалить

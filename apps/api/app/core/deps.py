@@ -54,7 +54,7 @@ def require_roles(*roles: str):
     """Return a dependency that restricts access to the given roles."""
 
     async def checker(user: CurrentUser) -> User:
-        if user.role not in roles:
+        if not user.has_role(*roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Role '{user.role}' not allowed (needs: {', '.join(roles)})",

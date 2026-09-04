@@ -17,6 +17,10 @@ class RepairCreate(BaseModel):
     city_id: uuid.UUID
     branch_id: uuid.UUID | None = None
     client: ClientCreate
+    # Второй контакт по этому ремонту (напр. владелец техники ≠ тот, кто
+    # доставил её в сервис — разные люди, разные номера).
+    contact2_name: str | None = None
+    contact2_phone: str | None = None
     device_type: str = Field(min_length=1, max_length=32)
     brand: str | None = None
     model: str | None = None
@@ -29,6 +33,8 @@ class RepairCreate(BaseModel):
     eta_source: str | None = None
     source: str = "walkin"
     consent_repair: bool = False
+    # Заказ доставлен курьером / забран с адреса клиента.
+    is_delivery: bool = False
 
 
 class RepairUpdate(BaseModel):
@@ -37,6 +43,9 @@ class RepairUpdate(BaseModel):
     # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
     # Первый в списке становится основным (master_id).
     master_ids: list[uuid.UUID] | None = None
+    # Помощники мастера (в бланке — «Inžiner (kömekçi)»). Пользователю можно
+    # назначить помощника независимо от списка основных мастеров.
+    helper_ids: list[uuid.UUID] | None = None
     fault_master: str | None = None
     eta_days: int | None = None
     eta_source: str | None = None
@@ -48,6 +57,9 @@ class RepairUpdate(BaseModel):
     # Что починили (для бланка) и гарантия на ремонт.
     work_done: str | None = None
     warranty_text: str | None = None
+    contact2_name: str | None = None
+    contact2_phone: str | None = None
+    is_delivery: bool | None = None
 
 
 class RepairEventOut(BaseModel):
@@ -107,6 +119,9 @@ class RepairOut(BaseModel):
     print_count: int
     source: str
     events: list[RepairEventOut] = []
+    contact2_name: str | None = None
+    contact2_phone: str | None = None
+    is_delivery: bool = False
 
     # denormalized client info for list/card rendering
     client_name: str | None = None
@@ -116,6 +131,9 @@ class RepairOut(BaseModel):
     # все мастера ремонта (по порядку; первый — основной)
     master_ids: list[uuid.UUID] = []
     master_names: list[str] = []
+    # помощники мастера (в бланке — «Inžiner (kömekçi)»)
+    helper_ids: list[uuid.UUID] = []
+    helper_names: list[str] = []
 
 
 class PartOrderCreate(BaseModel):

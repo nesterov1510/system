@@ -17,12 +17,19 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     "repairs": {
         "work_done": "TEXT",
         "warranty_text": "VARCHAR(64)",
+        "contact2_name": "VARCHAR(255)",
+        "contact2_phone": "VARCHAR(32)",
+        "is_delivery": "BOOLEAN DEFAULT FALSE",
     },
     "users": {
         "telegram": "VARCHAR(128)",
+        "roles": "JSON",
     },
     "chat_channel_members": {
         "last_read_at": "TIMESTAMP",
+    },
+    "repair_masters": {
+        "kind": "VARCHAR(16) DEFAULT 'master'",
     },
 }
 

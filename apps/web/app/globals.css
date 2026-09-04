@@ -122,6 +122,13 @@ button, a, input, select, textarea {
     @apply border-t border-slate-200/70;
   }
 
+  /* Поле «Марка + Модель + Серийный номер»: подсветка разделителя «..» —
+     маркер границы сегмента (Модель / Серийный номер). */
+  .msb-devicefield-sep {
+    @apply rounded bg-emerald-200/70;
+    box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.35);
+  }
+
   /* Стили для скроллбара */
   .custom-scroll::-webkit-scrollbar {
     width: 4px;

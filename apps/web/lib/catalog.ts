@@ -52,14 +52,30 @@ const ROLE_SCOPES: Record<string, Href[] | "all"> = {
   callcenter: ["/repairs", "/clients", "/callcenter", "/chat", "/profile"],
 };
 
-export function canView(role?: string | null, href?: string): boolean {
-  if (!role || !href) return false;
-  const scope = ROLE_SCOPES[role];
-  if (!scope) return false;
-  if (scope === ROLE_ALL) return true;
-  return (scope as string[]).includes(href);
+/**
+ * Проверить доступ к разделу `href`.
+ *
+ * Пользователь может иметь несколько ролей одновременно (`roles`, помимо
+ * основной `role`) — итоговые права это ОБЪЕДИНЕНИЕ прав всех его ролей,
+ * а не только основной.
+ */
+export function canView(
+  role?: string | null,
+  href?: string,
+  roles?: string[] | null,
+): boolean {
+  if (!href) return false;
+  const allRoles = Array.from(new Set([role, ...(roles ?? [])].filter(Boolean))) as string[];
+  if (!allRoles.length) return false;
+  for (const r of allRoles) {
+    const scope = ROLE_SCOPES[r];
+    if (!scope) continue;
+    if (scope === ROLE_ALL) return true;
+    if ((scope as string[]).includes(href)) return true;
+  }
+  return false;
 }
 
-export function isAdminRole(role?: string | null): boolean {
-  return role === "admin";
+export function isAdminRole(role?: string | null, roles?: string[] | null): boolean {
+  return role === "admin" || !!roles?.includes("admin");
 }

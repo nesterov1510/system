@@ -34,12 +34,19 @@ async def list_branches(db: DbSession, user: CurrentUser):
 
 @router.get("/masters")
 async def list_masters(db: DbSession, user: CurrentUser):
+    """Все активные пользователи, у которых есть роль «мастер» —
+
+    основная или дополнительная (пользователю можно назначить несколько
+    ролей, напр. admin ещё и master).
+    """
     row = await db.execute(
-        select(User)
-        .where(User.role == UserRole.MASTER.value, User.active.is_(True))
-        .order_by(User.name)
+        select(User).where(User.active.is_(True)).order_by(User.name)
     )
-    return [{"id": u.id, "name": u.name} for u in row.scalars().all()]
+    return [
+        {"id": u.id, "name": u.name}
+        for u in row.scalars().all()
+        if u.has_role(UserRole.MASTER.value)
+    ]
 
 
 @router.get("/complectation-items")

@@ -13,9 +13,20 @@ export interface User {
   phone?: string | null;
   telegram?: string | null;
   role: string;
+  // Полный список ролей пользователя (основная + дополнительные).
+  // Одному сотруднику можно назначить несколько ролей одновременно,
+  // например admin ещё и master.
+  roles?: string[];
   city_id?: string | null;
   branch_id?: string | null;
   active: boolean;
+}
+
+/** Есть ли у пользователя роль `role` (учитывая все назначенные роли). */
+export function hasRole(user: User | null | undefined, role: string): boolean {
+  if (!user) return false;
+  if (user.role === role) return true;
+  return Array.isArray(user.roles) && user.roles.includes(role);
 }
 
 export interface Channel {
@@ -178,6 +189,11 @@ export interface Repair {
   master_name?: string | null;
   master_ids?: string[];
   master_names?: string[];
+  helper_ids?: string[];
+  helper_names?: string[];
+  contact2_name?: string | null;
+  contact2_phone?: string | null;
+  is_delivery?: boolean;
   events: RepairEvent[];
 }
 
@@ -426,6 +442,13 @@ export const api = {
       pdf_base64: string;
       repair_url: string;
     }>(`/api/repairs/${repairId}/print-label`, { method: "POST" }),
+  // «Зарегистрировано без печати» — после 2 неудачных попыток печати бланка.
+  // Фиксирует событие в истории ремонта + уведомляет всех админов.
+  reportPrintFailure: (repairId: string, reason?: string) =>
+    request<{ ok: boolean; notified_admins: number }>(
+      `/api/repairs/${repairId}/print-failure`,
+      { method: "POST", body: JSON.stringify({ reason: reason || "" }) },
+    ),
 
   // Photos
   photos: (repairId: string) =>
@@ -555,6 +578,22 @@ export const api = {
   deactivateUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
 
+  // Notifications (напр. уведомление админа об ошибке печати)
+  notifications: (unreadOnly = false) =>
+    request<
+      Array<{
+        id: string;
+        type: string;
+        title: string;
+        body?: string | null;
+        repair_id?: string | null;
+        read_at?: string | null;
+        created_at: string;
+      }>
+    >(`/api/notifications${unreadOnly ? "?unread_only=true" : ""}`),
+  markNotificationRead: (id: string) =>
+    request<{ ok: boolean }>(`/api/notifications/${id}/read`, { method: "POST" }),
+
   // Printer config (admin)
   getPrinter: () =>
     request<{
@@ -652,6 +691,43 @@ export const api = {
     if (!res.ok) throw new Error(`Ошибка превью: ${res.status}`);
     return res.blob();
   },
+
+  // SMS gateway + templates (admin)
+  getSmsConfig: () =>
+    request<{
+      server: {
+        enabled: boolean;
+        url: string;
+        username: string;
+        password: string;
+        verify_ssl: boolean;
+        timeout_sec: number;
+      };
+      templates: { master_assign: string; ready: string };
+      template_fields: { master_assign: string[]; ready: string[] };
+    }>("/api/admin/sms"),
+  saveSmsConfig: (payload: {
+    enabled: boolean;
+    url: string;
+    username: string;
+    password?: string;
+    verify_ssl: boolean;
+    timeout_sec: number;
+  }) =>
+    request<{ server: Record<string, unknown> }>("/api/admin/sms", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  saveSmsTemplates: (payload: { master_assign: string; ready: string }) =>
+    request<{ templates: Record<string, unknown> }>("/api/admin/sms/templates", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  testSms: (phone: string, text?: string) =>
+    request<{ ok: boolean; detail?: string }>("/api/admin/sms/test", {
+      method: "POST",
+      body: JSON.stringify({ phone, text }),
+    }),
 };
 
 export function mediaUrl(path: string): string {

@@ -58,6 +58,104 @@ def test_master_auto_assigned_on_intake(client, master_headers, city_id):
     )
     assert r.status_code == 201
     assert r.json()["master_id"] is not None
+    # Мастер уже назначен при создании — статус сразу «Диагностика», минуя
+    # «Принято» (даже когда мастер сам себя назначил на приёмке).
+    assert r.json()["status"] == "Диагностика"
+
+
+def test_repair_without_master_stays_new(client, operator_headers, city_id):
+    """Без мастера при приёмке ремонт остаётся в «Принято», как раньше."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "no-master-intake-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Без мастера", "phone": "+993 61 888888"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["master_id"] is None
+    assert r.json()["status"] == "Принято"
+
+
+def test_repair_created_with_master_by_operator_is_diag(
+    client, admin_headers, operator_headers, city_id
+):
+    """Оператор при приёмке сразу указал мастера — статус тоже «Диагностика»."""
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    master = next(u for u in users if u["email"] == "master@msb.local")
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "operator-intake-master-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "С мастером сразу", "phone": "+993 61 777333"},
+            "device_type": "ТВ",
+            "master_id": master["id"],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["status"] == "Диагностика"
+
+
+def test_is_delivery_flag_default_and_set_on_intake(client, operator_headers, city_id):
+    """Чекбокс «Заказ с доставкой» на приёмке — по умолчанию выключен, можно включить."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-default-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Без доставки", "phone": "+993 61 444555"},
+            "device_type": "ТВ",
+        },
+    )
+    assert r.status_code == 201
+    assert r.json()["is_delivery"] is False
+
+    r2 = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-set-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "С доставкой", "phone": "+993 61 444556"},
+            "device_type": "ТВ",
+            "is_delivery": True,
+        },
+    )
+    assert r2.status_code == 201
+    assert r2.json()["is_delivery"] is True
+
+
+def test_is_delivery_flag_editable_via_patch(client, operator_headers, city_id):
+    """Флаг доставки можно включить/выключить на карточке ремонта после приёмки."""
+    r = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "delivery-patch-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Доставка потом", "phone": "+993 61 444557"},
+            "device_type": "ТВ",
+        },
+    )
+    repair = r.json()
+    assert repair["is_delivery"] is False
+
+    r2 = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"is_delivery": True},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["is_delivery"] is True
+
+    r3 = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"is_delivery": False},
+    )
+    assert r3.status_code == 200, r3.text
+    assert r3.json()["is_delivery"] is False
 
 
 def test_consent_repair_recorded(client, operator_headers, city_id):

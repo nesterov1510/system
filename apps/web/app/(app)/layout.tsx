@@ -37,6 +37,7 @@ const NAV_ITEMS = [
       { href: "/admin/users", label: "Сотрудники", icon: "👥" },
       { href: "/admin/print-templates", label: "Шаблоны", icon: "🖨️" },
       { href: "/admin/printer", label: "Принтер", icon: "🖨️" },
+      { href: "/admin/sms", label: "SMS", icon: "✉️" },
     ],
   },
 ];
@@ -63,7 +64,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Десктопная боковая панель по умолчанию свёрнута до узкой полосы с
+  // иконками — освобождает место под контент. Разворачивается по клику на
+  // стрелку и остаётся развёрнутой, пока пользователь сам её не свернёт.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [chatUnread, setChatUnread] = useState(0);
+  // Внутренние уведомления админам (напр. эскалация ошибки печати — item 4).
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifItems, setNotifItems] = useState<
+    Array<{ id: string; title: string; body?: string | null; read_at?: string | null; created_at: string }>
+  >([]);
 
   useEffect(() => {
     const u = getStoredUser();
@@ -84,10 +94,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
+  // Уведомления видны только тем, кто имеет роль admin (item 4: эскалация
+  // ошибки печати главному разработчику через внутреннее уведомление).
+  useEffect(() => {
+    if (!ready || !user || !isAdminRole(user.role, user.roles)) return;
+    const load = () => api.notifications().then(setNotifItems).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [ready, user]);
+
+  const unreadNotifCount = notifItems.filter((n) => !n.read_at).length;
+
+  async function openNotif(n: { id: string; read_at?: string | null }) {
+    if (!n.read_at) {
+      await api.markNotificationRead(n.id).catch(() => {});
+      setNotifItems((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)),
+      );
+    }
+  }
+
   // Единый WebSocket на всё приложение: обновляем бейдж и звучим уведомлением,
   // когда приходит сообщение (напр. о назначении мастера на ремонт).
   useEffect(() => {
-    if (!ready || !user || !canView(user.role, "/chat")) return;
+    if (!ready || !user || !canView(user.role, "/chat", user.roles)) return;
     const token = getToken();
     if (!token) return;
     connectChat(token);
@@ -127,6 +158,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("pointerdown", onFirst);
   }, []);
 
+  // На мобильных экранная клавиатура часто перекрывает поле, которое человек
+  // заполняет (особенно у нижней части формы). Прокручиваем сфокусированное
+  // поле в видимую область с запасом, когда клавиатура уже открылась.
+  useEffect(() => {
+    function onFocusIn(e: FocusEvent) {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      const tag = el.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") return;
+      // Небольшая задержка — ждём анимацию появления клавиатуры на iOS/Android,
+      // иначе scrollIntoView сработает до того, как вьюпорт уменьшится.
+      window.setTimeout(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 300);
+    }
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+
   function isActive(href: string) {
     if (href === "/repairs" && pathname === "/repairs") return true;
     if (href !== "/repairs" && pathname.startsWith(href)) return true;
@@ -148,8 +198,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
       {/* Desktop Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 lg:px-8">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 lg:px-6">
+          <div className="flex items-center gap-2 lg:gap-4">
             {/* Mobile menu toggle */}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -162,6 +212,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 ) : (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 )}
+              </svg>
+            </button>
+
+            {/* Desktop sidebar collapse/expand toggle */}
+            <button
+              onClick={() => setSidebarCollapsed((v) => !v)}
+              className="hidden lg:inline-flex msb-btn-ghost p-2 text-slate-500 hover:text-slate-700"
+              aria-label={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
+              title={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
 
@@ -179,6 +241,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
           {/* User area */}
           <div className="flex items-center gap-3">
+            {isAdminRole(user.role, user.roles) && (
+              <div className="relative">
+                <button
+                  onClick={() => setNotifOpen((v) => !v)}
+                  className="msb-btn-ghost relative p-2 text-slate-500 hover:text-slate-700"
+                  title="Уведомления"
+                >
+                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  {unreadNotifCount > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">
+                      {unreadNotifCount > 9 ? "9+" : unreadNotifCount}
+                    </span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 z-40 mt-2 w-80 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-slate-200 animate-slide-up">
+                    <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Уведомления
+                    </p>
+                    <div className="max-h-80 space-y-1 overflow-y-auto custom-scroll">
+                      {notifItems.length === 0 && (
+                        <p className="px-3 py-4 text-center text-sm text-slate-400">Пусто</p>
+                      )}
+                      {notifItems.map((n) => (
+                        <button key={n.id} onClick={() => openNotif(n)}
+                          className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                            n.read_at ? "text-slate-500 hover:bg-slate-50" : "bg-amber-50 text-slate-800 hover:bg-amber-100"}`}>
+                          <div className="font-medium">{n.title}</div>
+                          {n.body && <div className="mt-0.5 text-xs text-slate-500">{n.body}</div>}
+                          <div className="mt-1 text-[10px] text-slate-400">
+                            {new Date(n.created_at).toLocaleString("ru")}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <Link href="/profile" title="Профиль"
               className="hidden items-center gap-2 sm:flex">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
@@ -208,36 +312,56 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex min-w-0 max-w-7xl">
-        {/* Desktop Sidebar */}
-        <aside className="hidden shrink-0 lg:block lg:w-56 xl:w-64">
-          <nav className="sticky top-16 space-y-6 overflow-y-auto px-4 py-6 lg:px-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
+      <div className="mx-auto flex min-w-0 max-w-[1600px]">
+        {/* Desktop Sidebar — по умолчанию свёрнута до узкой полосы с иконками,
+            разворачивается по кнопке в шапке (см. sidebarCollapsed). */}
+        <aside
+          className={`hidden shrink-0 border-r border-slate-200/70 transition-[width] duration-200 lg:block ${
+            sidebarCollapsed ? "lg:w-[68px]" : "lg:w-56 xl:w-64"
+          }`}
+        >
+          <nav
+            className={`sticky top-16 space-y-6 overflow-y-auto overflow-x-hidden py-6 ${
+              sidebarCollapsed ? "px-2" : "px-4 lg:px-6"
+            }`}
+            style={{ maxHeight: "calc(100vh - 4rem)" }}
+          >
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
               return (
                 <div key={group.group}>
-                  <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                    {group.group}
-                  </div>
+                  {!sidebarCollapsed && (
+                    <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
+                      {group.group}
+                    </div>
+                  )}
                   <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
-                        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+                        title={sidebarCollapsed ? item.label : undefined}
+                        className={`flex items-center rounded-xl text-sm font-medium transition-all duration-200 ${
+                          sidebarCollapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5"
+                        } ${
                           isActive(item.href)
                             ? "bg-gradient-to-r from-msb-50 to-msb-100/50 text-msb-700 shadow-sm"
                             : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
                         }`}
                       >
-                        <span className="text-base leading-none">{item.icon}</span>
-                        <span>{item.label}</span>
-                        {item.href === "/chat" && chatUnread > 0 && (
+                        <span className="relative text-base leading-none">
+                          {item.icon}
+                          {sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
+                            <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-2 ring-white" />
+                          )}
+                        </span>
+                        {!sidebarCollapsed && <span>{item.label}</span>}
+                        {!sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
                           <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
                             {chatUnread > 99 ? "99+" : chatUnread}
                           </span>
                         )}
-                        {isActive(item.href) && item.href !== "/chat" && (
+                        {!sidebarCollapsed && isActive(item.href) && item.href !== "/chat" && (
                           <span className="ml-auto h-1.5 w-1.5 rounded-full bg-msb-600" />
                         )}
                       </Link>
@@ -281,14 +405,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           <nav className="space-y-6 overflow-y-auto px-4 py-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
             {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && user.role !== "admin") return null;
+              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
               return (
                 <div key={group.group}>
                   <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
                     {group.group}
                   </div>
                   <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href)).map((item) => (
+                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
                       <Link
                         key={item.href}
                         href={item.href}
@@ -339,8 +463,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </aside>
 
         {/* Main Content */}
-        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-8 lg:pb-6">
-          <div className="mx-auto min-w-0 max-w-5xl animate-fade-in">
+        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-6 lg:pb-6 xl:px-10">
+          {/* Не ограничиваем ширину искусственно узким контейнером — когда
+              панель слева свёрнута, страницы (таблицы, формы) используют
+              освободившееся место. Отдельные узкие формы (профиль и т.п.)
+              сами задают себе max-w на уровне страницы. */}
+          <div className="mx-auto min-w-0 max-w-[1400px] animate-fade-in">
             {children}
           </div>
         </main>

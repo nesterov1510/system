@@ -19,7 +19,7 @@ export default function MobileNav() {
     ? pathname === "/repairs"
     : pathname.startsWith(href);
 
-  const visible = ITEMS.filter((i) => canView(user?.role, i.href));
+  const visible = ITEMS.filter((i) => canView(user?.role, i.href, user?.roles));
 
   return (
     <nav

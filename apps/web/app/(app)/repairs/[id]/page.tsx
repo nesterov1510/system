@@ -7,6 +7,7 @@ import {
   api,
   downloadPdfBase64,
   getStoredUser,
+  hasRole,
   mediaUrl,
   money,
   type Lookup,
@@ -17,6 +18,7 @@ import {
   type Repair,
   type RepairPart,
 } from "@/lib/api";
+import { checkPhone } from "@/lib/phone";
 
 // Статус ремонта в карточке — только 4 этапа (как и на доске).
 const STAGES = [
@@ -117,6 +119,20 @@ export default function RepairCardPage() {
   const [smsSending, setSmsSending] = useState(false);
   const [smsMsg, setSmsMsg] = useState<string | null>(null);
 
+  // 7) Мастер/помощники — теперь сразу видны и меняются в шапке карточки,
+  // не только во вкладке «Бланк».
+  const [topMasterOpen, setTopMasterOpen] = useState(false);
+  const [topMasterId, setTopMasterId] = useState("");
+  const [topHelperIds, setTopHelperIds] = useState<string[]>([]);
+  const [topAssignBusy, setTopAssignBusy] = useState(false);
+
+  // 6) Второй контакт по ремонту (владелец техники vs. тот, кто её доставил).
+  const [contact2ModalOpen, setContact2ModalOpen] = useState(false);
+  const [contact2Name, setContact2Name] = useState("");
+  const [contact2Phone, setContact2Phone] = useState("");
+  const [contact2Busy, setContact2Busy] = useState(false);
+  const [contact2Error, setContact2Error] = useState<string | null>(null);
+
   const load = useCallback(() => {
     api.repair(id).then(setRepair).catch((e) => setError(e.message));
     api.photos(id).then(setPhotos).catch(() => {});
@@ -136,6 +152,21 @@ export default function RepairCardPage() {
     setError(null);
     try {
       const updated = await api.updateRepair(id, { status });
+      setRepair(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Заказ с доставкой: можно включить/выключить прямо на карточке ремонта.
+  async function toggleDelivery(value: boolean) {
+    if (!repair) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateRepair(id, { is_delivery: value });
       setRepair(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка");
@@ -287,8 +318,69 @@ export default function RepairCardPage() {
       setBlankWarranty(repair.warranty_text ?? "");
       setBlankEta(repair.eta_days?.toString() ?? "");
       setBlankPrice(repair.price_final?.toString() ?? "");
+      setTopMasterId(repair.master_ids?.[0] ?? "");
+      setTopHelperIds(repair.helper_ids ?? []);
+      setContact2Name(repair.contact2_name ?? "");
+      setContact2Phone(repair.contact2_phone ?? "");
     }
   }, [repair]);
+
+  const canAssignMaster = hasRole(currentUser, "admin") || hasRole(currentUser, "operator");
+
+  // Смена основного мастера прямо в шапке карточки (не только во вкладке «Бланк»).
+  async function saveTopMaster() {
+    setTopAssignBusy(true);
+    setError(null);
+    try {
+      const otherMasters = (repair?.master_ids ?? []).slice(1);
+      const newMasterIds = topMasterId
+        ? [topMasterId, ...otherMasters.filter((m) => m !== topMasterId)]
+        : otherMasters;
+      const updated = await api.updateRepair(id, {
+        master_ids: newMasterIds,
+        helper_ids: topHelperIds,
+      });
+      setRepair(updated);
+      setTopMasterOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка назначения мастера");
+    } finally {
+      setTopAssignBusy(false);
+    }
+  }
+
+  function toggleTopHelper(userId: string) {
+    setTopHelperIds((prev) =>
+      prev.includes(userId) ? prev.filter((h) => h !== userId) : [...prev, userId],
+    );
+  }
+
+  // Второй контакт по ремонту (item 6).
+  async function saveContact2() {
+    setContact2Error(null);
+    if (contact2Phone.trim()) {
+      const check = checkPhone(contact2Phone);
+      if (!check.valid) {
+        setContact2Error(check.message || "Некорректный номер телефона");
+        alert(check.message || "Некорректный номер телефона. Исправьте номер телефона.");
+        return;
+      }
+    }
+    setContact2Busy(true);
+    setError(null);
+    try {
+      const updated = await api.updateRepair(id, {
+        contact2_name: contact2Name.trim() || null,
+        contact2_phone: contact2Phone.trim() || null,
+      });
+      setRepair(updated);
+      setContact2ModalOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка сохранения контакта");
+    } finally {
+      setContact2Busy(false);
+    }
+  }
 
   // --- бланк: сохранение и заказанные запчасти ---
   async function saveBlank() {
@@ -453,20 +545,88 @@ export default function RepairCardPage() {
             className="msb-btn-secondary">
             🖨️ Бланк A4
           </button>
-          {(currentUser?.role === "admin" || currentUser?.role === "operator") &&
+          {(hasRole(currentUser, "admin") || hasRole(currentUser, "operator")) &&
             !["Выдано", "Не забрано", "Архив", "Отказ"].includes(repair.status) && (
               <button onClick={openFinish} disabled={busy}
                 className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700">
                 ✅ Ремонт закончен
               </button>
             )}
-          {currentUser?.role === "admin" && (
+          {hasRole(currentUser, "admin") && (
             <button onClick={removeThis} disabled={busy}
               className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200 transition-colors hover:bg-red-100">
               🗑 Удалить
             </button>
           )}
         </div>
+      </div>
+
+      {/* 7) Мастер/помощники — видно сразу, сменить можно тут же, без вкладки «Бланк» */}
+      <div className="msb-card-solid p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <p className="text-xs font-medium text-slate-500">Мастер</p>
+              <p className="text-sm font-semibold text-slate-800">
+                {repair.master_names?.[0] || repair.master_name || "— не назначен —"}
+              </p>
+            </div>
+            {repair.helper_names && repair.helper_names.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500">
+                  Помощник(и) <span className="text-slate-400">(Inžiner (kömekçi))</span>
+                </p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {repair.helper_names.join(", ")}
+                </p>
+              </div>
+            )}
+          </div>
+          {canAssignMaster && (
+            <button onClick={() => setTopMasterOpen((v) => !v)}
+              className="msb-btn-secondary text-xs py-2 px-4">
+              {topMasterOpen ? "Свернуть" : "✏️ Сменить / назначить"}
+            </button>
+          )}
+        </div>
+
+        {topMasterOpen && canAssignMaster && (
+          <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+            <div>
+              <label className="msb-label">Основной мастер</label>
+              <select className="msb-input" value={topMasterId}
+                onChange={(e) => setTopMasterId(e.target.value)}>
+                <option value="">— не назначен —</option>
+                {mastersList.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="msb-label">
+                Помощники <span className="text-slate-400">(в бланке — «Inžiner (kömekçi)»)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {mastersList.filter((m) => m.id !== topMasterId).map((m) => {
+                  const active = topHelperIds.includes(m.id);
+                  return (
+                    <button key={m.id} type="button" onClick={() => toggleTopHelper(m.id)}
+                      className={`rounded-xl px-3 py-2 text-sm font-medium ring-1 transition-all ${
+                        active
+                          ? "bg-msb-600 text-white ring-msb-600"
+                          : "bg-white text-slate-600 ring-slate-200 hover:ring-msb-300"}`}>
+                      {m.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button onClick={saveTopMaster} disabled={topAssignBusy}
+              className="msb-btn-primary">
+              {topAssignBusy ? "Сохраняем…" : "Сохранить назначение"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Header Card */}
@@ -499,6 +659,33 @@ export default function RepairCardPage() {
             <Detail label="Хранение до" value={fmt(repair.storage_until)} icon="📦" />
             <Detail label="Неисправность" value={repair.fault_client} icon="🔧" className="col-span-2" />
           </div>
+          {/* 6) Второй контакт по ремонту — напр. владелец техники и доставщик */}
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
+            {repair.contact2_name || repair.contact2_phone ? (
+              <div className="text-sm">
+                <span className="font-medium text-slate-500">Второй контакт:</span>{" "}
+                <span className="font-medium text-slate-800">{repair.contact2_name || "—"}</span>
+                {repair.contact2_phone && (
+                  <span className="ml-2 font-mono text-slate-600">{repair.contact2_phone}</span>
+                )}
+              </div>
+            ) : (
+              <span className="text-sm text-slate-400">Второй контакт не указан</span>
+            )}
+            <button onClick={() => setContact2ModalOpen(true)}
+              className="ml-auto text-xs font-semibold text-msb-600 hover:text-msb-700">
+              {repair.contact2_name || repair.contact2_phone ? "✏️ Изменить" : "＋ Добавить"}
+            </button>
+          </div>
+          {/* Заказ с доставкой — редактируется прямо на карточке. */}
+          <label className="mt-3 flex items-center gap-2.5 rounded-xl bg-amber-50/60 px-4 py-2.5 text-sm text-slate-700 ring-1 ring-amber-100 w-fit">
+            <input type="checkbox" checked={!!repair.is_delivery} disabled={busy}
+              onChange={(e) => toggleDelivery(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500" />
+            <span className="flex items-center gap-1.5">
+              <span>🚚</span> <b>Заказ с доставкой</b>
+            </span>
+          </label>
           {complect && complect.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {complect.map((item) => (
@@ -966,6 +1153,54 @@ export default function RepairCardPage() {
               <button onClick={closeSmsModal} disabled={smsSending}
                 className="msb-btn-secondary">
                 Без SMS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6) Модалка второго контакта по ремонту */}
+      {contact2ModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setContact2ModalOpen(false)} />
+          <div className="relative w-full max-w-md msb-card-solid p-6 animate-slide-up">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="msb-section-title">📞 Второй контакт</h3>
+              <button onClick={() => setContact2ModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <p className="mb-4 text-sm text-slate-600">
+              Например: владелец техники и тот, кто её доставил — разные люди.
+              Этот контакт привязан только к текущему ремонту.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="msb-label">Имя</label>
+                <input className="msb-input" value={contact2Name}
+                  onChange={(e) => setContact2Name(e.target.value)}
+                  placeholder="Напр. курьер / доставщик" />
+              </div>
+              <div>
+                <label className="msb-label">Телефон</label>
+                <input className="msb-input" value={contact2Phone}
+                  onChange={(e) => { setContact2Phone(e.target.value); setContact2Error(null); }}
+                  inputMode="tel" placeholder="+993 61 000000" />
+                {contact2Error && (
+                  <p className="mt-1 text-xs font-medium text-red-600">⚠ {contact2Error}</p>
+                )}
+              </div>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button onClick={saveContact2} disabled={contact2Busy}
+                className="msb-btn-primary flex-1">
+                {contact2Busy ? "Сохраняем…" : "Сохранить"}
+              </button>
+              <button onClick={() => setContact2ModalOpen(false)} disabled={contact2Busy}
+                className="msb-btn-secondary">
+                Отмена
               </button>
             </div>
           </div>

@@ -47,9 +47,16 @@ from app.ws.manager import manager
 router = APIRouter(prefix="/repairs", tags=["repairs"])
 
 
+def _is_master_only(user) -> bool:
+    """У пользователя есть роль мастера, но нет «старших» ролей с полным доступом."""
+    return user.has_role(UserRole.MASTER.value) and not user.has_role(
+        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
+    )
+
+
 def _can_access(user, repair: Repair) -> bool:
     """Masters see only their own repairs; others see all."""
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         if repair.master_id == user.id:
             return True
         # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
@@ -59,7 +66,7 @@ def _can_access(user, repair: Repair) -> bool:
 
 def _is_assigner(user) -> bool:
     """Кто может назначать мастеров на ремонт (не сам мастер)."""
-    return user.role in (
+    return user.has_role(
         UserRole.ADMIN.value,
         UserRole.MANAGER.value,
         UserRole.OPERATOR.value,
@@ -81,9 +88,13 @@ def _serialize(repair: Repair) -> RepairOut:
         )
         for e in repair.events
     ]
-    masters = list(repair.masters)
-    master_ids = [m.user_id for m in masters]
-    master_names = [m.user.name for m in masters if m.user]
+    all_links = list(repair.masters)
+    master_links = [m for m in all_links if (m.kind or "master") != "helper"]
+    helper_links = [m for m in all_links if (m.kind or "master") == "helper"]
+    master_ids = [m.user_id for m in master_links]
+    master_names = [m.user.name for m in master_links if m.user]
+    helper_ids = [m.user_id for m in helper_links]
+    helper_names = [m.user.name for m in helper_links if m.user]
     # Основной мастер всегда первым, даже если связей ещё нет (старые ремонты).
     if repair.master_id and repair.master_id not in master_ids:
         master_ids.insert(0, repair.master_id)
@@ -125,11 +136,16 @@ def _serialize(repair: Repair) -> RepairOut:
         print_count=repair.print_count,
         source=repair.source,
         events=events,
+        contact2_name=repair.contact2_name,
+        contact2_phone=repair.contact2_phone,
+        is_delivery=repair.is_delivery,
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         master_name=repair.master.name if repair.master else None,
         master_ids=master_ids,
         master_names=master_names,
+        helper_ids=helper_ids,
+        helper_names=helper_names,
     )
 
 
@@ -289,7 +305,7 @@ async def client_repairs(
         )
         .order_by(Repair.accepted_at.desc())
     )
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         repairs_q = repairs_q.where(_master_scope(user.id))
     r = await db.execute(repairs_q)
     return [_serialize(x) for x in r.scalars().all()]
@@ -297,7 +313,7 @@ async def client_repairs(
 
 
 def _require_admin(user) -> None:
-    if user.role != UserRole.ADMIN.value:
+    if not user.has_role(UserRole.ADMIN.value):
         raise HTTPException(403, "Только администратор")
 
 
@@ -388,8 +404,13 @@ async def create_repair(
 
     # Если приёмку ведёт мастер — он автоматически назначается исполнителем.
     master_id = payload.master_id
-    if master_id is None and user.role == UserRole.MASTER.value:
+    if master_id is None and user.has_role(UserRole.MASTER.value):
         master_id = user.id
+
+    # Как только у ремонта есть основной мастер — он сразу начинает работу,
+    # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято» (даже
+    # если мастер сам принял заявку на себя).
+    initial_status = "Диагностика" if master_id else "Принято"
 
     repair = Repair(
         number=number,
@@ -404,10 +425,13 @@ async def create_repair(
         complectation=payload.complectation,
         fault_client=payload.fault_client,
         condition_notes=payload.condition_notes,
+        contact2_name=payload.contact2_name,
+        contact2_phone=payload.contact2_phone,
+        is_delivery=payload.is_delivery,
         consent_repair_at=now if payload.consent_repair else None,
         accepted_by=user.id,
         master_id=master_id,
-        status="Принято",
+        status=initial_status,
         eta_days=payload.eta_days,
         eta_source=payload.eta_source,
         accepted_at=now,
@@ -426,20 +450,29 @@ async def create_repair(
             data={"to": "Принято", "from": None},
         )
     )
+    if initial_status != "Принято":
+        db.add(
+            RepairEvent(
+                repair_id=repair.id,
+                type="status_change",
+                actor_id=user.id,
+                data={"to": initial_status, "from": "Принято"},
+            )
+        )
     await db.commit()
 
     repair = await _get_repair_or_404(db, repair.id)
 
-    # Если оператор/админ при приёмке сразу назначил мастера — сообщим ему в личку
-    # и отправим авто-SMS (если у мастера указан номер).
-    if (
-        master_id
-        and _is_assigner(user)
-        and repair.master is not None
-        and repair.master.id != user.id
-    ):
-        await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
-        await send_master_assignment_sms(repair.master, repair)
+    # Мастеру назначен ремонт (сразу при приёмке): в личку сообщаем только
+    # если назначил кто-то другой, а вот SMS на телефон мастера (если указан
+    # в профиле) уходит в любом случае — даже когда мастер принял заявку сам.
+    if repair.master is not None:
+        if (
+            _is_assigner(user)
+            and repair.master.id != user.id
+        ):
+            await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
+        await send_master_assignment_sms(repair.master, repair, db=db)
 
     # Notify the chat: new acceptance.
     await manager.broadcast(
@@ -493,7 +526,7 @@ async def list_repairs(
             )
         )
     # Мастера видят только свои ремонты (назначен напрямую или через список).
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         filters.append(_master_scope(user.id))
 
     base = select(Repair).where(*filters)
@@ -523,7 +556,7 @@ async def list_repairs(
 async def stage_counts(db: DbSession, user: CurrentUser):
     """Сколько техники на каждом этапе — для бейджей на доске."""
     scope = []
-    if user.role == UserRole.MASTER.value:
+    if _is_master_only(user):
         scope.append(_master_scope(user.id))
     counts: dict[str, int] = {}
     for key, statuses in STAGE_STATUSES.items():
@@ -586,8 +619,10 @@ async def update_repair(
     from app.db.base import utcnow
 
     old_status = repair.status
+    old_master_id = repair.master_id
     data = payload.model_dump(exclude_unset=True)
     master_ids = data.pop("master_ids", None)
+    helper_ids = data.pop("helper_ids", None)
     for field, value in data.items():
         setattr(repair, field, value)
 
@@ -648,18 +683,81 @@ async def update_repair(
             )
             newly_assigned_ids.append(data["master_id"])
 
-    if payload.status and payload.status != old_status:
+    # Помощники мастера (в бланке — «Inžiner (kömekçi)»). Хранятся в той же
+    # таблице repair_masters с kind="helper", чтобы не плодить лишние сущности.
+    if helper_ids is not None:
+        ordered_helper_ids: list[uuid.UUID] = []
+        for hid in helper_ids:
+            if hid not in ordered_helper_ids:
+                ordered_helper_ids.append(hid)
+
+        if ordered_helper_ids:
+            rows = await db.execute(select(User).where(User.id.in_(ordered_helper_ids)))
+            found = {u.id for u in rows.scalars().all()}
+            missing = [str(h) for h in ordered_helper_ids if h not in found]
+            if missing:
+                raise HTTPException(404, f"Помощник не найден: {', '.join(missing)}")
+
+        existing_helpers = {
+            m.user_id: m for m in repair.masters if (m.kind or "master") == "helper"
+        }
+        new_helper_ids = [
+            hid for hid in ordered_helper_ids if hid not in existing_helpers
+        ]
+        for link in list(repair.masters):
+            if (link.kind or "master") == "helper" and link.user_id not in ordered_helper_ids:
+                repair.masters.remove(link)
+        base_position = len(
+            [m for m in repair.masters if (m.kind or "master") != "helper"]
+        )
+        for offset, hid in enumerate(ordered_helper_ids):
+            link = existing_helpers.get(hid)
+            if link is None:
+                repair.masters.append(
+                    RepairMaster(
+                        user_id=hid,
+                        position=base_position + offset,
+                        kind="helper",
+                    )
+                )
+        if new_helper_ids:
+            newly_assigned_ids.extend(new_helper_ids)
+            repair.events.append(
+                RepairEvent(
+                    repair_id=repair.id,
+                    type="assign",
+                    actor_id=user.id,
+                    data={
+                        "message": "Назначен помощник мастера",
+                        "count": len(ordered_helper_ids),
+                    },
+                )
+            )
+
+    # Как только у ремонта появился основной мастер — он сам начинает работу,
+    # поэтому «Принято» автоматически переходит в «Диагностика» (если статус
+    # не задан явно в этом же запросе и мастер назначается впервые).
+    had_master_before = bool(old_master_id)
+    if (
+        payload.status is None
+        and old_status == "Принято"
+        and repair.master_id
+        and not had_master_before
+    ):
+        repair.status = "Диагностика"
+
+    if repair.status != old_status:
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
                 actor_id=user.id,
-                data={"from": old_status, "to": payload.status},
+                data={"from": old_status, "to": repair.status},
             )
         )
-        if payload.status == "Готово к выдаче":
+        if repair.status == "Готово к выдаче":
             repair.ready_at = utcnow()
-        if payload.status == "Выдано":
+        if repair.status == "Выдано":
             repair.issued_at = utcnow()
 
     # Финализация починки: оператор указал расходы/цену/оплату.
@@ -693,20 +791,23 @@ async def update_repair(
     repair = await _get_repair_or_404(db, repair_id)
 
     # Уведомляем в личку + авто-SMS мастерам, назначенным в этом запросе.
-    if newly_assigned_ids and _is_assigner(user):
+    # В личку сообщаем, только если назначил кто-то другой (не сам мастер) и
+    # это сделал оператор/менеджер/админ. А вот SMS на телефон мастера (если
+    # указан в его профиле) уходит всегда — даже если мастер назначил себя сам.
+    if newly_assigned_ids:
         rows = await db.execute(select(User).where(User.id.in_(newly_assigned_ids)))
         for master in rows.scalars().all():
-            if master.id != user.id:
+            if master.id != user.id and _is_assigner(user):
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
-                await send_master_assignment_sms(master, repair)
+            await send_master_assignment_sms(master, repair, db=db)
 
-    if payload.status and payload.status != old_status:
+    if repair.status != old_status:
         await manager.broadcast(
             {
                 "type": "repair.status_changed",
-                "repair": {"number": repair.number, "status": payload.status},
+                "repair": {"number": repair.number, "status": repair.status},
             }
         )
     return _serialize(repair)
@@ -719,7 +820,7 @@ _FINISH_TERMINAL = {"Выдано", "Не забрано", "Архив", "Отк
 
 
 def _require_finisher(user) -> None:
-    if user.role not in _FINISH_ROLES:
+    if not user.has_role(*_FINISH_ROLES):
         raise HTTPException(403, "Только админ или оператор")
 
 
@@ -762,7 +863,10 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
             }
         )
 
-    text = build_ready_sms(repair)
+    from app.services.settings import get_sms_templates
+
+    tpl = await get_sms_templates(db)
+    text = build_ready_sms(repair, template=tpl.get("ready") or None)
     return {
         "repair": _serialize(repair),
         "sms": {"to": repair.client.phone, "text": text},
@@ -782,7 +886,7 @@ async def finish_repair_send_sms(
         raise HTTPException(403, "Нет доступа к этому ремонту")
     _require_finisher(user)
 
-    result = await send_sms(repair.client.phone, payload.text)
+    result = await send_sms(repair.client.phone, payload.text, db=db)
     if not result.get("ok"):
         raise HTTPException(
             502, f"Не удалось отправить SMS: {result.get('detail', 'ошибка шлюза')}"

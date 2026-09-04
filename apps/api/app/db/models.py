@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
@@ -93,7 +93,17 @@ class User(Base, TimestampMixin):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     telegram: Mapped[str | None] = mapped_column(String(128), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255))
+    # Основная (первая) роль — используется для бейджей и обратной совместимости.
     role: Mapped[str] = mapped_column(String(32), default=UserRole.OPERATOR.value)
+    # Дополнительные роли пользователя (сверх основной `role`). Одному
+    # сотруднику можно назначить несколько ролей: напр. admin ещё и master.
+    # Полный список — см. свойство `roles` ниже.
+    extra_roles: Mapped[list | None] = mapped_column(
+        # Отдельный экземпляр JSON-типа: `Mutable.as_mutable()` регистрирует
+        # слушателей на самом объекте типа, поэтому его нельзя переиспользовать
+        # между колонкой-списком (roles) и колонками-словарями (see JSONType).
+        "roles", MutableList.as_mutable(JSON().with_variant(JSONB(), "postgresql")), nullable=True
+    )
     city_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("cities.id"), nullable=True
     )
@@ -101,6 +111,19 @@ class User(Base, TimestampMixin):
         Uuid, ForeignKey("branches.id"), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    @property
+    def roles(self) -> list[str]:
+        """Все роли пользователя (основная + дополнительные), без дублей."""
+        extra = self.extra_roles if isinstance(self.extra_roles, list) else []
+        result: list[str] = []
+        for r in [self.role, *extra]:
+            if r and r not in result:
+                result.append(r)
+        return result
+
+    def has_role(self, *roles: str) -> bool:
+        return any(r in self.roles for r in roles)
 
 
 class City(Base, TimestampMixin):
@@ -210,6 +233,13 @@ class Repair(Base, TimestampMixin):
         String(128), nullable=True, unique=True
     )
 
+    # Второй контакт по ремонту (напр. владелец техники ≠ тот, кто доставил).
+    contact2_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    contact2_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # Заказ доставлен курьером / забран с адреса (не принесён лично в сервис).
+    is_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+
     client: Mapped["Client"] = relationship(back_populates="repairs")
     accepted_by_user: Mapped["User"] = relationship(foreign_keys=[accepted_by])
     # Основной мастер (для совместимости: фильтры, доска, права доступа).
@@ -267,6 +297,9 @@ class RepairMaster(Base, TimestampMixin):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"), index=True)
     # Порядок вывода в бланке (0 — основной мастер).
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # "master" — основной исполнитель (position 0), "helper" — помощник,
+    # в бланке печатается как «Inžiner (kömekçi)».
+    kind: Mapped[str] = mapped_column(String(16), default="master")
 
     repair: Mapped["Repair"] = relationship(back_populates="masters")
     user: Mapped["User"] = relationship()
