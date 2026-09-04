@@ -17,7 +17,8 @@
 > Работают: PWA-форма приёмки с прайс-подсказкой, карточка ремонта
 > (timeline/фото/комментарии/запчасти/**оплата**), печать с редактором шаблона бланка,
 > публичная QR-страница, доска-канбан, очередь call-центра, прайс API, дашборд
-> «курс ремонта» + AI-прогноз ETA, склад запчастей, **касса** (платежи/методы/выручка),
+> «курс ремонта» + AI-прогноз ETA, склад (запчасти + купленная техника с
+> статусами разборки), **касса** (платежи/методы/выручка),
 > service worker (PWA-офлайн), **25 pytest-тестов**.
 
 ---
@@ -238,7 +239,10 @@ GET  /api/prices/hint                             (подсказка цены �
 POST/PATCH/DELETE /api/prices                     (admin/manager)
 GET  /api/parts                                   (склад: каталог + остатки, ?low_stock=true)
 POST/PATCH/DELETE /api/parts                      (admin/manager)
-GET/POST /api/repairs/:id/parts                   (запчасти ремонта, списание остатков)
+GET  /api/equipment                               (склад: купленная техника, ?q=&status=)
+POST/PATCH/DELETE /api/equipment                  (admin/manager)
+POST /api/equipment/:id/status                    (разобран / частично разобран)
+GET/POST /api/repairs/:id/parts                   (запчасти ремонта: со склада или вручную name+price)
 DELETE /api/repairs/:id/parts/:rp_id
 GET/POST /api/repairs/:id/payments                (касса: платежи по ремонту)
 DELETE /api/payments/:id                          (отмена платежа, admin/manager)

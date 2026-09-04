@@ -125,6 +125,39 @@ export interface RepairPart {
   sku?: string | null;
   qty: number;
   price?: number | null;
+  /** Запчасть внесена вручную (название + цена), а не выбрана со склада. */
+  is_manual?: boolean;
+}
+
+/** Купленная техника на складе (скрап/доноры). */
+export interface Equipment {
+  id: string;
+  name: string;
+  brand?: string | null;
+  model?: string | null;
+  /** За сколько купили (ман.). */
+  purchase_price?: number | null;
+  /** Дата покупки. */
+  purchased_at: string;
+  /** in_stock | partial | dismantled */
+  status: string;
+  /** Какие комплектующие внутри (опционально). */
+  components?: string[] | null;
+  /** Где лежит (напр. «Склад, полка 3»). */
+  storage_place?: string | null;
+  notes?: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export const EQUIPMENT_STATUS: Record<string, { label: string; badge: string }> = {
+  in_stock: { label: "В наличии", badge: "bg-emerald-100 text-emerald-700" },
+  partial: { label: "Частично разобран", badge: "bg-amber-100 text-amber-700" },
+  dismantled: { label: "Разобран", badge: "bg-slate-200 text-slate-600" },
+};
+
+export function equipmentStatusLabel(status: string): string {
+  return EQUIPMENT_STATUS[status]?.label ?? status;
 }
 
 /** Запчасть, заказанная под конкретный ремонт. */
@@ -494,14 +527,41 @@ export const api = {
     }),
   repairParts: (repairId: string) =>
     request<RepairPart[]>(`/api/repairs/${repairId}/parts`),
-  addRepairPart: (repairId: string, partId: string, qty: number) =>
+  // Запчасть в ремонт: либо со склада (part_id), либо вручную (name + price).
+  addRepairPart: (
+    repairId: string,
+    payload: { part_id?: string; name?: string; price?: number | null; qty?: number },
+  ) =>
     request<RepairPart>(`/api/repairs/${repairId}/parts`, {
       method: "POST",
-      body: JSON.stringify({ part_id: partId, qty }),
+      body: JSON.stringify(payload),
     }),
   removeRepairPart: (repairId: string, rpId: string) =>
     request<{ ok: boolean }>(`/api/repairs/${repairId}/parts/${rpId}`, {
       method: "DELETE",
+    }),
+
+  // Equipment (склад: купленная техника)
+  equipment: (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<Equipment[]>(`/api/equipment${qs ? `?${qs}` : ""}`);
+  },
+  createEquipment: (payload: Record<string, unknown>) =>
+    request<Equipment>("/api/equipment", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateEquipment: (id: string, payload: Record<string, unknown>) =>
+    request<Equipment>(`/api/equipment/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteEquipment: (id: string) =>
+    request<{ ok: boolean }>(`/api/equipment/${id}`, { method: "DELETE" }),
+  setEquipmentStatus: (id: string, status: string) =>
+    request<Equipment>(`/api/equipment/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
     }),
 
   // Заказанные под ремонт запчасти (печатаются в бланке)

@@ -106,6 +106,9 @@ export default function RepairCardPage() {
   const [blankPrice, setBlankPrice] = useState("");
   const [orderName, setOrderName] = useState("");
   const [orderQty, setOrderQty] = useState("1");
+  // Запчасть вручную (нет на складе): название + цена, за которую поставили.
+  const [manualPartName, setManualPartName] = useState("");
+  const [manualPartPrice, setManualPartPrice] = useState("");
   const [blankSaved, setBlankSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -259,7 +262,30 @@ export default function RepairCardPage() {
   async function addPart(partId: string) {
     setBusy(true);
     try {
-      await api.addRepairPart(id, partId, 1);
+      await api.addRepairPart(id, { part_id: partId, qty: 1 });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Запчасть вручную: вписать название и цену, за которую поставили.
+  // Если такой позиции ещё нет на складе — система создаст её с нулевым
+  // остатком (в выпадающем списке карточки она показываться не будет).
+  async function addManualPart() {
+    const name = manualPartName.trim();
+    if (!name) return;
+    setBusy(true);
+    try {
+      await api.addRepairPart(id, {
+        name,
+        qty: 1,
+        price: manualPartPrice ? Number(manualPartPrice) : null,
+      });
+      setManualPartName("");
+      setManualPartPrice("");
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка");
@@ -799,6 +825,9 @@ export default function RepairCardPage() {
                     className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3 ring-1 ring-slate-100">
                     <div>
                       <span className="text-sm font-medium text-slate-800">{rp.part_name}</span>
+                      {rp.is_manual && (
+                        <span className="msb-badge-gray ml-1.5 text-[10px]">вручную</span>
+                      )}
                       <span className="ml-2 text-xs text-slate-500">×{rp.qty}</span>
                     </div>
                     <div className="flex items-center gap-3">
@@ -814,18 +843,47 @@ export default function RepairCardPage() {
                 ))}
               </div>
             )}
-            <div className="mt-4">
-              <label className="msb-label">Добавить запчасть</label>
-              <select onChange={(e) => { if (e.target.value) addPart(e.target.value); e.target.value = ""; }}
-                disabled={busy} defaultValue=""
-                className="msb-input">
-                <option value="">Выберите запчасть…</option>
-                {partsCatalog.filter(p => p.stock_qty > 0).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} · {p.stock_qty} шт · {money(p.sell_price)}
-                  </option>
-                ))}
-              </select>
+            <div className="mt-4 space-y-4">
+              <div>
+                <label className="msb-label">Добавить со склада</label>
+                <select onChange={(e) => { if (e.target.value) addPart(e.target.value); e.target.value = ""; }}
+                  disabled={busy} defaultValue=""
+                  className="msb-input">
+                  <option value="">Выберите запчасть…</option>
+                  {partsCatalog.filter(p => p.stock_qty > 0).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.stock_qty} шт · {money(p.sell_price)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Вручную: если запчасти нет на складе — название + цена поставки */}
+              <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-slate-100">
+                <label className="msb-label">Или вручную — название + цена</label>
+                <div className="mt-2 flex flex-wrap items-end gap-3">
+                  <div className="min-w-[180px] flex-1">
+                    <input value={manualPartName}
+                      onChange={(e) => setManualPartName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") addManualPart(); }}
+                      placeholder="Напр. Матрица 15.6 FHD" className="msb-input" />
+                  </div>
+                  <div className="w-32">
+                    <input type="number" value={manualPartPrice}
+                      onChange={(e) => setManualPartPrice(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") addManualPart(); }}
+                      placeholder="Цена, ман." className="msb-input" />
+                  </div>
+                  <button onClick={addManualPart} disabled={busy || !manualPartName.trim()}
+                    className="msb-btn-primary">
+                    + Добавить
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-400">
+                  Впишите запчасть, которую поставили под ремонт, и её цену —
+                  даже если её нет на складе.
+                </p>
+              </div>
             </div>
           </div>
         )}

@@ -117,6 +117,7 @@ def _to_rp_out(rp: RepairPart) -> RepairPartOut:
         sku=rp.part.sku,
         qty=rp.qty,
         price=rp.price,
+        is_manual=rp.is_manual,
     )
 
 
@@ -143,9 +144,37 @@ async def add_repair_part(
     repair = await db.get(Repair, repair_id)
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
-    part = await db.get(Part, payload.part_id)
-    if part is None:
-        raise HTTPException(404, "Запчасть не найдена")
+
+    is_manual = False
+    if payload.part_id:
+        part = await db.get(Part, payload.part_id)
+        if part is None:
+            raise HTTPException(404, "Запчасть не найдена")
+    else:
+        # Вручную: название + цена. Ищем в каталоге по точному совпадению
+        # (без учёта регистра), иначе создаём позицию — дальше она видна
+        # на складе, но в выпадающем списке карточки не показывается
+        # (остаток 0). Сравнение по регистру — на стороне Python: встроенная
+        # lower() в SQLite/Postgres(C) не умеет кириллицу.
+        is_manual = True
+        name = (payload.name or "").strip()
+        row = await db.execute(select(Part).where(Part.name == name))
+        part = row.scalars().first()
+        if part is None:
+            row = await db.execute(select(Part))
+            part = next(
+                (p for p in row.scalars().all() if p.name.lower() == name.lower()),
+                None,
+            )
+        if part is None:
+            part = Part(
+                name=name,
+                stock_qty=0,
+                min_stock=0,
+                sell_price=payload.price,
+            )
+            db.add(part)
+            await db.flush()
 
     # Upsert: if already attached, bump qty.
     row = await db.execute(
@@ -158,27 +187,32 @@ async def add_repair_part(
         rp.qty += payload.qty
         if payload.price is not None:
             rp.price = payload.price
+        if is_manual:
+            rp.is_manual = True
     else:
         rp = RepairPart(
             repair_id=repair_id,
             part_id=part.id,
             qty=payload.qty,
             price=payload.price if payload.price is not None else part.sell_price,
+            is_manual=is_manual,
         )
         db.add(rp)
 
-    # Debit stock.
-    if part.stock_qty >= payload.qty:
-        part.stock_qty -= payload.qty
-    else:
-        part.stock_qty = 0
+    # Debit stock (вручную внесённые позиции остатка не имеют).
+    if not is_manual:
+        if part.stock_qty >= payload.qty:
+            part.stock_qty -= payload.qty
+        else:
+            part.stock_qty = 0
 
+    suffix = " (вручную)" if is_manual else ""
     db.add(
         RepairEvent(
             repair_id=repair_id,
             type="comment",
             actor_id=user.id,
-            data={"message": f"Добавлена запчасть: {part.name} ×{payload.qty}"},
+            data={"message": f"Добавлена запчасть: {part.name} ×{payload.qty}{suffix}"},
         )
     )
     await db.commit()
@@ -194,9 +228,9 @@ async def remove_repair_part(
     rp = await db.get(RepairPart, rp_id)
     if rp is None or rp.repair_id != repair_id:
         raise HTTPException(404, "Запчасть не найдена")
-    # Return stock.
+    # Return stock (вручную внесённые — без возврата, их не было на складе).
     part = await db.get(Part, rp.part_id)
-    if part:
+    if part and not rp.is_manual:
         part.stock_qty += rp.qty
     db.add(
         RepairEvent(

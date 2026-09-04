@@ -31,6 +31,12 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     "repair_masters": {
         "kind": "VARCHAR(16) DEFAULT 'master'",
     },
+    "repair_parts": {
+        "is_manual": "BOOLEAN DEFAULT FALSE",
+    },
+    "equipment": {
+        "storage_place": "VARCHAR(255)",
+    },
 }
 
 
