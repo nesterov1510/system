@@ -53,6 +53,8 @@ class RepairUpdate(BaseModel):
     price_max: float | None = None
     price_final: float | None = None
     cost_amount: float | None = None
+    # Сколько выплачено мастерам по этому ремонту (вручную).
+    master_payout: float | None = None
     paid: bool | None = None
     # Что починили (для бланка) и гарантия на ремонт.
     work_done: str | None = None
@@ -126,6 +128,13 @@ class RepairOut(BaseModel):
     # denormalized client info for list/card rendering
     client_name: str | None = None
     client_phone: str | None = None
+    # Кто принял технику (имя сотрудника) — для колонки списка.
+    accepted_by_name: str | None = None
+    # Сколько выплачено мастерам по этому ремонту.
+    master_payout: float | None = None
+    # Сводка по запчастям ремонта: сумма и строки «название ×кол-во».
+    parts_cost: float | None = None
+    parts_names: list[str] = []
     # denormalized master info
     master_name: str | None = None
     # все мастера ремонта (по порядку; первый — основной)

@@ -45,8 +45,9 @@ def test_master_scoped_to_own(client, master_headers, created_repair):
     assert created_repair["number"] not in numbers
 
 
-def test_master_auto_assigned_on_intake(client, master_headers, city_id):
-    """Мастер принимает заявку — он автоматически становится исполнителем."""
+def test_master_intake_not_self_assigned(client, master_headers, city_id):
+    """Мастер НЕ назначает себя на приёмке: «Мастер»/«Помощники» остаются
+    пустыми, назначение — только администратор или оператор."""
     r = client.post(
         "/api/repairs",
         headers={**master_headers, "Idempotency-Key": "master-intake-1"},
@@ -57,10 +58,24 @@ def test_master_auto_assigned_on_intake(client, master_headers, city_id):
         },
     )
     assert r.status_code == 201
-    assert r.json()["master_id"] is not None
-    # Мастер уже назначен при создании — статус сразу «Диагностика», минуя
-    # «Принято» (даже когда мастер сам себя назначил на приёмке).
-    assert r.json()["status"] == "Диагностика"
+    assert r.json()["master_id"] is None
+    assert r.json()["master_names"] == []
+    assert r.json()["status"] == "Принято"
+
+    # Мастер не может назначить себя (или другого) через PATCH — 403.
+    me = client.get("/api/auth/me", headers=master_headers).json()
+    r2 = client.patch(
+        f"/api/repairs/{r.json()['id']}",
+        headers=master_headers,
+        json={"master_ids": [me["id"]]},
+    )
+    assert r2.status_code == 403
+    r3 = client.patch(
+        f"/api/repairs/{r.json()['id']}",
+        headers=master_headers,
+        json={"helper_ids": [me["id"]]},
+    )
+    assert r3.status_code == 403
 
 
 def test_repair_without_master_stays_new(client, operator_headers, city_id):

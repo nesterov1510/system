@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PartCreate(BaseModel):
@@ -45,9 +45,19 @@ class PartOut(BaseModel):
 
 
 class RepairPartAdd(BaseModel):
-    part_id: uuid.UUID
+    """Добавить запчасть в ремонт: либо выбрать со склада (part_id),
+    либо вручную — название + цена (name/price)."""
+
+    part_id: uuid.UUID | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     qty: int = Field(default=1, ge=1)
     price: float | None = None
+
+    @model_validator(mode="after")
+    def _check_source(self):
+        if not self.part_id and not self.name:
+            raise ValueError("Нужно part_id (со склада) или name (вручную)")
+        return self
 
 
 class RepairPartOut(BaseModel):
@@ -57,3 +67,4 @@ class RepairPartOut(BaseModel):
     sku: str | None = None
     qty: int
     price: float | None = None
+    is_manual: bool = False

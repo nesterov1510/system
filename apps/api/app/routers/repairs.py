@@ -1,5 +1,5 @@
 import uuid
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
@@ -73,6 +73,11 @@ def _is_assigner(user) -> bool:
     )
 
 
+def _can_assign_masters(user) -> bool:
+    """Назначить мастеров/помощников на ремонт могут только admin и operator."""
+    return user.has_role(UserRole.ADMIN.value, UserRole.OPERATOR.value)
+
+
 def _master_scope(user_id) -> "object":
     """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters."""
     from sqlalchemy import or_, select as _select
@@ -126,6 +131,7 @@ def _serialize(repair: Repair) -> RepairOut:
         price_max=repair.price_max,
         price_final=repair.price_final,
         cost_amount=repair.cost_amount,
+        master_payout=repair.master_payout,
         paid=repair.paid,
         work_done=repair.work_done,
         warranty_text=repair.warranty_text,
@@ -402,10 +408,11 @@ async def create_repair(
     storage_months = await get_storage_months(db)
     now = utcnow()
 
-    # Если приёмку ведёт мастер — он автоматически назначается исполнителем.
+    # Мастера назначает только администратор или оператор. Мастер, принявший
+    # технику, себя НЕ назначает автоматически — «Мастер» остаётся пустым.
+    if payload.master_id is not None and not _can_assign_masters(user):
+        raise HTTPException(403, "Мастера назначает администратор или оператор")
     master_id = payload.master_id
-    if master_id is None and user.has_role(UserRole.MASTER.value):
-        master_id = user.id
 
     # Как только у ремонта есть основной мастер — он сразу начинает работу,
     # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято» (даже
@@ -493,19 +500,30 @@ STAGE_STATUSES: dict[str, list[str]] = {
 }
 
 
-@router.get("", response_model=RepairsPage)
-async def list_repairs(
-    db: DbSession,
-    user: CurrentUser,
-    stage: str | None = Query(
-        None, pattern="^(new|diag|work|done|all)$", description="Фильтр по этапу"
-    ),
-    status: str | None = None,
-    master_id: uuid.UUID | None = None,
-    q: str | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-):
+def _parse_master_ids(raw: str | None) -> list[uuid.UUID]:
+    """'id1,id2' -> [UUID, UUID] (мультивыбор мастеров в фильтре списка)."""
+    if not raw:
+        return []
+    try:
+        return [uuid.UUID(c.strip()) for c in raw.split(",") if c.strip()]
+    except ValueError:
+        raise HTTPException(400, "Некорректный id мастера")
+
+
+def _repairs_filters(
+    user,
+    stage: str | None,
+    status: str | None,
+    master_id: uuid.UUID | None,
+    master_ids: list[uuid.UUID],
+    q: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    date_field: str,
+    unassigned: bool,
+) -> list:
+    """Общий срез для GET /repairs и GET /repairs/stats — одно и то же
+    условие, чтобы карточки-суммарики совпадали с таблицей."""
     from sqlalchemy import or_
 
     filters = []
@@ -515,6 +533,20 @@ async def list_repairs(
         filters.append(Repair.status == status)
     if master_id:
         filters.append(Repair.master_id == master_id)
+    if master_ids:
+        subq = select(RepairMaster.repair_id).where(RepairMaster.user_id.in_(master_ids))
+        filters.append(or_(Repair.master_id.in_(master_ids), Repair.id.in_(subq)))
+    if date_from is not None or date_to is not None:
+        # «по приёму» — accepted_at, «по закрытию» — ready_at
+        # (готово к выдаче).
+        col = Repair.ready_at if date_field == "ready" else Repair.accepted_at
+        if date_from is not None:
+            filters.append(col >= datetime.combine(date_from, datetime.min.time()))
+        if date_to is not None:
+            filters.append(col < datetime.combine(date_to + timedelta(days=1), datetime.min.time()))
+    if unassigned:
+        filters.append(Repair.master_id.is_(None))
+        filters.append(Repair.id.not_in(select(RepairMaster.repair_id)))
     if q:
         like = f"%{q.strip()}%"
         filters.append(
@@ -528,7 +560,34 @@ async def list_repairs(
     # Мастера видят только свои ремонты (назначен напрямую или через список).
     if _is_master_only(user):
         filters.append(_master_scope(user.id))
+    return filters
 
+
+@router.get("", response_model=RepairsPage)
+async def list_repairs(
+    db: DbSession,
+    user: CurrentUser,
+    stage: str | None = Query(
+        None, pattern="^(new|diag|work|done|all)$", description="Фильтр по этапу"
+    ),
+    status: str | None = None,
+    master_id: uuid.UUID | None = None,
+    master_ids: str | None = Query(
+        None, description="Список id мастеров через запятую (мультивыбор)"
+    ),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    date_field: str = Query("accepted", pattern="^(accepted|ready)$"),
+    unassigned: bool = False,
+    q: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+):
+    mid_list = _parse_master_ids(master_ids)
+    filters = _repairs_filters(
+        user, stage, status, master_id, mid_list, q,
+        date_from, date_to, date_field, unassigned,
+    )
     base = select(Repair).where(*filters)
 
     total_row = await db.execute(
@@ -540,6 +599,7 @@ async def list_repairs(
         base.options(
             selectinload(Repair.client),
             selectinload(Repair.master),
+            selectinload(Repair.accepted_by_user),
             selectinload(Repair.events),
             selectinload(Repair.masters).selectinload(RepairMaster.user),
         )
@@ -548,8 +608,91 @@ async def list_repairs(
         .limit(page_size)
     )
     row = await db.execute(q_stmt)
-    items = [_serialize(r) for r in row.scalars().all()]
+    repairs_rows = row.scalars().all()
+    items = [_serialize(r) for r in repairs_rows]
+    # Дополнительно для таблицы: кто принял технику + запчасти ремонта
+    # (стоимость и какие).
+    if repairs_rows:
+        rp_rows = await db.execute(
+            select(RepairPart)
+            .options(selectinload(RepairPart.part))
+            .where(RepairPart.repair_id.in_([r.id for r in repairs_rows]))
+        )
+        parts_by_repair: dict[uuid.UUID, list[RepairPart]] = {}
+        for rp in rp_rows.scalars().all():
+            parts_by_repair.setdefault(rp.repair_id, []).append(rp)
+        for r, out in zip(repairs_rows, items):
+            out.accepted_by_name = r.accepted_by_user.name if r.accepted_by_user else None
+            rps = parts_by_repair.get(r.id)
+            if rps:
+                cost = 0.0
+                names = []
+                for rp in rps:
+                    if rp.price is not None:
+                        cost += float(rp.price) * rp.qty
+                    pname = rp.part.name if rp.part else "запчасть"
+                    names.append(f"{pname} ×{rp.qty}" if rp.qty > 1 else pname)
+                out.parts_cost = round(cost, 2)
+                out.parts_names = names
     return RepairsPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/stats")
+async def repairs_stats(
+    db: DbSession,
+    user: CurrentUser,
+    stage: str | None = Query(
+        None, pattern="^(new|diag|work|done|all)$", description="Фильтр по этапу"
+    ),
+    status: str | None = None,
+    master_id: uuid.UUID | None = None,
+    master_ids: str | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    date_field: str = Query("accepted", pattern="^(accepted|ready)$"),
+    unassigned: bool = False,
+    q: str | None = None,
+):
+    """5 суммариков по тому же срезу, что и GET /repairs (карточки на вкладке)."""
+    mid_list = _parse_master_ids(master_ids)
+    filters = _repairs_filters(
+        user, stage, status, master_id, mid_list, q,
+        date_from, date_to, date_field, unassigned,
+    )
+    ids_sub = select(Repair.id).where(*filters).subquery()
+
+    total_row = await db.execute(
+        select(
+            func.coalesce(
+                func.sum(func.coalesce(Repair.price_final, Repair.price_max, 0.0)), 0.0
+            )
+        ).where(Repair.id.in_(ids_sub))
+    )
+    payout_row = await db.execute(
+        select(func.coalesce(func.sum(Repair.master_payout), 0.0)).where(
+            Repair.id.in_(ids_sub)
+        )
+    )
+    clients_row = await db.execute(
+        select(func.count(func.distinct(Repair.client_id))).where(Repair.id.in_(ids_sub))
+    )
+    parts_row = await db.execute(
+        select(
+            func.coalesce(func.sum(func.coalesce(RepairPart.price, 0.0) * RepairPart.qty), 0.0)
+        ).where(RepairPart.repair_id.in_(ids_sub))
+    )
+
+    total_sum = float(total_row.scalar() or 0)
+    payout_sum = float(payout_row.scalar() or 0)
+    parts_cost = float(parts_row.scalar() or 0)
+    return {
+        "total_sum": round(total_sum, 2),
+        "parts_cost": round(parts_cost, 2),
+        "master_payout": round(payout_sum, 2),
+        # Прибыль = сумма ремонтов − расходы на запчасти − выплаты мастерам.
+        "profit": round(total_sum - parts_cost - payout_sum, 2),
+        "clients_unique": int(clients_row.scalar() or 0),
+    }
 
 
 @router.get("/stage-counts")
@@ -623,6 +766,14 @@ async def update_repair(
     data = payload.model_dump(exclude_unset=True)
     master_ids = data.pop("master_ids", None)
     helper_ids = data.pop("helper_ids", None)
+    # Назначение мастеров/помощников — только admin и operator (проверка на
+    # сервере, не только скрытие в UI).
+    if (
+        master_ids is not None
+        or helper_ids is not None
+        or "master_id" in data
+    ) and not _can_assign_masters(user):
+        raise HTTPException(403, "Мастера назначает администратор или оператор")
     for field, value in data.items():
         setattr(repair, field, value)
 

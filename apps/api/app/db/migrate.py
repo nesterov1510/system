@@ -20,6 +20,7 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "contact2_name": "VARCHAR(255)",
         "contact2_phone": "VARCHAR(32)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
+        "master_payout": "NUMERIC(12, 2)",
     },
     "users": {
         "telegram": "VARCHAR(128)",
@@ -30,6 +31,12 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     "repair_masters": {
         "kind": "VARCHAR(16) DEFAULT 'master'",
+    },
+    "repair_parts": {
+        "is_manual": "BOOLEAN DEFAULT FALSE",
+    },
+    "equipment": {
+        "storage_place": "VARCHAR(255)",
     },
 }
 

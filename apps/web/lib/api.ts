@@ -125,6 +125,39 @@ export interface RepairPart {
   sku?: string | null;
   qty: number;
   price?: number | null;
+  /** Запчасть внесена вручную (название + цена), а не выбрана со склада. */
+  is_manual?: boolean;
+}
+
+/** Купленная техника на складе (скрап/доноры). */
+export interface Equipment {
+  id: string;
+  name: string;
+  brand?: string | null;
+  model?: string | null;
+  /** За сколько купили (ман.). */
+  purchase_price?: number | null;
+  /** Дата покупки. */
+  purchased_at: string;
+  /** in_stock | partial | dismantled */
+  status: string;
+  /** Какие комплектующие внутри (опционально). */
+  components?: string[] | null;
+  /** Где лежит (напр. «Склад, полка 3»). */
+  storage_place?: string | null;
+  notes?: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export const EQUIPMENT_STATUS: Record<string, { label: string; badge: string }> = {
+  in_stock: { label: "В наличии", badge: "bg-emerald-100 text-emerald-700" },
+  partial: { label: "Частично разобран", badge: "bg-amber-100 text-amber-700" },
+  dismantled: { label: "Разобран", badge: "bg-slate-200 text-slate-600" },
+};
+
+export function equipmentStatusLabel(status: string): string {
+  return EQUIPMENT_STATUS[status]?.label ?? status;
 }
 
 /** Запчасть, заказанная под конкретный ремонт. */
@@ -174,6 +207,8 @@ export interface Repair {
   client_name?: string | null;
   client_phone?: string | null;
   accepted_at: string;
+  /** Когда стало «Готово к выдаче» (закрытие). */
+  ready_at?: string | null;
   storage_until?: string | null;
   master_id?: string | null;
   eta_days?: number | null;
@@ -182,6 +217,8 @@ export interface Repair {
   price_max?: number | null;
   price_final?: number | null;
   cost_amount?: number | null;
+  /** Сколько выплачено мастерам по этому ремонту (вручную). */
+  master_payout?: number | null;
   paid: boolean;
   work_done?: string | null;
   warranty_text?: string | null;
@@ -195,6 +232,20 @@ export interface Repair {
   contact2_phone?: string | null;
   is_delivery?: boolean;
   events: RepairEvent[];
+  /** Кто принял технику (список ремонтов). */
+  accepted_by_name?: string | null;
+  /** Сумма запчастей ремонта и строки «название ×кол-во» (список). */
+  parts_cost?: number | null;
+  parts_names?: string[];
+}
+
+/** Карточки-суммарики вкладки «Ремонты» (по текущему срезу). */
+export interface RepairsStats {
+  total_sum: number;
+  parts_cost: number;
+  master_payout: number;
+  profit: number;
+  clients_unique: number;
 }
 
 const TOKEN_KEY = "msb_token";
@@ -350,6 +401,11 @@ export const api = {
     page?: number;
     page_size?: number;
     master_id?: string;
+    master_ids?: string;
+    date_from?: string;
+    date_to?: string;
+    date_field?: "accepted" | "ready";
+    unassigned?: boolean;
   } = {}) => {
     const qs = new URLSearchParams();
     if (params.stage) qs.set("stage", params.stage);
@@ -357,10 +413,38 @@ export const api = {
     if (params.page) qs.set("page", String(params.page));
     if (params.page_size) qs.set("page_size", String(params.page_size));
     if (params.master_id) qs.set("master_id", params.master_id);
+    if (params.master_ids) qs.set("master_ids", params.master_ids);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    if (params.date_field) qs.set("date_field", params.date_field);
+    if (params.unassigned) qs.set("unassigned", "true");
     const s = qs.toString();
     return request<{ items: Repair[]; total: number; page: number; page_size: number }>(
       `/api/repairs${s ? `?${s}` : ""}`,
     );
+  },
+  // Суммарики по тому же срезу, что и список (карточки на вкладке).
+  repairsStats: (params: {
+    stage?: string;
+    q?: string;
+    master_id?: string;
+    master_ids?: string;
+    date_from?: string;
+    date_to?: string;
+    date_field?: "accepted" | "ready";
+    unassigned?: boolean;
+  } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.stage) qs.set("stage", params.stage);
+    if (params.q) qs.set("q", params.q);
+    if (params.master_id) qs.set("master_id", params.master_id);
+    if (params.master_ids) qs.set("master_ids", params.master_ids);
+    if (params.date_from) qs.set("date_from", params.date_from);
+    if (params.date_to) qs.set("date_to", params.date_to);
+    if (params.date_field) qs.set("date_field", params.date_field);
+    if (params.unassigned) qs.set("unassigned", "true");
+    const s = qs.toString();
+    return request<RepairsStats>(`/api/repairs/stats${s ? `?${s}` : ""}`);
   },
   repair: (id: string) => request<Repair>(`/api/repairs/${id}`),
   stageCounts: () =>
@@ -494,14 +578,41 @@ export const api = {
     }),
   repairParts: (repairId: string) =>
     request<RepairPart[]>(`/api/repairs/${repairId}/parts`),
-  addRepairPart: (repairId: string, partId: string, qty: number) =>
+  // Запчасть в ремонт: либо со склада (part_id), либо вручную (name + price).
+  addRepairPart: (
+    repairId: string,
+    payload: { part_id?: string; name?: string; price?: number | null; qty?: number },
+  ) =>
     request<RepairPart>(`/api/repairs/${repairId}/parts`, {
       method: "POST",
-      body: JSON.stringify({ part_id: partId, qty }),
+      body: JSON.stringify(payload),
     }),
   removeRepairPart: (repairId: string, rpId: string) =>
     request<{ ok: boolean }>(`/api/repairs/${repairId}/parts/${rpId}`, {
       method: "DELETE",
+    }),
+
+  // Equipment (склад: купленная техника)
+  equipment: (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request<Equipment[]>(`/api/equipment${qs ? `?${qs}` : ""}`);
+  },
+  createEquipment: (payload: Record<string, unknown>) =>
+    request<Equipment>("/api/equipment", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateEquipment: (id: string, payload: Record<string, unknown>) =>
+    request<Equipment>(`/api/equipment/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteEquipment: (id: string) =>
+    request<{ ok: boolean }>(`/api/equipment/${id}`, { method: "DELETE" }),
+  setEquipmentStatus: (id: string, status: string) =>
+    request<Equipment>(`/api/equipment/${id}/status`, {
+      method: "POST",
+      body: JSON.stringify({ status }),
     }),
 
   // Заказанные под ремонт запчасти (печатаются в бланке)

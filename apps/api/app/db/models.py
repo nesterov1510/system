@@ -219,6 +219,8 @@ class Repair(Base, TimestampMixin):
     warranty_text: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Расходы (себестоимость) — сколько потратили на ремонт.
     cost_amount: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Сколько выплачено мастерам по этому ремонту (заводится вручную).
+    master_payout: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     # Отметка «оплачено» оператором при оформлении починки.
     paid: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -346,6 +348,9 @@ class RepairPart(Base, TimestampMixin):
     part_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("parts.id"), index=True)
     qty: Mapped[int] = mapped_column(Integer, default=1)
     price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Запчасть внесена вручную (название + цена), а не выбрана со склада.
+    # При удалении такую запчасть НЕ возвращаем на остаток.
+    is_manual: Mapped[bool] = mapped_column(Boolean, default=False)
 
     part: Mapped["Part"] = relationship()
 
@@ -373,6 +378,48 @@ class RepairPartOrder(Base, TimestampMixin):
     )
 
     repair: Mapped["Repair"] = relationship(back_populates="part_orders")
+
+
+class EquipmentStatus(str, enum.Enum):
+    """Жизненный цикл купленной техники на складе."""
+
+    IN_STOCK = "in_stock"          # в наличии (целая)
+    PARTIAL = "partial"            # частично разобран
+    DISMANTLED = "dismantled"      # разобран (оставлен только корпус/частично)
+
+
+class Equipment(Base, TimestampMixin):
+    """Купленная техника на складе (скрап/доноры).
+
+    Админ добавляет купленную технику, указывает за сколько купили и
+    опционально какие комплектующие внутри. По мере разборки статус меняется:
+    в наличии -> частично разобран -> разобран.
+    """
+
+    __tablename__ = "equipment"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    # Название техники, напр. «Ноутбук», «Моноблок», «Холодильник».
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    brand: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # За сколько купили (ман.).
+    purchase_price: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    # Дата покупки.
+    purchased_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    status: Mapped[str] = mapped_column(
+        String(32), default=EquipmentStatus.IN_STOCK.value, index=True
+    )
+    # Какие комплектующие есть внутри (опционально), напр. ["Матрица", "Блок питания"].
+    # Отдельный экземпляр JSON-типа (as_mutable регистрирует слушатели на самом
+    # объекте типа — см. комментарий у User.extra_roles).
+    components: Mapped[list | None] = mapped_column(
+        MutableList.as_mutable(JSON().with_variant(JSONB(), "postgresql")), nullable=True
+    )
+    # Где лежит (напр. «Склад, полка 3»).
+    storage_place: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 # --------------------------------------------------------------------------

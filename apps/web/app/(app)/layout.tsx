@@ -22,7 +22,7 @@ const NAV_ITEMS = [
     items: [
       { href: "/repairs", label: "Все ремонты", icon: "📋" },
       { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-      { href: "/clients", label: "Клиенты", icon: "👥" },
+      { href: "/clients", label: "Контакты", icon: "👥" },
       { href: "/callcenter", label: "Call-центр", icon: "📞" },
       { href: "/chat", label: "Чат", icon: "💬" },
       { href: "/dashboard", label: "Курс", icon: "📊" },

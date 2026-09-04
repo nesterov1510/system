@@ -37,7 +37,7 @@ export default function ClientsPage() {
   useEffect(load, []);
 
   async function removeClient(c: ClientRow) {
-    if (!confirm(`Удалить клиента «${c.full_name}»? История его ремонтов останется, но из списка клиентов он исчезнет.`)) return;
+    if (!confirm(`Удалить контакт «${c.full_name}»? История его ремонтов останется, но из списка контактов он исчезнет.`)) return;
     setError(null);
     try {
       await api.deleteClient(c.id);
@@ -101,7 +101,7 @@ export default function ClientsPage() {
     <div className="mx-auto max-w-4xl">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Клиенты</h1>
+        <h1 className="text-2xl font-bold text-slate-900">Контакты</h1>
         <p className="mt-1 text-sm text-slate-500">
           {clients.length} уникальных клиентов ·{" "}
           {clients.reduce((s, c) => s + c.repairs_count, 0)} ремонтов всего
@@ -117,7 +117,7 @@ export default function ClientsPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск клиента: имя или телефон…"
+            placeholder="Поиск контакта: имя или телефон…"
             className="msb-input pl-10"
             autoFocus
           />
@@ -136,7 +136,7 @@ export default function ClientsPage() {
           <div className="flex flex-col items-center justify-center py-12 text-slate-400">
             <span className="text-3xl mb-2">👥</span>
             <p className="text-sm font-medium">
-              {q ? "Клиенты не найдены" : "Пока нет клиентов"}
+              {q ? "Контакты не найдены" : "Пока нет контактов"}
             </p>
             <Link href="/repairs/new" className="msb-btn-primary mt-4">
               + Новая приёмка
@@ -146,7 +146,7 @@ export default function ClientsPage() {
           <table className="w-full min-w-[620px] text-left">
             <thead className="bg-slate-50/50">
               <tr>
-                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Клиент</th>
+                <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Контакт</th>
                 <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Телефон</th>
                 <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Ремонтов</th>
                 <th className="px-5 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500 text-right">Действие</th>
@@ -220,7 +220,7 @@ function ClientDetail({
     <div className="mx-auto max-w-4xl space-y-6">
       <button onClick={onClose}
         className="msb-btn-ghost text-slate-500 hover:text-slate-700">
-        ← Все клиенты
+        ← Все контакты
       </button>
 
       {/* Client header */}

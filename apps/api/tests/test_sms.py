@@ -205,10 +205,11 @@ def test_auto_sms_to_master_on_intake_with_master(
     assert (master["id"], r.json()["id"]) in calls
 
 
-def test_auto_sms_to_master_self_accept(
-    client, admin_headers, city_id, monkeypatch
+def test_sms_when_master_assigned_after_intake(
+    client, admin_headers, operator_headers, city_id, monkeypatch
 ):
-    """Мастер сам принял заявку на себя — SMS всё равно должно уйти ему."""
+    """Мастер принял технику (без назначения — «Мастер» пустой, SMS нет),
+    затем оператор назначил мастера на ремонт — SMS уходит назначенному."""
     login = client.post(
         "/api/admin/users", headers=admin_headers,
         json={"name": "Мастер Сам", "email": "masterself@msb.local",
@@ -226,6 +227,7 @@ def test_auto_sms_to_master_self_accept(
         return {"ok": True}
     monkeypatch.setattr("app.routers.repairs.send_master_assignment_sms", _fake_sms)
 
+    # Приёмка мастером: он себя не назначает, SMS не уходит.
     r = client.post(
         "/api/repairs",
         headers={**self_headers, "Idempotency-Key": "sms-self-accept-1"},
@@ -236,8 +238,16 @@ def test_auto_sms_to_master_self_accept(
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["master_id"] == login["id"]
-    assert r.json()["status"] == "Диагностика"
+    assert r.json()["master_id"] is None
+    assert calls == []
+
+    # Оператор назначает мастера — SMS уходит.
+    p = client.patch(
+        f"/api/repairs/{r.json()['id']}",
+        headers=operator_headers,
+        json={"master_ids": [login["id"]]},
+    )
+    assert p.status_code == 200, p.text
     assert (login["id"], r.json()["id"]) in calls
 
 

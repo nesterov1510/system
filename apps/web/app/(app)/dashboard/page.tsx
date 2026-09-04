@@ -20,6 +20,15 @@ export default function DashboardPage() {
   const [eta, setEta] = useState<EtaPrediction | null>(null);
   const [etaType, setEtaType] = useState("ТВ");
   const [etaBrand, setEtaBrand] = useState("Samsung");
+  // Прогноз суммы ремонта (единственная карточка вкладки «Курс»).
+  const [pType, setPType] = useState("ТВ");
+  const [pBrand, setPBrand] = useState("");
+  const [hint, setHint] = useState<{
+    price_min?: number | null;
+    price_max?: number | null;
+    n?: number | null;
+  } | null>(null);
+  const [hintMsg, setHintMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,6 +50,23 @@ export default function DashboardPage() {
     }
   }
 
+  // Прогноз суммы ремонта по прайсу (вилка price_min–price_max).
+  async function runPriceHint() {
+    setHint(null);
+    setHintMsg(null);
+    setError(null);
+    try {
+      const params: Record<string, string> = {};
+      if (pType) params.type = pType;
+      if (pBrand) params.brand = pBrand;
+      const r = await api.priceHint(params);
+      if (r.hint) setHint(r.hint);
+      else setHintMsg(r.message || "Нет данных по прайсу");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка");
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -55,139 +81,36 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Overview Cards */}
-      {overview && (
-        <>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MetricCard
-              label="Всего ремонтов"
-              value={String(overview.total)}
-              icon="📋"
-              color="blue"
-            />
-            <MetricCard
-              label="В работе"
-              value={String(overview.active)}
-              icon="🔧"
-              color="cyan"
-            />
-            <MetricCard
-              label="Просрочка хранения"
-              value={String(overview.overdue_storage)}
-              icon="⚠️"
-              color={overview.overdue_storage > 0 ? "red" : "gray"}
-            />
-            <MetricCard
-              label="Мало на складе"
-              value={String(overview.low_stock)}
-              icon="📦"
-              color={overview.low_stock > 0 ? "amber" : "gray"}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <MetricCard
-              label="Выручка (30 дней)"
-              value={money(overview.revenue_30d)}
-              icon="💰"
-              color="emerald"
-            />
-            <MetricCard
-              label="Расходы (за всё время)"
-              value={money(overview.finished_cost)}
-              icon="💸"
-              color="rose"
-            />
-            <MetricCard
-              label="Прибыль"
-              value={money(overview.profit)}
-              icon="📈"
-              color={overview.profit < 0 ? "red" : "emerald"}
-            />
-            <MetricCard
-              label="Выручка (всего)"
-              value={money(overview.revenue)}
-              icon="🏦"
-              color="purple"
-            />
-          </div>
-        </>
-      )}
-
-      {/* Статистика по группам */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-700">Статистика по направлениям</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {tiles
-            .filter((t) => t.group === "Всего" || !t.message)
-            .map((t) => (
-              <div key={t.group} className="msb-card-solid p-5">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-slate-700">{t.group}</h3>
-                  <span className="msb-badge-info">{t.n} ремонтов</span>
-                </div>
-                {t.message ? (
-                  <p className="mt-3 text-sm text-slate-400">{t.message}</p>
-                ) : (
-                  <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-                    <MiniStat label="Срок" value={`${t.avg_days ?? "—"} дн`} sub={`p90 ${t.p90_days ?? "—"}`} />
-                    <MiniStat label="Чек" value={money(t.avg_price)} sub={`n=${t.n}`} />
-                    <MiniStat label="SLA" value={`${t.sla_pct ?? 0}%`} sub={`мед. ${t.median_days ?? 0}д`} />
-                  </div>
-                )}
-              </div>
-            ))}
-        </div>
-      </div>
-
-      {/* AI ETA */}
+      {/* Прогноз: сумма ремонта — единственная карточка вкладки «Курс» */}
       <div className="msb-card-solid p-6">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-          <span>🤖</span> AI-прогноз срока ремонта
+          <span>📈</span> Прогноз: сумма ремонта
         </h2>
         <div className="mt-4 grid gap-3 sm:flex sm:flex-wrap">
-          <input value={etaType} onChange={(e) => setEtaType(e.target.value)}
+          <input value={pType} onChange={(e) => setPType(e.target.value)}
             placeholder="Тип (ТВ)" className="msb-input min-w-0 flex-1" />
-          <input value={etaBrand} onChange={(e) => setEtaBrand(e.target.value)}
+          <input value={pBrand} onChange={(e) => setPBrand(e.target.value)}
             placeholder="Бренд" className="msb-input min-w-0 flex-1" />
-          <button onClick={runEta} className="msb-btn-primary">
-            Получить прогноз
+          <button onClick={runPriceHint} className="msb-btn-primary">
+            Прогнозировать
           </button>
         </div>
-        {eta && (
-          <div className="mt-4 rounded-xl bg-gradient-to-r from-msb-50 to-blue-50 p-5 ring-1 ring-msb-100 animate-slide-up">
-            {eta.message === "мало данных" ? (
-              <div className="flex items-center gap-3 text-sm">
-                <span className="text-2xl">📊</span>
-                <div>
-                  <p className="font-medium text-slate-700">Недостаточно данных</p>
-                  <p className="text-xs text-slate-500 mt-0.5">Честно не прогнозируем (n={eta.n})</p>
-                </div>
+        {hintMsg && (
+          <p className="mt-3 text-sm text-slate-500">📊 {hintMsg}</p>
+        )}
+        {hint && (
+          <div className="mt-4 flex flex-wrap items-center gap-6 rounded-xl bg-gradient-to-r from-emerald-50 to-msb-50 p-5 ring-1 ring-emerald-200 animate-slide-up">
+            <div className="text-center">
+              <div className="text-xs font-medium uppercase tracking-wide text-msb-600">Прогноз</div>
+              <div className="text-3xl font-extrabold text-slate-900">
+                {money(hint.price_min ?? 0)}
+                <span className="text-lg font-medium text-slate-500"> – {money(hint.price_max ?? 0)}</span>
               </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-6">
-                <div className="text-center">
-                  <div className="text-xs font-medium text-msb-600 uppercase tracking-wide">Прогноз</div>
-                  <div className="text-3xl font-extrabold text-slate-900">{eta.eta_days} <span className="text-lg font-medium text-slate-500">дн</span></div>
-                </div>
-                <div className="h-10 w-px bg-msb-200" />
-                <div>
-                  <div className="text-xs text-slate-500">Источник</div>
-                  <div className="text-sm font-semibold text-slate-700">
-                    {eta.source === "ai" ? "🤖 AI-модель" : "📊 Статистика"}
-                  </div>
-                </div>
-                {eta.confidence != null && (
-                  <>
-                    <div className="h-10 w-px bg-msb-200" />
-                    <div>
-                      <div className="text-xs text-slate-500">Уверенность</div>
-                      <div className="text-sm font-semibold text-slate-700">{Math.round(eta.confidence * 100)}%</div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+            </div>
+            <div>
+              <div className="text-xs text-slate-500">Источник</div>
+              <div className="text-sm font-semibold text-slate-700">Прайс (n={hint.n ?? 0})</div>
+            </div>
           </div>
         )}
       </div>
