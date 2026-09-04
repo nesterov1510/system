@@ -297,7 +297,10 @@ const EMPTY_EQ_FORM = {
 };
 
 function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  // Локальная дата (не UTC) — чтобы «сегодня» не сдвигалось ночью.
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function EquipmentTab() {
@@ -359,10 +362,10 @@ function EquipmentTab() {
       brand: form.brand.trim() || null,
       model: form.model.trim() || null,
       purchase_price: form.purchase_price ? Number(form.purchase_price) : null,
-      // Обед — чтобы дата не «уплыла» при смене таймзоны на сервере.
-      purchased_at: form.purchased_at
-        ? new Date(`${form.purchased_at}T12:00:00`).toISOString()
-        : null,
+      // Наивная строка (без «Z») — вся БД хранит naive UTC, а aware-datetime
+      // роняет asyncpg (DataError). Обед 12:00 — безопасный «день в себе»,
+      // дата стабильно вернётся тем же календарным днём при любом смещении.
+      purchased_at: form.purchased_at ? `${form.purchased_at}T12:00:00` : null,
       components: components.length ? components : null,
       storage_place: form.storage_place.trim() || null,
       status: form.status,

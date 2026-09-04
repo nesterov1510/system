@@ -1,11 +1,20 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import EquipmentStatus
 
 VALID_STATUSES = {s.value for s in EquipmentStatus}
+
+
+def to_naive_utc(v: datetime | None) -> datetime | None:
+    """Вся БД хранит naive UTC (см. utcnow() в models). asyncpg падает с
+    DataError, если в naive TIMESTAMP-колонку передать aware-datetime —
+    поэтому входящие значения с таймзоной приводим к naive UTC."""
+    if v is not None and v.tzinfo is not None:
+        v = v.astimezone(timezone.utc).replace(tzinfo=None)
+    return v
 
 
 class EquipmentCreate(BaseModel):
@@ -22,6 +31,11 @@ class EquipmentCreate(BaseModel):
     # Где лежит (напр. «Склад, полка 3»).
     storage_place: str | None = None
     notes: str | None = None
+
+    @field_validator("purchased_at", mode="after")
+    @classmethod
+    def _naive_utc(cls, v):
+        return to_naive_utc(v)
 
     @model_validator(mode="after")
     def _check_status(self):
@@ -41,6 +55,11 @@ class EquipmentUpdate(BaseModel):
     storage_place: str | None = None
     notes: str | None = None
     active: bool | None = None
+
+    @field_validator("purchased_at", mode="after")
+    @classmethod
+    def _naive_utc(cls, v):
+        return to_naive_utc(v)
 
     @model_validator(mode="after")
     def _check_status(self):

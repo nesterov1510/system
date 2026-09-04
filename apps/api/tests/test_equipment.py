@@ -93,6 +93,34 @@ def test_equipment_soft_delete(client, admin_headers):
     assert client.get(f"/api/equipment/{eq['id']}", headers=admin_headers).status_code == 404
 
 
+def test_equipment_aware_datetime_normalized(client, admin_headers):
+    # Aware-datetime (с таймзоной) — такое фронт присылал через toISOString.
+    # Бэкенд обязан нормализовать до naive UTC: иначе asyncpg падает с
+    # DataError на naive TIMESTAMP-колонке (can't subtract offset-naive...).
+    r = client.post(
+        "/api/equipment",
+        headers=admin_headers,
+        json={
+            "name": "Монитор",
+            "brand": "Dell",
+            "purchased_at": "2026-09-04T07:00:00+05:00",
+        },
+    )
+    assert r.status_code == 201, r.text
+    eq = r.json()
+    # 07:00+05:00 == 02:00 UTC, хранится без таймзоны.
+    assert eq["purchased_at"] == "2026-09-04T02:00:00"
+    assert "Z" not in eq["purchased_at"] and "+" not in eq["purchased_at"]
+
+    r2 = client.patch(
+        f"/api/equipment/{eq['id']}",
+        headers=admin_headers,
+        json={"purchased_at": "2026-09-01T05:30:00Z"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["purchased_at"] == "2026-09-01T05:30:00"
+
+
 def test_operator_cannot_manage_equipment(client, admin_headers, operator_headers):
     eq = client.post(
         "/api/equipment",
