@@ -18,6 +18,11 @@ import DeviceCombinedField, {
   joinDeviceCombined,
   splitDeviceCombined,
 } from "@/components/DeviceCombinedField";
+import IntakeDoneDialog, { type LabelState } from "@/components/repair/IntakeDoneDialog";
+
+// Сколько секунд окно «ремонт принят» висит перед автопереходом на доску.
+// За это время оператор успевает снять этикетку с принтера и наклеить её.
+const REDIRECT_SECONDS = 6;
 
 // Техника делится на классы: телевизоры / компьютеры / бытовая техника / другое.
 const DEVICE_TYPES = ["Телевизоры", "Компьютеры", "Бытовая техника", "Другое"];
@@ -103,9 +108,13 @@ export default function NewRepairPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Repair | null>(null);
-  const [labelBusy, setLabelBusy] = useState(false);
+  // Этикетка печатается сама, сразу после сохранения (см. useEffect ниже).
+  const [labelState, setLabelState] = useState<LabelState>("idle");
   const [labelMessage, setLabelMessage] = useState<string | null>(null);
   const [labelPdf, setLabelPdf] = useState<string | null>(null);
+  // Обратный отсчёт до перехода на «Все ремонты»; null = автопереход выключен.
+  const [redirectIn, setRedirectIn] = useState<number | null>(null);
+  const labelAutoRef = useRef(false);
   const [priceHint, setPriceHint] = useState<PriceHint | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -115,7 +124,6 @@ export default function NewRepairPage() {
   const [printBusy, setPrintBusy] = useState(false);
   const [printPdf, setPrintPdf] = useState<string | null>(null);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
-  const [registeredWithoutPrint, setRegisteredWithoutPrint] = useState(false);
 
   const currentUser = getStoredUser();
   // Назначать мастера на ремонт могут только admin и operator.
@@ -230,7 +238,12 @@ export default function NewRepairPage() {
     setPrintMsg(null);
     setPrintPdf(null);
     setPrintAttempts(0);
-    setRegisteredWithoutPrint(false);
+    setPrintAsking(false);
+    setLabelState("idle");
+    setLabelMessage(null);
+    setLabelPdf(null);
+    setRedirectIn(null);
+    labelAutoRef.current = false;
     try {
       const repair = await api.createRepair({
         city_id: cityId,
@@ -269,30 +282,53 @@ export default function NewRepairPage() {
     }
   }
 
-  async function printLabel() {
-    if (!done) return;
-    setLabelBusy(true);
+  async function printLabel(repairId: string) {
+    setLabelState("printing");
     setLabelMessage(null);
     setLabelPdf(null);
     try {
-      const result = await api.printLabel(done.id);
+      const result = await api.printLabel(repairId);
       setLabelPdf(result.pdf_base64);
-      setLabelMessage("Этикетка 58×38 поставлена в очередь печати. Переходим в главное меню…");
-      // После печати этикетки приёмка завершена — сразу возвращаемся в
-      // главное меню (доска «Все ремонты»), не заставляя ждать бланк A4.
-      setTimeout(() => router.push("/repairs"), 900);
+      setLabelState("ok");
     } catch (e) {
+      // Ремонт уже сохранён — печать этикетки не должна его откатывать.
+      // Но и уходить с доски молча нельзя: оператор должен увидеть проблему.
       setLabelMessage(e instanceof Error ? e.message : "Ошибка печати этикетки");
-    } finally {
-      setLabelBusy(false);
+      setLabelState("error");
+      setRedirectIn(null);
     }
   }
+
+  // Сохранили ремонт → этикетка уходит на принтер АВТОМАТИЧЕСКИ (один раз).
+  useEffect(() => {
+    if (!done || labelAutoRef.current) return;
+    labelAutoRef.current = true;
+    printLabel(done.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [done]);
+
+  // Этикетка напечатана → включаем обратный отсчёт перехода на «Все ремонты».
+  useEffect(() => {
+    if (done && labelState === "ok") setRedirectIn(REDIRECT_SECONDS);
+  }, [done, labelState]);
+
+  // Сам отсчёт: раз в секунду минус один, на нуле — переход.
+  useEffect(() => {
+    if (redirectIn === null) return;
+    if (redirectIn <= 0) {
+      router.push("/repairs");
+      return;
+    }
+    const t = setTimeout(() => setRedirectIn((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [redirectIn, router]);
 
   // 4) Печать бланка A4: после печати спрашиваем «успешно ли напечатано?».
   // Если нет — предлагаем напечатать заново; если и вторая попытка не удалась —
   // третий вариант «зарегистрирован без печати» + сообщение об ошибке админу.
   async function printBlank() {
     if (!done) return;
+    setRedirectIn(null);
     setPrintBusy(true);
     setPrintMsg(null);
     try {
@@ -321,7 +357,6 @@ export default function NewRepairPage() {
       if (!done) return;
       try {
         await api.reportPrintFailure(done.id, "Печать не удалась дважды подряд");
-        setRegisteredWithoutPrint(true);
         setPrintMsg(
           "⚠ Зарегистрировано без печати. Об ошибке уведомлён администратор/разработчик.",
         );
@@ -336,129 +371,64 @@ export default function NewRepairPage() {
     }
   }
 
+  /** Сброс формы — «➕ Новая приёмка» в окне успеха. */
+  function resetIntake() {
+    labelAutoRef.current = false;
+    setDone(null);
+    setClientName("");
+    setClientPhone("");
+    setPhoneError(null);
+    setExistingClient(null);
+    setContact2Name("");
+    setContact2Phone("");
+    setContact2Error(null);
+    setContact2Open(false);
+    setIsDelivery(false);
+    setDeviceCombined("");
+    setComplect([]);
+    setConditions([]);
+    setConditionOther("");
+    setFault("");
+    setPhotos([]);
+    setMasterId("");
+    setEtaDays("");
+    setLabelState("idle");
+    setLabelMessage(null);
+    setLabelPdf(null);
+    setRedirectIn(null);
+    setPrintMsg(null);
+    setPrintPdf(null);
+    setPrintAttempts(0);
+    setPrintAsking(false);
+    setStep(0);
+  }
+
+  // Приёмка завершена: вместо отдельного экрана — модальное окно.
+  // Этикетка к этому моменту уже отправлена на принтер автоматически,
+  // а через REDIRECT_SECONDS окно само уводит оператора на «Все ремонты».
   if (done) {
     return (
-      <div className="mx-auto max-w-md animate-slide-up">
-        <div className="msb-card-solid p-8 text-center">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-100 to-emerald-50 shadow-sm ring-1 ring-emerald-200">
-            <span className="text-4xl">✅</span>
-          </div>
-          <p className="text-sm font-medium text-emerald-600">Техника принята</p>
-          <p className="mt-2 font-mono text-3xl font-extrabold text-slate-900 tracking-tight">
-            {done.number}
-          </p>
-          <p className="mt-2 text-sm text-slate-500">
-            Хранение до {done.storage_until
-              ? new Date(done.storage_until).toLocaleDateString("ru")
-              : "—"}
-          </p>
-
-          <div className="mt-8 space-y-3">
-            <button
-              onClick={printLabel}
-              disabled={labelBusy}
-              className="msb-btn-primary w-full"
-            >
-              {labelBusy ? "Отправляем…" : "🏷️ Печатать этикетку 58×38"}
-            </button>
-
-            {labelMessage && (
-              <div className={`rounded-xl px-4 py-3 text-sm ring-1 ${
-                labelPdf
-                  ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                  : "bg-red-50 text-red-600 ring-red-100"
-              }`}>
-                <p>{labelPdf ? "✅ " : "⚠ "}{labelMessage}</p>
-                {labelPdf && (
-                  <button
-                    onClick={() => downloadPdfBase64(labelPdf, `label-${done.number}.pdf`)}
-                    className="mt-2 text-xs font-semibold underline"
-                  >
-                    Скачать PDF этикетки
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Вопрос «успешно ли напечатано?» после каждой попытки печати бланка */}
-            {printAsking && (
-              <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm ring-1 ring-amber-200 text-left">
-                <p className="font-semibold text-amber-800">
-                  Бланк A4 распечатан успешно?
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button onClick={confirmPrintSuccess}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">
-                    ✓ Да, напечатано
-                  </button>
-                  <button onClick={confirmPrintFailed}
-                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700">
-                    ✗ Нет{printAttempts >= 2 ? " — зарегистрировать без печати" : ", напечатать заново"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {printMsg && (
-              <div className={`rounded-xl px-4 py-3 text-sm ring-1 text-left ${
-                printMsg.startsWith("⚠")
-                  ? "bg-amber-50 text-amber-800 ring-amber-200"
-                  : "bg-emerald-50 text-emerald-700 ring-emerald-200"
-              }`}>
-                <p>{printMsg}</p>
-                {printPdf && (
-                  <button
-                    onClick={() => downloadPdfBase64(printPdf, `blank-${done.number}.pdf`)}
-                    className="mt-2 text-xs font-semibold underline"
-                  >
-                    Скачать PDF бланка
-                  </button>
-                )}
-              </div>
-            )}
-
-            <button
-              onClick={() => router.push(`/repairs/${done.id}`)}
-              className="msb-btn-secondary w-full"
-            >
-              Открыть карточку ремонта
-            </button>
-            <button
-              onClick={() => {
-                setDone(null);
-                setClientName("");
-                setClientPhone("");
-                setPhoneError(null);
-                setExistingClient(null);
-                setContact2Name("");
-                setContact2Phone("");
-                setContact2Error(null);
-                setContact2Open(false);
-                setIsDelivery(false);
-                setDeviceCombined("");
-                setComplect([]);
-                setConditions([]);
-                setConditionOther("");
-                setFault("");
-                setPhotos([]);
-                setMasterId("");
-                setEtaDays("");
-                setLabelMessage(null);
-                setLabelPdf(null);
-                setPrintMsg(null);
-                setPrintPdf(null);
-                setPrintAttempts(0);
-                setPrintAsking(false);
-                setRegisteredWithoutPrint(false);
-                setStep(0);
-              }}
-              className="msb-btn-ghost w-full text-slate-600"
-            >
-              ➕ Новая приёмка
-            </button>
-          </div>
-        </div>
-      </div>
+      <IntakeDoneDialog
+        repair={done}
+        labelState={labelState}
+        labelMessage={labelMessage}
+        labelPdf={labelPdf}
+        onRetryLabel={() => printLabel(done.id)}
+        blank={{
+          busy: printBusy,
+          asking: printAsking,
+          attempts: printAttempts,
+          message: printMsg,
+          pdf: printPdf,
+        }}
+        onPrintBlank={printBlank}
+        onBlankSuccess={confirmPrintSuccess}
+        onBlankFailed={confirmPrintFailed}
+        redirectIn={redirectIn}
+        onGoList={() => router.push("/repairs")}
+        onOpenCard={() => router.push(`/repairs/${done.id}`)}
+        onNewIntake={resetIntake}
+      />
     );
   }
 
