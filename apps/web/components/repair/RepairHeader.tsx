@@ -169,7 +169,7 @@ export default function RepairHeader({ s }: { s: RepairCardState }) {
 
       {/* Строка 2: техника и ключевые факты */}
       <div className="px-3 py-3 sm:px-4">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <span className="text-sm font-semibold text-slate-900">
             {repair.device_type}
           </span>
@@ -177,7 +177,91 @@ export default function RepairHeader({ s }: { s: RepairCardState }) {
           {repair.serial && (
             <span className="font-mono text-xs text-slate-400">SN {repair.serial}</span>
           )}
+          {/* Марку/модель/серийник можно поправить и после приёмки: операторы
+              ошибаются, а пересоздавать ремонт = терять номер и этикетку. */}
+          {s.canEditDevice && !s.deviceEdit.open && (
+            <button
+              onClick={s.openDeviceEdit}
+              className="min-h-0 rounded-md p-1 text-xs text-slate-400 transition-colors hover:bg-slate-100 hover:text-msb-600"
+              title="Изменить марку, модель или серийный номер"
+              aria-label="Изменить данные техники"
+            >
+              ✏️
+            </button>
+          )}
         </div>
+
+        {s.deviceEdit.open && (
+          <div className="mt-3 rounded-xl bg-slate-50 p-3 ring-1 ring-slate-100">
+            <div className="grid gap-2 sm:grid-cols-3">
+              <div>
+                <label className="msb-label" htmlFor="dev-brand">
+                  Марка
+                </label>
+                <input
+                  id="dev-brand"
+                  className="msb-input"
+                  value={s.deviceEdit.brand}
+                  onChange={(e) =>
+                    s.setDeviceEdit({ ...s.deviceEdit, brand: e.target.value })
+                  }
+                  placeholder="Samsung"
+                />
+              </div>
+              <div>
+                <label className="msb-label" htmlFor="dev-model">
+                  Модель
+                </label>
+                <input
+                  id="dev-model"
+                  className="msb-input"
+                  value={s.deviceEdit.model}
+                  onChange={(e) =>
+                    s.setDeviceEdit({ ...s.deviceEdit, model: e.target.value })
+                  }
+                  placeholder="UE55TU7140"
+                />
+              </div>
+              <div>
+                <label className="msb-label" htmlFor="dev-serial">
+                  Серийный №
+                </label>
+                <input
+                  id="dev-serial"
+                  className="msb-input font-mono"
+                  value={s.deviceEdit.serial}
+                  onChange={(e) =>
+                    s.setDeviceEdit({ ...s.deviceEdit, serial: e.target.value })
+                  }
+                  placeholder="SN1234567"
+                />
+              </div>
+            </div>
+            {s.deviceError && (
+              <p className="mt-2 text-xs font-medium text-red-600">⚠ {s.deviceError}</p>
+            )}
+            <p className="mt-2 text-[11px] text-slate-400">
+              Изменение попадёт в историю ремонта; бланк и этикетку после правки
+              лучше напечатать заново.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                onClick={s.saveDevice}
+                disabled={s.deviceBusy || !s.deviceEdit.brand.trim()}
+                className="msb-btn-primary px-4 py-2 text-xs"
+              >
+                {s.deviceBusy ? "Сохраняем…" : "💾 Сохранить"}
+              </button>
+              <button
+                onClick={s.closeDeviceEdit}
+                disabled={s.deviceBusy}
+                className="msb-btn-secondary px-4 py-2 text-xs"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
 
         <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-3 lg:grid-cols-6">
           <Fact label="Клиент" value={repair.client_name} />

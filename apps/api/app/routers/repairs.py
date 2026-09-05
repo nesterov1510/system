@@ -14,6 +14,7 @@ from app.core.permissions import (
     can_assign_masters,
     can_delete_client,
     can_delete_repair,
+    can_edit_device_info,
     can_edit_finances,
     can_finish_repair,
     is_master_only,
@@ -114,6 +115,10 @@ def _num(value):
 FINANCIAL_FIELDS = ("price_final", "cost_amount", "master_payout", "paid")
 # Цена «вилки» тоже влияет на деньги и на печать в бланке.
 FINANCIAL_FIELDS += ("price_min", "price_max")
+
+# Паспорт техники: марка, модель, серийный номер. Правятся после приёмки
+# (операторы ошибаются), но только старшими ролями и со следом в истории.
+DEVICE_FIELDS = ("brand", "model", "serial")
 
 
 def _master_scope(user_id) -> "object":
@@ -1016,6 +1021,20 @@ async def update_repair(
             "Цену, расходы и выплату указывает администратор, менеджер или оператор",
         )
 
+    # Марка/модель/серийник — тоже не для мастера: это данные бланка и этикетки.
+    touched_device = [f for f in DEVICE_FIELDS if f in data]
+    if touched_device and not can_edit_device_info(user):
+        raise HTTPException(
+            403,
+            "Марку, модель и серийный номер меняет администратор, менеджер или оператор",
+        )
+    # Запомним старое-новое, чтобы честно показать изменение в истории ремонта.
+    device_changes = [
+        (f, getattr(repair, f), data[f])
+        for f in touched_device
+        if (getattr(repair, f) or None) != (data[f] or None)
+    ]
+
     # Статус — только из настраиваемого списка. Произвольная строка ломала
     # доску (STAGE_STATUSES), очередь call-центра и статистику: все они
     # фильтруют по точному совпадению, и ремонт становился невидимым.
@@ -1170,6 +1189,25 @@ async def update_repair(
         elif repair.status in STOP_STATUSES:
             cancel_reminders(repair)
 
+    # Правка паспорта техники видна в ленте: кто и что именно поменял.
+    if device_changes:
+        _labels = {"brand": "марка", "model": "модель", "serial": "серийный №"}
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="device",
+                actor_id=user.id,
+                data={
+                    "message": "Исправлены данные техники: "
+                    + "; ".join(
+                        f"{_labels.get(f, f)} «{old or '—'}» → «{new or '—'}»"
+                        for f, old, new in device_changes
+                    ),
+                    "changes": {f: {"from": old, "to": new} for f, old, new in device_changes},
+                },
+            )
+        )
+
     # Финализация починки: оператор указал расходы/цену/оплату.
     if payload.cost_amount is not None or payload.price_final is not None:
         repair.events.append(
@@ -1203,6 +1241,18 @@ async def update_repair(
             entity="repair",
             entity_id=repair.id,
             meta={"from": old_status, "to": repair.status, "number": repair.number},
+        )
+    if device_changes:
+        await audit.record(
+            db,
+            audit.ACTION_REPAIR_DEVICE,
+            actor_id=user.id,
+            entity="repair",
+            entity_id=repair.id,
+            meta={
+                "number": repair.number,
+                "changes": {f: {"from": old, "to": new} for f, old, new in device_changes},
+            },
         )
     if touched_financials:
         await audit.record(

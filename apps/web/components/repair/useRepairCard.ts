@@ -105,6 +105,16 @@ export function useRepairCard(id: string) {
   const [assignHelperIds, setAssignHelperIds] = useState<string[]>([]);
   const [assignBusy, setAssignBusy] = useState(false);
 
+  // --- правка марки/модели/серийника (после приёмки) ---
+  const [deviceEdit, setDeviceEdit] = useState<{
+    open: boolean;
+    brand: string;
+    model: string;
+    serial: string;
+  }>({ open: false, brand: "", model: "", serial: "" });
+  const [deviceBusy, setDeviceBusy] = useState(false);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+
   // --- второй контакт ---
   const [contact2Open, setContact2Open] = useState(false);
   const [contact2Name, setContact2Name] = useState("");
@@ -132,6 +142,8 @@ export function useRepairCard(id: string) {
   const canAddPart =
     canEditMoney || hasRole(currentUser, "master") || hasRole(currentUser, "callcenter");
   const canRemovePart = canEditMoney;
+  // Паспорт техники (марка/модель/серийник) правят старшие роли — как на сервере.
+  const canEditDevice = canEditMoney;
   const canTakePayment = canEditMoney;
   const canRefund = hasRole(currentUser, "admin") || hasRole(currentUser, "manager");
 
@@ -206,6 +218,12 @@ export function useRepairCard(id: string) {
     setAssignHelperIds(repair.helper_ids ?? []);
     setContact2Name(repair.contact2_name ?? "");
     setContact2Phone(repair.contact2_phone ?? "");
+    setDeviceEdit((prev) => ({
+      open: prev.open,
+      brand: repair.brand ?? "",
+      model: repair.model ?? "",
+      serial: repair.serial ?? "",
+    }));
   }, [repair]);
 
   // -------------------------------------------------------------------------
@@ -223,6 +241,44 @@ export function useRepairCard(id: string) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function openDeviceEdit() {
+    if (!repair) return;
+    setDeviceError(null);
+    setDeviceEdit({
+      open: true,
+      brand: repair.brand ?? "",
+      model: repair.model ?? "",
+      serial: repair.serial ?? "",
+    });
+  }
+
+  function closeDeviceEdit() {
+    setDeviceError(null);
+    setDeviceEdit((prev) => ({ ...prev, open: false }));
+  }
+
+  /** Сохранить марку/модель/серийный номер уже принятого ремонта. */
+  async function saveDevice() {
+    if (!repair) return;
+    const brand = deviceEdit.brand.trim();
+    if (!brand) {
+      setDeviceError("Марка техники не может быть пустой");
+      return;
+    }
+    setDeviceBusy(true);
+    setDeviceError(null);
+    const ok = await patchRepair(
+      {
+        brand,
+        model: deviceEdit.model.trim() || null,
+        serial: deviceEdit.serial.trim() || null,
+      },
+      "Не удалось сохранить данные техники",
+    );
+    setDeviceBusy(false);
+    if (ok) setDeviceEdit((prev) => ({ ...prev, open: false }));
   }
 
   const changeStatus = (status: string) => patchRepair({ status });
@@ -571,16 +627,18 @@ export function useRepairCard(id: string) {
     orderName, setOrderName, orderQty, setOrderQty,
     assignOpen, setAssignOpen, assignMasterId, setAssignMasterId,
     assignHelperIds, assignBusy,
+    deviceEdit, setDeviceEdit, deviceBusy, deviceError, setDeviceError,
     contact2Open, setContact2Open, contact2Name, setContact2Name,
     contact2Phone, setContact2Phone, contact2Busy, contact2Error, setContact2Error,
     smsModal, smsSending, smsMsg,
     // права
     currentUser, canAssignMaster, canEditMoney, canFinish, canDelete,
-    canAddPart, canRemovePart, canTakePayment, canRefund,
+    canAddPart, canRemovePart, canTakePayment, canRefund, canEditDevice,
     // производные
     paidTotal, priceFinal, balance, complect,
     // действия
     reload, changeStatus, toggleDelivery, removeRepair, doPrint, doPrintLabel,
+    openDeviceEdit, closeDeviceEdit, saveDevice,
     addComment, onFiles, addPart, addManualPart, removePart, addPayment,
     refundPayment, saveAssign, toggleHelper, saveContact2, saveBlank,
     toggleBlankMaster, addOrder, removeOrder, finalize, openFinish,

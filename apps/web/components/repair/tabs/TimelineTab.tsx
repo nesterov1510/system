@@ -14,6 +14,7 @@ const EVENT_LABELS: Record<string, string> = {
   photo: "фото",
   assign: "назначение",
   notify: "уведомление",
+  device: "данные техники",
 };
 
 const EVENT_ICONS: Record<string, string> = {
@@ -25,6 +26,7 @@ const EVENT_ICONS: Record<string, string> = {
   photo: "📷",
   assign: "👤",
   notify: "🔔",
+  device: "📺",
 };
 
 function fmt(dt: string | null | undefined) {

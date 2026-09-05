@@ -4,6 +4,85 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api, getStoredUser, hasRole, money, type Lookup, type Repair, type RepairsStats } from "@/lib/api";
 import { classIcon, normalizeClass } from "@/lib/catalog";
+import ColumnHint from "@/components/ColumnHint";
+
+// Колонки списка ремонтов: заголовок сокращён (эмодзи + короткое слово),
+// а смысл раскрывает кнопка «?» рядом с ним. Так таблица помещается на экран
+// стойки и при этом никто не гадает, что за цифра в колонке.
+const COLUMNS: Array<{
+  key: string;
+  label: string;
+  title: string;
+  hint: string;
+  details?: string[];
+  align?: "right";
+}> = [
+  {
+    key: "date",
+    label: "📅 Дата",
+    title: "Дата",
+    hint: "Дата приёма техники в сервис. Если сверху выбран срез «по закрытию» — дата, когда ремонт перевели в «Готово к выдаче».",
+  },
+  {
+    key: "device",
+    label: "📺 Техника",
+    title: "Название техники",
+    hint: "Класс техники, марка и модель. Клик открывает карточку ремонта.",
+    details: ["🚚 — заказ с доставкой (курьер или забрали с адреса)"],
+  },
+  {
+    key: "accepted",
+    label: "🧾 Принял",
+    title: "Кто принял технику",
+    hint: "Сотрудник, который оформил приёмку этого ремонта.",
+  },
+  {
+    key: "fault",
+    label: "🔧 Причина",
+    title: "Причина поломки",
+    hint: "Неисправность со слов клиента. Если жалоба пустая — показывается диагноз мастера.",
+  },
+  {
+    key: "sum",
+    label: "💵 Сумма",
+    title: "Общая сумма ремонта",
+    hint: "Сколько стоит ремонт: итоговая цена, если она уже указана, иначе верхняя граница вилки из прайса.",
+    align: "right",
+  },
+  {
+    key: "parts",
+    label: "🔩 Запчасти",
+    title: "Расходы на запчасти",
+    hint: "Сумма списанных под ремонт запчастей и сами позиции (название ×кол-во).",
+  },
+  {
+    key: "client",
+    label: "👤 Клиент",
+    title: "Имя и номер клиента",
+    hint: "Кто владелец ремонта. Номер кликабельный — на телефоне сразу набирается.",
+  },
+  {
+    key: "masters",
+    label: "👷 Мастера",
+    title: "Мастер(а) и помощники",
+    hint: "Кто ведёт ремонт: сначала основные мастера, ниже строчкой помощники (kömekçi).",
+    details: ["«Не назначен» — у ремонта ещё нет исполнителя"],
+  },
+  {
+    key: "payout",
+    label: "💰 Выплата",
+    title: "Сколько оплачено мастерам",
+    hint: "Сумма, выплаченная мастерам за этот ремонт. Заполняется при оформлении починки (админ/менеджер/оператор).",
+    align: "right",
+  },
+  {
+    key: "total",
+    label: "🏁 Итог",
+    title: "Итоговая сумма ремонта",
+    hint: "Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».",
+    align: "right",
+  },
+];
 
 // Этапы (вкладки). Внутри каждого — список ремонтов таблицей.
 const STAGES = [
@@ -332,25 +411,28 @@ export default function RepairsBoardPage() {
         </div>
       )}
 
-      {/* List: ровно 10 колонок */}
+      {/* List: ровно 10 колонок (заголовки сокращены, «?» объясняет каждый) */}
       <div className="overflow-x-auto rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
-        <table className="w-full min-w-[1280px] text-left">
+        <table className="w-full min-w-[1080px] text-left">
           <thead className="bg-slate-50/50">
             <tr>
-              {[
-                "Дата",
-                "Название техники",
-                "Кто принял технику",
-                "Причина поломки",
-                "Общая сумма ремонта",
-                "Расходы на запчасти и какие запчасти",
-                "Имя и номер клиента",
-                "Мастер(а) и помощники",
-                "Какому мастеру сколько было оплачено",
-                "Итоговая сумма ремонта",
-              ].map((h) => (
-                <th key={h} className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  {h}
+              {COLUMNS.map((c) => (
+                <th
+                  key={c.key}
+                  className={`px-3 py-2.5 text-xs font-semibold tracking-wide text-slate-500 ${
+                    c.align === "right" ? "text-right" : "text-left"
+                  }`}
+                >
+                  <span
+                    className={`inline-flex items-center gap-1 ${
+                      c.align === "right" ? "flex-row-reverse" : ""
+                    }`}
+                  >
+                    <span className="whitespace-nowrap" title={c.title}>
+                      {c.label}
+                    </span>
+                    <ColumnHint label={c.title} hint={c.hint} details={c.details} />
+                  </span>
                 </th>
               ))}
             </tr>
@@ -379,14 +461,14 @@ export default function RepairsBoardPage() {
                 return (
                   <tr key={r.id} className="transition-colors hover:bg-msb-50/40">
                     {/* 1. Дата: по выбранному срезу (приём/закрытие) */}
-                    <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
+                    <td className="whitespace-nowrap px-3 py-3 text-xs text-slate-500">
                       {(() => {
                         const dt = dateField === "ready" ? r.ready_at : r.accepted_at;
                         return dt ? new Date(dt).toLocaleDateString("ru") : "—";
                       })()}
                     </td>
                     {/* 2. Название техники */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Link href={`/repairs/${r.id}`} className="flex items-center gap-2.5">
                         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-lg">
                           {classIcon(r.device_type)}
@@ -405,15 +487,15 @@ export default function RepairsBoardPage() {
                       </Link>
                     </td>
                     {/* 3. Кто принял технику */}
-                    <td className="px-4 py-3 text-xs text-slate-600">
+                    <td className="px-3 py-3 text-xs text-slate-600">
                       {r.accepted_by_name || "—"}
                     </td>
                     {/* 4. Причина поломки */}
-                    <td className="max-w-[220px] px-4 py-3 text-xs text-slate-600">
+                    <td className="max-w-[200px] px-3 py-3 text-xs text-slate-600">
                       <span className="line-clamp-2">{r.fault_client || r.fault_master || "—"}</span>
                     </td>
                     {/* 5. Общая сумма ремонта (сумма к оплате клиенту) */}
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       {sum != null ? (
                         <span className="text-sm font-semibold text-slate-800">{money(sum)}</span>
                       ) : (
@@ -421,7 +503,7 @@ export default function RepairsBoardPage() {
                       )}
                     </td>
                     {/* 6. Расходы на запчасти и какие запчасти */}
-                    <td className="max-w-[240px] px-4 py-3">
+                    <td className="max-w-[220px] px-3 py-3">
                       {r.parts_cost != null ? (
                         <div>
                           <div className="text-sm font-semibold text-rose-600">{money(r.parts_cost)}</div>
@@ -434,7 +516,7 @@ export default function RepairsBoardPage() {
                       )}
                     </td>
                     {/* 7. Имя и номер клиента */}
-                    <td className="whitespace-nowrap px-4 py-3">
+                    <td className="whitespace-nowrap px-3 py-3">
                       <Link href={`/repairs/${r.id}`} className="block">
                         <span className="text-sm font-medium text-slate-800">{r.client_name}</span>
                       </Link>
@@ -443,7 +525,7 @@ export default function RepairsBoardPage() {
                       </a>
                     </td>
                     {/* 8. Мастер(а) и помощники */}
-                    <td className="px-4 py-3 text-xs text-slate-600">
+                    <td className="px-3 py-3 text-xs text-slate-600">
                       {hasMasters ? (
                         <div>
                           <div className="font-medium text-slate-800">{r.master_names?.join(", ")}</div>
@@ -458,20 +540,30 @@ export default function RepairsBoardPage() {
                       )}
                     </td>
                     {/* 9. Какому мастеру сколько было оплачено */}
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       {r.master_payout != null ? (
                         <span className="text-sm font-semibold text-amber-600">{money(r.master_payout)}</span>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    {/* 10. Итоговая сумма ремонта (то же поле, что и 5) */}
-                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                    {/* 10. Итоговая сумма ремонта + рассчитался ли клиент */}
+                    <td className="whitespace-nowrap px-3 py-3 text-right">
                       {sum != null ? (
                         <span className="text-sm font-bold text-slate-900">{money(sum)}</span>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
+                      <span
+                        className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          r.paid
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-700"
+                        }`}
+                        title={r.paid ? "Отмечено как оплаченное" : "Ещё не оплачено"}
+                      >
+                        {r.paid ? "✓ оплачено" : "долг"}
+                      </span>
                     </td>
                   </tr>
                 );

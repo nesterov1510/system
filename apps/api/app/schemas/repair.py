@@ -93,6 +93,25 @@ class RepairUpdate(BaseModel):
     contact2_phone: str | None = None
     is_delivery: bool | None = None
 
+    # Данные техники можно поправить и после приёмки: операторы ошибаются в
+    # марке/модели, а без правки приходилось пересоздавать ремонт (и терять
+    # номер с этикеткой). Меняют их только старшие роли — см.
+    # `can_edit_device_info` в core/permissions.py.
+    brand: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    serial: str | None = Field(default=None, max_length=128)
+
+    @field_validator("brand", "model", "serial")
+    @classmethod
+    def _device_text_clean(cls, v: str | None, info) -> str | None:
+        """Пробелы по краям убираем; пустая марка недопустима."""
+        if v is None:
+            return None
+        v = " ".join(v.split())
+        if not v and info.field_name == "brand":
+            raise ValueError("Марка техники не может быть пустой")
+        return v or None
+
 
 class RepairEventOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
