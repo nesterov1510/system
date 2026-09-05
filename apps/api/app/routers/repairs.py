@@ -19,6 +19,7 @@ from app.core.permissions import (
     can_finish_repair,
     is_master_only,
 )
+from app.db.conflicts import CLIENT_PHONE, NUMBER, OTHER, classify, constraint_name
 from app.db.models import (
     Client,
     City,
@@ -412,8 +413,17 @@ async def update_client(
                 Client.phone_norm == phone_norm, Client.id != client_id
             )
         )
-        if clash.scalar_one_or_none() is not None:
-            raise HTTPException(409, "Клиент с таким номером уже есть")
+        clash_client = clash.scalar_one_or_none()
+        if clash_client is not None:
+            # Важно сказать, что карточка удалена: иначе админ не понимает,
+            # почему номер «занят», хотя в поиске его не видно.
+            detail = "Клиент с таким номером уже есть"
+            if clash_client.deleted_at is not None:
+                detail += (
+                    " (карточка удалена — приёмка с этим номером восстановит её, "
+                    "а здесь номер занять нельзя)"
+                )
+            raise HTTPException(409, detail)
         client.phone = new_phone
         client.phone_norm = phone_norm
 
@@ -570,28 +580,42 @@ async def create_repair(
     if payload.master_id is not None and not _can_assign_masters(user):
         raise HTTPException(403, "Мастера назначает администратор или оператор")
 
+    # Повтор идёт после rollback(), который «протухает» (expire) все объекты
+    # сессии: чтение `user.id` или `city.slug` внутри async-кода падало с
+    # MissingGreenlet, то есть честный повтор номера не работал вовсе. Поэтому
+    # дальше передаём только простые значения.
+    user_id = user.id
+    city_slug = city.slug
+
     repair_id: uuid.UUID | None = None
     last_error: Exception | None = None
+    conflict = NUMBER
     for attempt in range(MAX_NUMBER_ATTEMPTS):
         try:
             repair_id = await _persist_repair(
-                db, payload, user, city, phone_norm, idempotency_key
+                db, payload, user_id, city_slug, phone_norm, idempotency_key
             )
             break
         except IntegrityError as exc:
             # Откатываем и пробуем заново: счётчик номера сдвинется.
             await db.rollback()
             last_error = exc
+            conflict = classify(exc)
             log.warning(
-                "конфликт номера ремонта (попытка %d/%d): %s",
-                attempt + 1, MAX_NUMBER_ATTEMPTS, exc,
+                "конфликт при приёмке (%s, ограничение %s, попытка %d/%d): %s",
+                conflict,
+                constraint_name(exc),
+                attempt + 1,
+                MAX_NUMBER_ATTEMPTS,
+                exc,
             )
+            if conflict == OTHER:
+                # Причина не в номере и не в телефоне клиента — повтор не поможет.
+                break
     if repair_id is None:
-        raise HTTPException(
-            409,
-            "Не удалось выделить номер ремонта — приёмку пытаются оформить "
-            "одновременно. Повторите попытку.",
-        ) from last_error
+        if conflict == OTHER:
+            log.error("Приёмка отклонена базой: %s", last_error)
+        raise HTTPException(409, _intake_conflict_message(conflict)) from last_error
 
     repair = await _get_repair_or_404(db, repair_id)
 
@@ -616,26 +640,36 @@ async def create_repair(
 async def _persist_repair(
     db,
     payload: RepairCreate,
-    user,
-    city: City,
+    user_id: uuid.UUID,
+    city_slug: str | None,
     phone_norm: str,
     idempotency_key: str | None,
 ) -> uuid.UUID:
     """Создать клиента (при необходимости) и ремонт. Возвращает id ремонта.
 
     Бросает `IntegrityError` при конфликте номера — вызывающий код повторяет
-    попытку. Ничего, кроме БД, здесь не происходит: SMS и рассылки делаются
-    снаружи, чтобы не дублироваться при повторе.
+    попытку. На вход принимаются только простые значения (`user_id`,
+    `city_slug`): повтор идёт после `rollback()`, а он делает объекты сессии
+    «протухшими», и ленивое чтение их атрибутов в async-коде падает.
+
+    Ничего, кроме БД, здесь не происходит: SMS и рассылки делаются снаружи,
+    чтобы не дублироваться при повторе.
     """
     from app.db.base import utcnow
 
     # --- Клиент: ищем по нормализованному номеру ---
+    # Мягко удалённых (deleted_at) смотрим тоже: индекс phone_norm уникальный
+    # без оговорок, поэтому «невидимый» удалённый клиент делал приёмку с этим
+    # номером невозможной НАВСЕГДА — INSERT падал в UniqueViolation, retry-цикл
+    # принимал это за конфликт номера ремонта, и оператор получал «не удалось
+    # выделить номер» пять раз подряд.
     row = await db.execute(
-        select(Client).where(
-            Client.phone_norm == phone_norm, Client.deleted_at.is_(None)
-        )
+        select(Client)
+        .where(Client.phone_norm == phone_norm)
+        # Живой клиент приоритетнее удалённого (false < true).
+        .order_by(Client.deleted_at.isnot(None))
     )
-    client = row.scalar_one_or_none()
+    client = row.scalars().first()
     new_name = (payload.client.full_name or "").strip()
     if client is None:
         client = Client(
@@ -645,25 +679,49 @@ async def _persist_repair(
         )
         db.add(client)
         await db.flush()
-    elif new_name and new_name != client.full_name:
-        # Раньше имя перезаписывалось молча: приём техники от другого человека
-        # с тем же номером стирал прежнее имя вместе со всей его историей.
-        # Теперь имя остаётся прежним, а расхождение фиксируется в аудите —
-        # правится явно через PATCH /repairs/clients/{id}.
-        await audit.record(
-            db,
-            audit.ACTION_CLIENT_MERGE_BLOCKED,
-            actor_id=user.id,
-            entity="client",
-            entity_id=client.id,
-            meta={
-                "kept_name": client.full_name,
-                "submitted_name": new_name,
-                "phone_norm": phone_norm,
-            },
-        )
+    else:
+        if client.deleted_at is not None:
+            # Клиент снова принёс технику: снимаем мягкое удаление, иначе его
+            # история ремонтов осталась бы «закрытой», а новый ремонт повис бы
+            # на втором, невидимом в поиске, клиенте с тем же номером.
+            client.deleted_at = None
+            await audit.record(
+                db,
+                audit.ACTION_CLIENT_RESTORE,
+                actor_id=user_id,
+                entity="client",
+                entity_id=client.id,
+                meta={
+                    "full_name": client.full_name,
+                    "phone": client.phone,
+                    "phone_norm": phone_norm,
+                    "reason": "приёмка с тем же номером телефона",
+                },
+            )
+            log.info(
+                "Клиент %s (phone_norm=%s) восстановлен при приёмке",
+                client.id,
+                phone_norm,
+            )
+        if new_name and new_name != client.full_name:
+            # Раньше имя перезаписывалось молча: приём техники от другого
+            # человека с тем же номером стирал прежнее имя вместе со всей его
+            # историей. Теперь имя остаётся прежним, а расхождение фиксируется
+            # в аудите — правится явно через PATCH /repairs/clients/{id}.
+            await audit.record(
+                db,
+                audit.ACTION_CLIENT_MERGE_BLOCKED,
+                actor_id=user_id,
+                entity="client",
+                entity_id=client.id,
+                meta={
+                    "kept_name": client.full_name,
+                    "submitted_name": new_name,
+                    "phone_norm": phone_norm,
+                },
+            )
 
-    number = await next_repair_number(db, city, payload.device_type)
+    number = await next_repair_number(db, city_slug, payload.device_type)
     storage_months = await get_storage_months(db)
     now = utcnow()
 
@@ -689,7 +747,7 @@ async def _persist_repair(
         contact2_phone=payload.contact2_phone,
         is_delivery=payload.is_delivery,
         consent_repair_at=now if payload.consent_repair else None,
-        accepted_by=user.id,
+        accepted_by=user_id,
         master_id=master_id,
         status=initial_status,
         eta_days=payload.eta_days,
@@ -706,7 +764,7 @@ async def _persist_repair(
         RepairEvent(
             repair_id=repair.id,
             type="status_change",
-            actor_id=user.id,
+            actor_id=user_id,
             data={"to": "Принято", "from": None},
         )
     )
@@ -715,7 +773,7 @@ async def _persist_repair(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
-                actor_id=user.id,
+                actor_id=user_id,
                 data={"to": initial_status, "from": "Принято"},
             )
         )
@@ -725,6 +783,25 @@ async def _persist_repair(
         )
     await db.commit()
     return repair.id
+
+
+def _intake_conflict_message(conflict: str) -> str:
+    """Человеческий текст 409 при приёмке — по настоящей причине конфликта."""
+    if conflict == CLIENT_PHONE:
+        return (
+            "Не удалось сохранить клиента: этот номер телефона уже привязан к "
+            "другой карточке клиента. Найдите клиента поиском по телефону и "
+            "повторите приёмку либо укажите другой номер."
+        )
+    if conflict == OTHER:
+        return (
+            "Приёмка не сохранена: база отклонила запись. Повторите попытку, а "
+            "если ошибка повторится — сообщите администратору (детали в логе API)."
+        )
+    return (
+        "Не удалось выделить номер ремонта — приёмку пытаются оформить "
+        "одновременно. Повторите попытку."
+    )
 
 
 # Группы-этапы для страницы «Все ремонты» (вкладки).

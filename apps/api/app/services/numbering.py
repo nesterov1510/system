@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import City, Repair
+from app.db.models import Repair
 
 # Типы техники из справочника UI (apps/web/lib/catalog.ts -> DEVICE_CLASSES).
 # Ключи ОБЯЗАНЫ совпадать со значениями, которые фронтенд шлёт в device_type,
@@ -43,16 +43,21 @@ def device_prefix(device_type: str) -> str:
     return DEVICE_PREFIX.get((device_type or "").strip(), FALLBACK_PREFIX)
 
 
-async def next_repair_number(db: AsyncSession, city: City, device_type: str) -> str:
+async def next_repair_number(db: AsyncSession, city_slug: str, device_type: str) -> str:
     """Сгенерировать человекочитаемый последовательный номер по (город, год).
 
     Счётчик читает максимальный существующий номер и увеличивает его. При
     одновременной приёмке двумя операторами возможна гонка — поэтому вызывающий
-    код обязан повторить попытку при `IntegrityError`
-    (см. `_create_repair_once` в `app.routers.repairs`).
+    код обязан повторить попытку при `IntegrityError` (см. `_persist_repair` и
+    `create_repair` в `app.routers.repairs`).
+
+    Город приходит строкой (`city.slug`), а не ORM-объектом: приёмка повторяет
+    попытку после `rollback()`, который «протухает» (expire) все объекты
+    сессии, и ленивое чтение атрибута города в async-коде падало с
+    `MissingGreenlet` — то есть честный повтор номера не работал вовсе.
     """
     prefix = device_prefix(device_type)
-    city_slug = (city.slug or "").upper()
+    city_slug = (city_slug or "").upper()
     year = datetime.now(timezone.utc).year
 
     pattern = f"{prefix}-{city_slug}-{year}-%"
