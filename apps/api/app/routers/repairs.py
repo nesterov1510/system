@@ -123,11 +123,20 @@ DEVICE_FIELDS = ("brand", "model", "serial")
 
 
 def _master_scope(user_id) -> "object":
-    """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters."""
+    """SQL-условие: ремонт назначен мастеру либо принят им самим.
+
+    Своя приёмка входит в область видимости: исполнитель назначается
+    администратором/оператором, поэтому без этого условия только что созданный
+    мастером ремонт тут же пропадал у него из списка и доски.
+    """
     from sqlalchemy import or_, select as _select
 
     subq = _select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
-    return or_(Repair.master_id == user_id, Repair.id.in_(subq))
+    return or_(
+        Repair.master_id == user_id,
+        Repair.id.in_(subq),
+        Repair.accepted_by == user_id,
+    )
 
 
 def _serialize(repair: Repair) -> RepairOut:
@@ -864,6 +873,11 @@ def _repairs_filters(
         like = f"%{q.strip()}%"
         filters.append(
             or_(
+                # Номер ремонта и серийник — то, что напечатано на этикетке:
+                # оператор читает её с техники и ищет карточку. Раньше поиск по
+                # номеру не работал вовсе (в условии не было Repair.number).
+                Repair.number.ilike(like),
+                Repair.serial.ilike(like),
                 Repair.client.has(Client.phone.ilike(like)),
                 Repair.client.has(Client.full_name.ilike(like)),
                 Repair.brand.ilike(like),

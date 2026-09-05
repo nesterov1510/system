@@ -289,3 +289,27 @@ def test_master_board_only_assigned(
     # Чужой ремонт открыть напрямую мастер не может.
     assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 403
     assert client.get(f"/api/repairs/{r1['id']}", headers=h2).status_code == 403
+
+
+def test_search_by_number_and_serial(client, operator_headers, city_id):
+    """Номер и серийник напечатаны на этикетке — по ним карточка обязана находиться."""
+    created = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": "search-1"},
+        json={
+            "city_id": city_id,
+            "client": {"full_name": "Поиск Клиент", "phone": "+993 61 880099", "consent_pdn": True},
+            "device_type": "Телевизоры",
+            "brand": "Sony",
+            "serial": "SN-SEARCH-77",
+            "fault_client": "не включается",
+        },
+    )
+    assert created.status_code == 201, created.text
+    number = created.json()["number"]
+
+    for query in (number, number.split("-", 1)[1], "sn-search-77"):
+        r = client.get("/api/repairs", headers=operator_headers, params={"q": query})
+        assert r.status_code == 200, r.text
+        numbers = [x["number"] for x in r.json()["items"]]
+        assert number in numbers, f"поиск {query!r} не нашёл ремонт: {numbers}"

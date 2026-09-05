@@ -126,9 +126,20 @@ def can_finish_repair(user) -> bool:
     return has_any_role(user, *FINISH_ROLES)
 
 
+def accepted_by_me(user, repair) -> bool:
+    """Приёмку этого ремонта оформил именно данный пользователь."""
+    accepted_by = getattr(repair, "accepted_by", None)
+    return accepted_by is not None and accepted_by == user.id
+
+
 def can_print(user, repair) -> bool:
-    """Напечатать бланк/этикетку: мастер — только свой ремонт."""
+    """Напечатать бланк/этикетку: мастер — свой ремонт или свою приёмку."""
     if has_any_role(user, *PRINT_QUEUE_ROLES) or not has_any_role(user, MASTER):
+        return True
+    # Мастер принял технику сам — этикетка на его приёмку печатается сразу,
+    # даже когда исполнитель ещё не назначен (ремонт «в очереди», а назначает
+    # его администратор/оператор). Иначе автопечать при приёмке упиралась в 403.
+    if accepted_by_me(user, repair):
         return True
     return repair.master_id == user.id or any(
         link.user_id == user.id for link in repair.masters
@@ -136,10 +147,14 @@ def can_print(user, repair) -> bool:
 
 
 def can_access_repair(user, repair) -> bool:
-    """Мастера видят только свои ремонты; остальные роли — все."""
+    """Мастера видят свои ремонты и собственные приёмки; остальные роли — все."""
     if not is_master_only(user):
         return True
     if repair.master_id == user.id:
+        return True
+    # Своя приёмка: мастер оформил ремонт и обязан видеть его карточку,
+    # даже если исполнителем назначат другого мастера.
+    if accepted_by_me(user, repair):
         return True
     # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
     return any(m.user_id == user.id for m in repair.masters)

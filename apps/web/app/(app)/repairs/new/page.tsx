@@ -789,10 +789,20 @@ export default function NewRepairPage() {
                 <label className="msb-label">Мастер</label>
                 {!canAssign ? (
                   <div
-                    title="Назначает администратор или оператор"
-                    className="flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-500 ring-1 ring-slate-100"
+                    title="Исполнителя назначит администратор или оператор"
+                    className="flex items-start gap-2 rounded-xl bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-500 ring-1 ring-slate-100"
                   >
-                    <span>🔒</span> Назначает администратор или оператор
+                    <span>🔒</span>
+                    <span>
+                      Исполнителя назначит администратор или оператор.
+                      {hasRole(currentUser, "master") ? (
+                        <>
+                          {" "}
+                          Своя приёмка останется у вас в списке, карточка будет
+                          доступна, а этикетка напечатается сразу после сохранения.
+                        </>
+                      ) : null}
+                    </span>
                   </div>
                 ) : (
                   <select className="msb-input" value={masterId}
