@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 
@@ -12,6 +14,7 @@ from app.db.migrate import run_migrations
 from app.db.models import *  # noqa: F401,F403 — register all models
 from app.db.seed import seed
 from app.db.session import async_session_factory, engine
+from app.services.reminders import reminder_loop
 from app.routers import (
     admin,
     ai,
@@ -46,7 +49,23 @@ async def lifespan(app: FastAPI):
     # Local file storage for photos (MVP).
     if settings.STORAGE_MODE == "local":
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    yield
+
+    # Фоновая задача: ежедневные SMS-напоминания «заберите технику».
+    # Живёт в том же процессе, что и API (при `--workers 1` — одна копия;
+    # на нескольких воркерах от двойной отправки защищает условный UPDATE
+    # в services/reminders.py).
+    reminder_stop = asyncio.Event()
+    reminder_task = None
+    if settings.REMINDER_ENABLED:
+        reminder_task = asyncio.create_task(reminder_loop(reminder_stop))
+    try:
+        yield
+    finally:
+        reminder_stop.set()
+        if reminder_task is not None:
+            reminder_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reminder_task
 
 
 app = FastAPI(

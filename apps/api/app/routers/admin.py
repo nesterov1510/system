@@ -3,6 +3,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
@@ -39,6 +40,7 @@ from app.services.print import (
 from app.services.sms import (
     AVAILABLE_MASTER_FIELDS as AVAILABLE_SMS_MASTER_FIELDS,
     AVAILABLE_READY_FIELDS as AVAILABLE_SMS_READY_FIELDS,
+    AVAILABLE_REMINDER_FIELDS as AVAILABLE_SMS_REMINDER_FIELDS,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminOnly])
@@ -415,6 +417,7 @@ async def get_sms_config(db: DbSession):
         "template_fields": {
             "master_assign": AVAILABLE_SMS_MASTER_FIELDS,
             "ready": AVAILABLE_SMS_READY_FIELDS,
+            "pickup_reminder": AVAILABLE_SMS_REMINDER_FIELDS,
         },
     }
 
@@ -463,6 +466,11 @@ async def set_sms_templates(db: DbSession, body: dict):
             body.get("master_assign", current.get("master_assign", ""))
         ).strip(),
         "ready": str(body.get("ready", current.get("ready", ""))).strip(),
+        # Ежедневное напоминание «заберите технику». Пустая строка = текст по
+        # умолчанию (название сервиса + адрес), см. services/sms.py.
+        "pickup_reminder": str(
+            body.get("pickup_reminder", current.get("pickup_reminder", ""))
+        ).strip(),
     }
     await set_setting(db, "sms_templates", value, "Шаблоны текстов SMS")
     return {"templates": value}
@@ -483,6 +491,85 @@ async def test_sms(db: DbSession, body: dict):
             502, f"Не удалось отправить тестовое SMS: {result.get('detail', 'ошибка шлюза')}"
         )
     return {"ok": True, "detail": result.get("detail")}
+
+
+# --- Ежедневные напоминания «заберите технику» ---
+@router.get("/reminders")
+async def reminders_queue(db: DbSession):
+    """Очередь напоминаний: какие ремонты и когда получат следующее SMS.
+
+    Нужно администратору, чтобы проверить, что рассылка жива: после «Ремонт
+    закончен» ремонт должен появиться здесь с датой следующего напоминания.
+    """
+    from app.services.reminders import (
+        REMINDER_STATUSES,
+        days_waiting,
+        in_sending_window,
+        local_now,
+    )
+
+    rows = await db.execute(
+        select(Repair)
+        .options(selectinload(Repair.client))
+        .where(Repair.reminder_next_at.isnot(None))
+        .order_by(Repair.reminder_next_at)
+        .limit(200)
+    )
+    repairs = rows.scalars().all()
+    return {
+        "enabled": settings.REMINDER_ENABLED,
+        "sms_window_open": in_sending_window(),
+        "local_time": local_now().isoformat(),
+        "schedule": {
+            "every_hours": settings.REMINDER_EVERY_HOURS,
+            "first_delay_hours": settings.REMINDER_FIRST_DELAY_HOURS,
+            "check_interval_min": settings.REMINDER_CHECK_INTERVAL_MIN,
+            "quiet_hours": f"{settings.REMINDER_SEND_FROM_HOUR}:00–"
+            f"{settings.REMINDER_SEND_TO_HOUR}:00 {settings.REMINDER_TIMEZONE}",
+            "max_count": settings.REMINDER_MAX_COUNT,
+            "statuses": list(REMINDER_STATUSES),
+        },
+        "items": [
+            {
+                "id": str(r.id),
+                "number": r.number,
+                "status": r.status,
+                "client_name": r.client.full_name if r.client else None,
+                "client_phone": r.client.phone if r.client else None,
+                "ready_at": r.ready_at.isoformat() if r.ready_at else None,
+                "days_waiting": days_waiting(r),
+                "sent_count": r.reminder_count or 0,
+                "last_sent_at": (
+                    r.reminder_last_at.isoformat() if r.reminder_last_at else None
+                ),
+                "next_at": r.reminder_next_at.isoformat() if r.reminder_next_at else None,
+            }
+            for r in repairs
+        ],
+    }
+
+
+@router.post("/reminders/run")
+async def run_reminders_now(db: DbSession, user: CurrentUser):
+    """Прогнать очередь напоминаний вручную (проверка шлюза и расписания).
+
+    Отправляет только те напоминания, срок которых уже подошёл, — так же, как
+    фоновая задача. Двойной запуск не приведёт к дублю SMS: строка ремонта
+    «заявляется» условным UPDATE.
+    """
+    from app.services import audit as audit_service
+    from app.services.reminders import send_due_reminders
+
+    report = await send_due_reminders(db)
+    await audit_service.record(
+        db,
+        "reminders.run",
+        actor_id=user.id,
+        entity="system",
+        meta={k: report.get(k) for k in ("sent", "failed", "skipped", "due", "reason")},
+    )
+    await db.commit()
+    return report
 
 
 # --- Audit log ---

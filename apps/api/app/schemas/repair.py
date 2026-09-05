@@ -155,6 +155,11 @@ class RepairOut(BaseModel):
     contact2_phone: str | None = None
     is_delivery: bool = False
 
+    # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
+    reminder_next_at: datetime | None = None
+    reminder_last_at: datetime | None = None
+    reminder_count: int = 0
+
     # denormalized client info for list/card rendering
     client_name: str | None = None
     client_phone: str | None = None

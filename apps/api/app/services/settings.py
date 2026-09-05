@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Setting
+from app.services.sms import DEFAULT_PICKUP_REMINDER_TEXT
 
 DEFAULT_SETTINGS: dict[str, dict] = {
     "storage_months": {
@@ -113,12 +114,18 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "value": {
             "master_assign": "",
             "ready": "",
+            # Ежедневное напоминание «заберите технику»: текст виден и правится
+            # в «Админ → SMS», поэтому название сервиса и адрес здесь можно
+            # поменять без правки кода.
+            "pickup_reminder": DEFAULT_PICKUP_REMINDER_TEXT,
         },
         "description": (
             "Шаблоны текстов SMS (пусто = использовать текст по умолчанию). "
             "Доступные плейсхолдеры для шаблона мастеру: {master_name} {number} "
             "{device} {serial} {client_name} {client_phone} {fault} {eta_days}. "
-            "Для шаблона клиенту о готовности: {client_name} {number} {device}."
+            "Для шаблона клиенту о готовности: {client_name} {number} {device}. "
+            "Для ежедневного напоминания забрать технику (pickup_reminder): "
+            "{client_name} {number} {device} {days} {ready_date}."
         ),
     },
 }

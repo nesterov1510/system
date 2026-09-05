@@ -231,6 +231,10 @@ export interface Repair {
   contact2_name?: string | null;
   contact2_phone?: string | null;
   is_delivery?: boolean;
+  /** Ежедневные SMS-напоминания «заберите технику» (после «Ремонт закончен»). */
+  reminder_next_at?: string | null;
+  reminder_last_at?: string | null;
+  reminder_count?: number;
   events: RepairEvent[];
   /** Кто принял технику (список ремонтов). */
   accepted_by_name?: string | null;
@@ -860,8 +864,12 @@ export const api = {
         verify_ssl: boolean;
         timeout_sec: number;
       };
-      templates: { master_assign: string; ready: string };
-      template_fields: { master_assign: string[]; ready: string[] };
+      templates: { master_assign: string; ready: string; pickup_reminder: string };
+      template_fields: {
+        master_assign: string[];
+        ready: string[];
+        pickup_reminder: string[];
+      };
     }>("/api/admin/sms"),
   saveSmsConfig: (payload: {
     enabled: boolean;
@@ -875,11 +883,47 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
-  saveSmsTemplates: (payload: { master_assign: string; ready: string }) =>
+  saveSmsTemplates: (payload: {
+    master_assign: string;
+    ready: string;
+    pickup_reminder: string;
+  }) =>
     request<{ templates: Record<string, unknown> }>("/api/admin/sms/templates", {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+  // Ежедневные напоминания «заберите технику»: очередь и ручной прогон.
+  remindersQueue: () =>
+    request<{
+      enabled: boolean;
+      sms_window_open: boolean;
+      local_time: string;
+      schedule: {
+        every_hours: number;
+        first_delay_hours: number;
+        check_interval_min: number;
+        quiet_hours: string;
+        max_count: number;
+        statuses: string[];
+      };
+      items: Array<{
+        id: string;
+        number: string;
+        status: string;
+        client_name?: string | null;
+        client_phone?: string | null;
+        ready_at?: string | null;
+        days_waiting?: number | null;
+        sent_count: number;
+        last_sent_at?: string | null;
+        next_at?: string | null;
+      }>;
+    }>("/api/admin/reminders"),
+  runReminders: () =>
+    request<{ sent: number; failed: number; skipped: number; due: number; reason?: string | null }>(
+      "/api/admin/reminders/run",
+      { method: "POST" },
+    ),
   testSms: (phone: string, text?: string) =>
     request<{ ok: boolean; detail?: string }>("/api/admin/sms/test", {
       method: "POST",

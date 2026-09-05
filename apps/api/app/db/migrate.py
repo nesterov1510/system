@@ -21,6 +21,10 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "contact2_phone": "VARCHAR(32)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
         "master_payout": "NUMERIC(12, 2)",
+        # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
+        "reminder_next_at": "TIMESTAMP",
+        "reminder_last_at": "TIMESTAMP",
+        "reminder_count": "INTEGER DEFAULT 0",
     },
     "users": {
         "telegram": "VARCHAR(128)",

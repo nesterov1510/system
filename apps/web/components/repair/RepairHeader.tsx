@@ -47,6 +47,10 @@ function fmt(dt?: string | null) {
   return dt ? new Date(dt).toLocaleString("ru") : "—";
 }
 
+function fmtShort(dt?: string | null) {
+  return dt ? new Date(dt).toLocaleString("ru", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
 function fmtDate(dt?: string | null) {
   return dt ? new Date(dt).toLocaleDateString("ru") : "—";
 }
@@ -230,6 +234,23 @@ export default function RepairHeader({ s }: { s: RepairCardState }) {
             />
             🚚 Доставка
           </label>
+
+          {/* Ежедневные SMS-напоминания «заберите технику»: оператор видит,
+              что клиент уже предупреждён и когда придёт следующее SMS. */}
+          {repair.reminder_next_at && (
+            <span
+              className="msb-badge bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700"
+              title={`Отправлено напоминаний: ${repair.reminder_count ?? 0}. Следующее — ${fmt(
+                repair.reminder_next_at,
+              )}. Рассылка идёт, пока технику не выдадут.`}
+            >
+              🔔 {repair.reminder_count ?? 0}
+              <span className="hidden sm:inline">
+                {" "}
+                · след. {fmtShort(repair.reminder_next_at)}
+              </span>
+            </span>
+          )}
 
           <button
             onClick={() => s.setContact2Open(true)}

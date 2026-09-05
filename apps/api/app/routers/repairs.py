@@ -52,6 +52,12 @@ from app.services.sms import (
     send_master_assignment_sms,
     send_sms,
 )
+from app.services.reminders import (
+    REMINDER_STATUSES,
+    STOP_STATUSES,
+    cancel_reminders,
+    schedule_reminders,
+)
 from app.services.settings import get_repair_statuses, get_storage_months
 from app.services.storage import (
     object_key_for,
@@ -177,6 +183,9 @@ def _serialize(repair: Repair) -> RepairOut:
         contact2_name=repair.contact2_name,
         contact2_phone=repair.contact2_phone,
         is_delivery=repair.is_delivery,
+        reminder_next_at=repair.reminder_next_at,
+        reminder_last_at=repair.reminder_last_at,
+        reminder_count=repair.reminder_count or 0,
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         master_name=repair.master.name if repair.master else None,
@@ -1154,6 +1163,12 @@ async def update_repair(
             repair.ready_at = utcnow()
         if repair.status == "Выдано":
             repair.issued_at = utcnow()
+        # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
+        # готов к выдаче, и снимаются, как только технику выдали/закрыли.
+        if repair.status in REMINDER_STATUSES:
+            schedule_reminders(repair)
+        elif repair.status in STOP_STATUSES:
+            cancel_reminders(repair)
 
     # Финализация починки: оператор указал расходы/цену/оплату.
     if payload.cost_amount is not None or payload.price_final is not None:
@@ -1275,6 +1290,10 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
         repair.status = "Готово к выдаче"
         repair.ready_at = utcnow()
+        # С этого момента клиенту раз в сутки напоминает о себе сервис:
+        # первое напоминание — через сутки (сегодня он уже получил SMS
+        # «ремонт готов»), дальше каждый день, пока технику не заберут.
+        schedule_reminders(repair)
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,

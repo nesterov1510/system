@@ -64,6 +64,26 @@ class Settings(BaseSettings):
     SMS_VERIFY_SSL: bool = True
     SMS_TIMEOUT_SEC: float = 10.0
 
+    # --- Ежедневные напоминания «заберите технику» ---
+    #
+    # После «Ремонт закончен» клиенту раз в сутки уходит SMS с просьбой забрать
+    # технику, пока ремонт не выдан (статусы «Готово к выдаче» / «Не забрано»).
+    # Текст — шаблон `pickup_reminder` в «Админ → SMS».
+    REMINDER_ENABLED: bool = True
+    # Как часто фоновая задача просматривает очередь напоминаний (минуты).
+    REMINDER_CHECK_INTERVAL_MIN: int = 15
+    # Периодичность напоминаний одному клиенту (часы). 24 = раз в сутки.
+    REMINDER_EVERY_HOURS: int = 24
+    # Первое напоминание — через столько часов после «Ремонт закончен»
+    # (в тот же день клиент уже получил SMS о готовности).
+    REMINDER_FIRST_DELAY_HOURS: int = 24
+    # Тихие часы: не будим клиента ночью (по местному времени сервиса).
+    REMINDER_SEND_FROM_HOUR: int = 9
+    REMINDER_SEND_TO_HOUR: int = 20
+    REMINDER_TIMEZONE: str = "Asia/Ashgabat"
+    # 0 = напоминать, пока технику не заберут. Иначе — не больше N напоминаний.
+    REMINDER_MAX_COUNT: int = 0
+
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"
     SEED_ADMIN_PASSWORD: str = "admin123"  # только dev; в ENV=prod обязательно заменить

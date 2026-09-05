@@ -82,6 +82,47 @@ def ready_sms_tokens(repair) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Ежедневное напоминание «заберите технику»
+# ---------------------------------------------------------------------------
+#
+# Текст по умолчанию — тот, что просил сервис: короткое вежливое напоминание
+# с названием и адресом. Администратор может переписать его в «Админ → SMS»
+# (ключ `pickup_reminder`), поэтому название и адрес не зашиты намертво:
+# здесь они живут только как fallback на случай пустых настроек.
+DEFAULT_PICKUP_REMINDER_TEXT = (
+    "Уважаемый клиент, просим забрать вашу технику из нашего сервиса MERYOSAB. "
+    "Находимся по адресу: Парахат 3/2, ж14."
+)
+
+
+def pickup_reminder_tokens(repair, days_waiting: int | None = None) -> dict:
+    """Плейсхолдеры, доступные в шаблоне напоминания клиенту."""
+    ready_at = getattr(repair, "ready_at", None)
+    return {
+        "client_name": (repair.client.full_name if getattr(repair, "client", None) else ""),
+        "number": getattr(repair, "number", "") or "",
+        "device": device_line(
+            getattr(repair, "brand", None),
+            getattr(repair, "model", None),
+            getattr(repair, "device_type", "") or "",
+        ),
+        # Сколько суток техника ждёт клиента после «Ремонт закончен».
+        "days": "" if days_waiting is None else str(days_waiting),
+        "ready_date": (
+            ready_at.strftime("%d.%m.%Y") if getattr(ready_at, "strftime", None) else ""
+        ),
+    }
+
+
+def build_pickup_reminder_sms(
+    repair, template: str | None = None, days_waiting: int | None = None
+) -> str:
+    """Текст ежедневного напоминания клиенту забрать готовую технику."""
+    text = (template or "").strip() or DEFAULT_PICKUP_REMINDER_TEXT
+    return _safe_format(text, pickup_reminder_tokens(repair, days_waiting)).strip()
+
+
 AVAILABLE_MASTER_FIELDS = [
     "master_name",
     "number",
@@ -93,6 +134,7 @@ AVAILABLE_MASTER_FIELDS = [
     "eta_days",
 ]
 AVAILABLE_READY_FIELDS = ["client_name", "number", "device"]
+AVAILABLE_REMINDER_FIELDS = ["client_name", "number", "device", "days", "ready_date"]
 
 
 def build_master_sms(master_name: str, repair, template: str | None = None) -> str:
@@ -216,3 +258,25 @@ async def send_master_assignment_sms(master, repair, db=None) -> dict:
         template = tpl.get("master_assign") or None
     text = build_master_sms(master.name, repair, template=template)
     return await send_sms(master.phone, text, db=db)
+
+
+async def send_pickup_reminder_sms(repair, db=None) -> dict:
+    """Отправить клиенту напоминание забрать технику.
+
+    Возвращает {"ok": bool, "detail": str, "text": str}. Ошибки шлюза наружу не
+    поднимаются — напоминание не должно ронять фоновую задачу.
+    """
+    phone = (repair.client.phone or "") if getattr(repair, "client", None) else ""
+    if not phone:
+        return {"ok": False, "detail": "no_phone", "text": ""}
+
+    template = None
+    if db is not None:
+        from app.services.settings import get_sms_templates
+
+        tpl = await get_sms_templates(db)
+        template = tpl.get("pickup_reminder") or None
+    text = build_pickup_reminder_sms(repair, template=template)
+    result = await send_sms(phone, text, db=db)
+    result["text"] = text
+    return result
