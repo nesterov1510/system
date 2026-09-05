@@ -82,11 +82,14 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Основной принтер: имя, режим печати (agent|ipp)",
     },
     "label_printer": {
+        # Адрес и имя очереди намеренно пустые: их задаёт администратор в
+        # «Админ → Принтер». Хардкодить внутренний IP в коде нельзя — при
+        # переносе на другой сервер этикетки молча уезжали бы не туда.
         "value": {
-            "ip": "192.168.5.238",
+            "ip": "",
             "port": 631,
             "mode": "cups_remote",
-            "name": "3B-350B",
+            "name": "",
             "width_mm": 58,
             "height_mm": 38,
             "media": "Custom.58x38mm",
@@ -94,12 +97,14 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "CUPS-принтер этикеток 58×38 мм",
     },
     "sms_server": {
+        # URL/логин/пароль задаются в «Админ → SMS» или через env. В коде
+        # боевых креденшелов и внутренних адресов быть не должно.
         "value": {
             "enabled": False,
-            "url": "https://192.168.5.238/api/3rdparty/v1/messages",
+            "url": "",
             "username": "",
             "password": "",
-            "verify_ssl": False,
+            "verify_ssl": True,
             "timeout_sec": 10.0,
         },
         "description": "SMS-шлюз: адрес, логин/пароль, таймаут",
@@ -153,6 +158,22 @@ async def get_legal_text(db: AsyncSession) -> str:
     if s and s.get("text"):
         return s["text"]
     return DEFAULT_SETTINGS["legal_text"]["value"]["text"]
+
+
+async def get_repair_statuses(db: AsyncSession) -> list[str]:
+    """Список допустимых статусов ремонта (настраивается в админке).
+
+    Используется для валидации PATCH /repairs/{id}: произвольный статус
+    ломал доску, очередь call-центра и статистику, потому что все они
+    фильтруют по точному совпадению со строкой статуса.
+    """
+    s = await get_setting(db, "repair_statuses")
+    items = (s or {}).get("items")
+    if isinstance(items, list) and items:
+        cleaned = [str(x).strip() for x in items if str(x).strip()]
+        if cleaned:
+            return cleaned
+    return list(DEFAULT_SETTINGS["repair_statuses"]["value"]["items"])
 
 
 async def get_currency(db: AsyncSession) -> dict:

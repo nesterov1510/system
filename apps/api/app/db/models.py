@@ -132,7 +132,7 @@ class City(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
     slug: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
-    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow")
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Ashgabat")
 
     branches: Mapped[list["Branch"]] = relationship(
         back_populates="city", cascade="all, delete-orphan"

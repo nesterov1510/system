@@ -250,54 +250,50 @@ export interface RepairsStats {
 
 const TOKEN_KEY = "msb_token";
 const USER_KEY = "msb_user";
+const REFRESH_KEY = "msb_refresh";
 const REMEMBER_KEY = "msb_remember";
 
-export interface RememberedLogin {
-  email: string;
-  password: string;
-}
+// ---------------------------------------------------------------------------
+// «Запомнить вход».
+//
+// Раньше в localStorage клался ПАРОЛЬ пользователя, обёрнутый в base64
+// (который не является шифрованием). На общем терминале приёмки любой следующий
+// сотрудник доставал его одной командой в DevTools, а любой XSS уводил
+// креденшелы целиком. Теперь запоминается ТОЛЬКО email для автозаполнения,
+// а сессию продлевает refresh-токен через /api/auth/refresh.
+// ---------------------------------------------------------------------------
 
-/** base64 (utf-8 safe) — это НЕ шифрование, только чтобы пароль
- *  не лежал в localStorage открытым текстом при беглом взгляде. */
-function encode(value: string): string {
-  return window.btoa(
-    String.fromCharCode(...new TextEncoder().encode(value)),
-  );
-}
-
-function decode(value: string): string {
-  const bin = window.atob(value);
-  return new TextDecoder().decode(
-    Uint8Array.from(bin, (ch) => ch.charCodeAt(0)),
-  );
-}
-
-/** Сохранить данные входа для автозаполнения формы логина. */
-export function saveRememberedLogin(email: string, password: string) {
+/** Сохранить email для автозаполнения формы входа (без пароля). */
+export function saveRememberedLogin(email: string) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(
-      REMEMBER_KEY,
-      encode(JSON.stringify({ email, password })),
-    );
+    window.localStorage.setItem(REMEMBER_KEY, email.trim().toLowerCase());
   } catch {
     /* приватный режим / переполненное хранилище — просто не запоминаем */
   }
 }
 
-/** Прочитать сохранённые данные входа (или null). */
-export function getRememberedLogin(): RememberedLogin | null {
+/** Прочитать запомненный email (или null). */
+export function getRememberedLogin(): string | null {
   if (typeof window === "undefined") return null;
   const raw = window.localStorage.getItem(REMEMBER_KEY);
   if (!raw) return null;
-  try {
-    const data = JSON.parse(decode(raw)) as RememberedLogin;
-    if (!data || typeof data.email !== "string") return null;
-    return { email: data.email, password: data.password ?? "" };
-  } catch {
-    window.localStorage.removeItem(REMEMBER_KEY);
-    return null;
+
+  // Миграция со старого формата: там лежал JSON с паролем. Пароль стираем,
+  // email оставляем — иначе обновление не очистило бы уже утечённые данные.
+  if (raw.startsWith("{")) {
+    try {
+      const legacy = JSON.parse(raw) as { email?: string };
+      const email = typeof legacy?.email === "string" ? legacy.email : null;
+      if (email) window.localStorage.setItem(REMEMBER_KEY, email);
+      else window.localStorage.removeItem(REMEMBER_KEY);
+      return email;
+    } catch {
+      window.localStorage.removeItem(REMEMBER_KEY);
+      return null;
+    }
   }
+  return raw;
 }
 
 export function clearRememberedLogin() {
@@ -310,9 +306,17 @@ export function getToken(): string | null {
   return window.localStorage.getItem(TOKEN_KEY);
 }
 
-export function setSession(token: string, user: User) {
+export function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(REFRESH_KEY);
+}
+
+export function setSession(token: string, user: User, refreshToken?: string | null) {
   window.localStorage.setItem(TOKEN_KEY, token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+  // Refresh-токен храним только если пользователь отметил «Запомнить вход».
+  if (refreshToken) window.localStorage.setItem(REFRESH_KEY, refreshToken);
+  else window.localStorage.removeItem(REFRESH_KEY);
 }
 
 export function getStoredUser(): User | null {
@@ -324,19 +328,61 @@ export function getStoredUser(): User | null {
 export function clearSession() {
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
+  window.localStorage.removeItem(REFRESH_KEY);
+}
+
+/** Общий промис, чтобы 10 параллельных 401 не сделали 10 refresh-запросов. */
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshSession(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${API_URL}/api/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    setSession(body.access_token, body.user, body.refresh_token);
+    return body.access_token as string;
+  } catch {
+    return null;
+  }
+}
+
+function sharedRefresh(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshSession().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    ...(init.headers as Record<string, string> | undefined),
+  const doFetch = async (token: string | null) => {
+    const headers: Record<string, string> = {
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (init.body && typeof init.body === "string") {
+      headers["Content-Type"] = "application/json";
+    }
+    return fetch(`${API_URL}${path}`, { ...init, headers });
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  if (init.body && typeof init.body === "string") {
-    headers["Content-Type"] = "application/json";
+
+  let res = await doFetch(getToken());
+
+  // Access-токен живёт 30 минут. Если он истёк, а refresh-токен есть —
+  // молча обновляем сессию и повторяем запрос ровно один раз.
+  if (res.status === 401 && getRefreshToken() && path !== "/api/auth/refresh") {
+    const fresh = await sharedRefresh();
+    if (fresh) res = await doFetch(fresh);
   }
 
-  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   if (res.status === 401 && typeof window !== "undefined") {
     clearSession();
     window.location.href = "/login";

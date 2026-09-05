@@ -50,20 +50,25 @@ class Settings(BaseSettings):
 
     # --- SMS gateway ---
     # Реальные значения (URL/логин/пароль/вкл-выкл) настраиваются в админке
-    # (Admin → SMS, хранится в БД как Setting["sms_server"]). Поля ниже — это
-    # только запасной дефолт для окружений без БД (юнит-тесты и т.п.).
-    SMS_ENABLED: bool = True
-    SMS_GATEWAY_URL: str = "https://192.168.8.81/api/3rdparty/v1/messages"
-    SMS_GATEWAY_USERNAME: str = "KJV7XJ"
-    SMS_GATEWAY_PASSWORD: str = "fbsybvpoothupl"
-    # Сертификат шлюза самоподписанный — аналог `curl -k`.
-    SMS_VERIFY_SSL: bool = False
+    # (Admin → SMS, хранится в БД как Setting["sms_server"]) либо через env.
+    #
+    # ВАЖНО: здесь намеренно НЕТ боевых логина/пароля. Секреты не должны
+    # попадать в исходники и в git-историю — только env или настройки в БД.
+    # При пустом URL/логине отправка просто возвращает {"ok": False}.
+    SMS_ENABLED: bool = False
+    SMS_GATEWAY_URL: str = ""
+    SMS_GATEWAY_USERNAME: str = ""
+    SMS_GATEWAY_PASSWORD: str = ""
+    # Сертификат шлюза может быть самоподписанным — тогда это аналог `curl -k`.
+    # Включайте только для доверенной внутренней сети.
+    SMS_VERIFY_SSL: bool = True
     SMS_TIMEOUT_SEC: float = 10.0
 
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"
     SEED_ADMIN_PASSWORD: str = "admin123"  # только dev; в ENV=prod обязательно заменить
-    SEED_ADMIN_PHONE: str = "+70000000000"
+    # Регион развёртывания — Туркменистан (+993).
+    SEED_ADMIN_PHONE: str = "+99300000000"
 
 
 @lru_cache

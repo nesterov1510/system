@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ClientCreate(BaseModel):
@@ -9,6 +9,27 @@ class ClientCreate(BaseModel):
     phone: str = Field(min_length=5, max_length=32)
     consent_pdn: bool = False
     consent_storage: bool = False
+
+    @field_validator("phone")
+    @classmethod
+    def _phone_has_digits(cls, v: str) -> str:
+        """Телефон обязан содержать цифры.
+
+        Без этого строка вроде "-----" нормализуется в пустой phone_norm, и все
+        такие клиенты сливаются в одну запись (phone_norm — UNIQUE). Фронтенд
+        проверяет номер строго (apps/web/lib/phone.ts), но API доступен и
+        напрямую, поэтому проверка дублируется на сервере.
+        """
+        if not any(ch.isdigit() for ch in (v or "")):
+            raise ValueError("В телефоне должна быть хотя бы одна цифра")
+        return v
+
+    @field_validator("full_name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("Имя клиента не может быть пустым")
+        return v.strip()
 
 
 class RepairCreate(BaseModel):
@@ -22,6 +43,15 @@ class RepairCreate(BaseModel):
     contact2_name: str | None = None
     contact2_phone: str | None = None
     device_type: str = Field(min_length=1, max_length=32)
+
+    @field_validator("contact2_phone")
+    @classmethod
+    def _contact2_phone_has_digits(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        if not any(ch.isdigit() for ch in v):
+            raise ValueError("В телефоне второго контакта должна быть хотя бы одна цифра")
+        return v.strip()
     brand: str | None = None
     model: str | None = None
     serial: str | None = None

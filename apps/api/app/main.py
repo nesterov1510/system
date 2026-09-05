@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.db.base import Base
+from app.db.datamigrate import run_data_migrations
 from app.db.migrate import run_migrations
 from app.db.models import *  # noqa: F401,F403 — register all models
 from app.db.seed import seed
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
     await run_migrations(engine)
     async with async_session_factory() as db:
         await seed(db)
+        # Одноразовые пересчёты уже лежащих в БД значений (идемпотентно).
+        await run_data_migrations(db)
     # Local file storage for photos (MVP).
     if settings.STORAGE_MODE == "local":
         os.makedirs(settings.UPLOAD_DIR, exist_ok=True)

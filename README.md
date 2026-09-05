@@ -19,7 +19,7 @@
 > публичная QR-страница, доска-канбан, очередь call-центра, прайс API, дашборд
 > «курс ремонта» + AI-прогноз ETA, склад (запчасти + купленная техника с
 > статусами разборки), **касса** (платежи/методы/выручка),
-> service worker (PWA-офлайн), **25 pytest-тестов**.
+> service worker (PWA-офлайн), SMS-уведомление о готовности, **127 pytest-тестов**.
 
 ---
 
@@ -40,8 +40,9 @@
 apps/api           FastAPI backend (routers, services, models, ws)
 apps/web           Next.js frontend (PWA)
 apps/print-agent   агент печати на точке (A4 принтер по драйверу ОС)
-packages/shared    константы статусов/ролей
 docs/              kickoff-документ (ТЗ, ER, API, wireframes)
+deploy/            systemd-юниты, env.production, скрипт обновления
+PROJECT_ANALYSIS.md  аудит проекта: найденные дефекты и что исправлено
 ```
 
 ---
@@ -117,7 +118,7 @@ TOKEN=$(curl -s -X POST localhost:8085/api/auth/login \
   -d '{"email":"admin@msb.local","password":"admin123"}' \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-# 2. Город (сидируется "Москва")
+# 2. Город (сидируется "Ашхабад", slug=asg, Asia/Ashgabat)
 CITY=$(curl -s localhost:8085/api/admin/cities -H "Authorization: Bearer $TOKEN" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
 
@@ -126,9 +127,11 @@ curl -s -X POST localhost:8085/api/repairs \
   -H "Authorization: Bearer $TOKEN" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H 'Content-Type: application/json' \
-  -d "{\"city_id\":\"$CITY\",\"client\":{\"full_name\":\"Иванов Иван\",\"phone\":\"+79001234567\",\"consent_pdn\":true,\"consent_storage\":true},\"device_type\":\"ТВ\",\"brand\":\"Samsung\",\"model\":\"UE55\",\"fault_client\":\"не включается\"}"
+  -d "{\"city_id\":\"$CITY\",\"client\":{\"full_name\":\"Иванов Иван\",\"phone\":\"+993 61 123456\",\"consent_pdn\":true,\"consent_storage\":true},\"device_type\":\"Телевизоры\",\"brand\":\"Samsung\",\"model\":\"UE55\",\"fault_client\":\"не включается\"}"
 
-# → номер TV-MSK-2026-00001, public_token, storage_until = +3 месяца
+# → номер TV-ASG-2026-00001, public_token, storage_until = +3 месяца
+# телефон нормализуется к 99361123456 — один и тот же человек, записанный
+# как «8 61 123456», «+99361123456» или «61123456», остаётся одним клиентом
 
 # 4. Публичная страница по QR-токену
 curl -s localhost:8085/api/public/r/{public_token}
@@ -142,7 +145,7 @@ CH=$(curl -s localhost:8085/api/chat/channels -H "Authorization: Bearer $TOKEN" 
   | python3 -c "import sys,json;print(json.load(sys.stdin)[0]['id'])")
 curl -s -X POST localhost:8085/api/chat/channels/$CH/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"text":"Принято #TV-MSK-00001"}'
+  -d '{"text":"Принято #TV-ASG-00001"}'
 ```
 
 ---
@@ -196,6 +199,24 @@ feature flag `print_mode=escpos`.
 CUPS-очередь, не меняя настройку основного A4-принтера. Настройка сети, CUPS и
 проверка описаны в [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
 
+## SMS-уведомления
+
+Готовность ремонта отправляется клиенту SMS через внешний шлюз. Credentials —
+только из окружения (`.env` / `deploy/env.production`):
+
+```ini
+SMS_GATEWAY_URL=https://sms.example.tm/api/send
+SMS_GATEWAY_USERNAME=login
+SMS_GATEWAY_PASSWORD=secret
+SMS_VERIFY_SSL=true
+```
+
+Без `SMS_GATEWAY_URL` отправка отключена: API честно возвращает ошибку
+(«SMS-шлюз не настроен»), а не делает вид, что сообщение ушло. Шаблоны текста и
+тестовая отправка — в админке (`Админ → SMS`).
+
+---
+
 ## AI (Итерация 6)
 
 AI идёт за абстракцией `app/services/ai.py`: `predict_eta()` и
@@ -227,6 +248,11 @@ WS   /ws?token=...                   (realtime чат + уведомления)
 POST /api/repairs                    (Idempotency-Key)
 GET  /api/repairs | /:id | /by-number/:number
 PATCH /api/repairs/:id               POST /api/repairs/:id/events
+PATCH /api/repairs/:id/client        (правка клиента без молчаливого переименования)
+DELETE /api/repairs/:id              (admin; чистит файлы фото и пишет аудит)
+POST /api/repairs/:id/finish         («Ремонт закончен» + текст SMS клиенту)
+POST /api/repairs/:id/finish-sms     (отправить SMS о готовности)
+GET/POST/PATCH/DELETE /api/repairs/:id/part-orders   (заказанные запчасти)
 POST /api/repairs/:id/print          POST /api/repairs/:id/print-label
 GET  /api/print/jobs                 PATCH /api/print/jobs/:id
 GET  /api/public/r/:token            (публичная QR-страница, limited DTO + city_stats)
@@ -253,6 +279,8 @@ POST /api/ai/weekly-summary                       (разбор недели)
 GET/POST/PATCH /api/admin/cities|branches|users
 DELETE /api/admin/users/:id                        (отключение пользователя)
 GET/PUT /api/admin/settings
+GET  /api/admin/audit                        (журнал действий: деньги, удаления, роли)
+GET/PUT /api/admin/sms | PUT /api/admin/sms/templates | POST /api/admin/sms/test
 GET/POST/PATCH /api/admin/print-templates        (редактор шаблона бланка)
 POST /api/admin/print-templates/preview          (PDF-превью бланка)
 GET/PUT /api/admin/printer                       (настройка принтера: IP/порт/режим)
@@ -264,11 +292,20 @@ POST /api/admin/printer/test                     (тестовая печать)
 ## Роли и безопасность
 
 - Роли: `admin | manager | operator | master | callcenter`.
+- Единая матрица прав «роль × операция» — `apps/api/app/core/permissions.py`:
+  касса и финансовые поля (`price_final`, `cost_amount`, `master_payout`, `paid`)
+  доступны только старшим ролям, мастер не может провести платёж или выписать
+  себе выплату; назначать мастеров и закрывать ремонт могут admin/operator.
 - Каждый endpoint проверяет роль (`require_roles`); админка — только admin.
 - Публичная страница отдаёт только публичные поля (без диагноза мастера,
   себестоимости и телефона клиента).
 - `public_token` — 128+ бит криптослучайный, не перебираемый.
-- Аудит изменений цены/статуса/печати — в `repair_events` и `audit_log`.
+- Аудит изменений цены/статуса/печати/удалений/ролей — в `repair_events` и
+  `audit_log` (`GET /api/admin/audit`, только admin).
+- Фронтенд не хранит пароль: в localStorage остаётся только email для
+  автозаполнения и refresh-токен, access-токен продлевается молча по 401.
+- Секреты (`SECRET_KEY`, `SMS_GATEWAY_PASSWORD`) — только из окружения,
+  в коде и в репозитории их нет; `deploy/env.production` не коммитится.
 - Согласие на ПДн и на хранение фиксируется в `clients.consent_*_at`;
   для 152-ФЗ заложено поле `clients.deleted_at` (процедура удаления).
 
@@ -303,6 +340,11 @@ POST /api/admin/printer/test                     (тестовая печать)
       починку — **расходы + цена + отметка оплачено**, статистика с **прибылью** (выручка − расходы)
 - [x] **Туркменский регион**: Ашхабад (Asia/Ashgabat), +993, валюта **TMT (ман.)** во всех ценах
 - [x] **PWA-офлайн**: service worker (app-shell кеш) + manifest
-- [x] **Тесты**: 30 pytest-смоук-тестов (auth/чат/ремонты/прайс/склад/оплаты/админ/статистика/AI)
+- [x] **Тесты**: 127 pytest-тестов (auth/чат/ремонты/прайс/склад/оплаты/админ/
+      статистика/AI/печать/SMS + 39 регрессионных на исправленные дефекты —
+      `apps/api/tests/test_fixed_defects.py`)
+- [x] **Аудит и исправления**: матрица прав, аудит действий, нормализация
+      телефонов, идемпотентная приёмка с retry нумерации, валидация статусов,
+      оверлейное боковое меню и облегчённая карточка ремонта
 
 Подробное ТЗ, ER-модель, wireframes и риски — в `docs/msb-kickoff.md`.

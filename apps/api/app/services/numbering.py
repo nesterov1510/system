@@ -1,6 +1,11 @@
-"""Repair number generation: `{TYPE}-{CITY}-{YYYY}-{NNNNN}`.
+"""Repair number generation + client phone normalisation.
 
-Example: TV-MSK-2026-01482.
+Number format: `{TYPE}-{CITY}-{YYYY}-{NNNNN}` (пример: `TV-ASG-2026-01482`).
+
+Регион развёртывания — Туркменистан (+993), поэтому нормализация телефона
+приводит номер к каноническому виду `993XXXXXXXX` (11 цифр). Это ОБЯЗАНО
+совпадать с `apps/web/lib/phone.ts`, иначе один и тот же человек, записанный
+в разных форматах, превращается в нескольких клиентов.
 """
 import secrets
 from datetime import datetime, timezone
@@ -10,27 +15,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import City, Repair
 
+# Типы техники из справочника UI (apps/web/lib/catalog.ts -> DEVICE_CLASSES).
+# Ключи ОБЯЗАНЫ совпадать со значениями, которые фронтенд шлёт в device_type,
+# иначе все номера деградируют в общий префикс "RE".
 DEVICE_PREFIX = {
+    "Телевизоры": "TV",
+    "Компьютеры": "PC",
+    "Бытовая техника": "BT",
+    "Другое": "OT",
+    # Legacy-значения (ремонт может быть принят до смены справочника).
     "ТВ": "TV",
     "Монитор": "MN",
     "Аудио": "AU",
-    "Другое": "OT",
+    "Компьютер": "PC",
+    "Ноутбук": "PC",
+    "Бытовая": "BT",
 }
+
+# Префикс для неизвестного типа техники.
+FALLBACK_PREFIX = "RE"
+
+# Код страны по умолчанию (Туркменистан).
+DEFAULT_COUNTRY_CODE = "993"
 
 
 def device_prefix(device_type: str) -> str:
-    return DEVICE_PREFIX.get(device_type, "RE")
+    return DEVICE_PREFIX.get((device_type or "").strip(), FALLBACK_PREFIX)
 
 
 async def next_repair_number(db: AsyncSession, city: City, device_type: str) -> str:
-    """Generate a unique, human-readable sequential number per city/year.
+    """Сгенерировать человекочитаемый последовательный номер по (город, год).
 
-    The counter is per (city, year). It reads the max existing sequence and
-    increments it. For MVP concurrency this is acceptable; a dedicated
-    sequence/table can be added later if two acceptances race.
+    Счётчик читает максимальный существующий номер и увеличивает его. При
+    одновременной приёмке двумя операторами возможна гонка — поэтому вызывающий
+    код обязан повторить попытку при `IntegrityError`
+    (см. `_create_repair_once` в `app.routers.repairs`).
     """
     prefix = device_prefix(device_type)
-    city_slug = city.slug.upper()
+    city_slug = (city.slug or "").upper()
     year = datetime.now(timezone.utc).year
 
     pattern = f"{prefix}-{city_slug}-{year}-%"
@@ -54,11 +76,48 @@ def new_public_token() -> str:
     return secrets.token_urlsafe(24)  # 24 bytes = 192 bits, >128
 
 
+def phone_digits(phone: str) -> str:
+    """Только цифры номера (без '+', пробелов и скобок)."""
+    return "".join(ch for ch in (phone or "") if ch.isdigit())
+
+
 def normalize_phone(phone: str) -> str:
-    digits = "".join(ch for ch in phone if ch.isdigit())
-    # Strip leading country code 8/7 -> canonical 10-digit Russian number.
-    if digits.startswith("8") and len(digits) == 11:
-        digits = digits[1:]
-    elif digits.startswith("7") and len(digits) == 11:
-        digits = digits[1:]
+    """Привести телефон к каноническому виду для уникального индекса `phone_norm`.
+
+    Туркменские номера (регион развёртывания) всегда приводятся к
+    `993XXXXXXXX` — 11 цифр:
+
+    ==========================  ==================
+    Ввод оператора              phone_norm
+    ==========================  ==================
+    ``+993 61 234567``          ``99361234567``
+    ``8 61 234567``             ``99361234567``
+    ``61 234567``               ``99361234567``
+    ==========================  ==================
+
+    Номера других стран не искажаются: если номер длиннее местного и не
+    начинается с 993/8, он сохраняется как есть (с ведущим кодом страны).
+
+    Пустая строка возвращается только если в телефоне вообще нет цифр —
+    вызывающий код обязан это отклонить, иначе все такие клиенты сливаются
+    в одну запись (phone_norm UNIQUE).
+    """
+    digits = phone_digits(phone)
+    if not digits:
+        return ""
+
+    # Уже с туркменским кодом страны.
+    if digits.startswith(DEFAULT_COUNTRY_CODE) and len(digits) == 11:
+        return digits
+
+    # Местный формат «8 XX XXXXXX» (9 цифр) — 8 это внутренний префикс,
+    # заменяем его на код страны.
+    if digits.startswith("8") and len(digits) == 9:
+        return DEFAULT_COUNTRY_CODE + digits[1:]
+
+    # Местный формат без префикса: «XX XXXXXX» (8 цифр).
+    if len(digits) == 8:
+        return DEFAULT_COUNTRY_CODE + digits
+
+    # Прочие страны — не искажаем номер.
     return digits

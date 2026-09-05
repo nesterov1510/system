@@ -13,6 +13,10 @@
 | Python | 3.11+ | `python3 --version` |
 | Node.js | 18+ (рекоменд. 20) | `node --version` |
 | npm | 9+ | `npm --version` |
+| Шрифт DejaVu Sans | любой | `fc-list | grep -i dejavu` (Linux) |
+
+Шрифт нужен для печати бланков и этикеток (кириллица в PDF). Без него API
+вернёт ошибку 503 «Не найден кириллический шрифт DejaVu Sans…» — см. раздел 5.
 
 Проверка:
 
@@ -25,6 +29,22 @@ npm --version
 Если `python3` не найден — поставьте Python 3.11 или новее с [python.org](https://www.python.org/).
 Если `node` не найден — поставьте LTS с [nodejs.org](https://nodejs.org/).
 
+Установка шрифта (один раз):
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install -y fonts-dejavu-core
+
+# Fedora / RHEL
+sudo dnf install -y dejavu-sans-fonts
+
+# macOS (Homebrew)
+brew install --cask font-dejavu
+```
+
+Если шрифт лежит в нестандартном месте — укажите путь переменными окружения
+`MSB_FONT_PATH` (обычный) и `MSB_FONT_PATH_BOLD` (жирный).
+
 ---
 
 ## 1. Скачайте проект
@@ -32,14 +52,14 @@ npm --version
 ```bash
 git clone https://github.com/nesterov1510/system.git
 cd system
-git checkout arena/01a03cd0-system
+git checkout main
 ```
 
 (Если у вас уже есть папка проекта — просто зайдите в неё.)
 
 ---
 
-## 2. Запуск backend (FastAPI, порт 8000)
+## 2. Запуск backend (FastAPI, порт 8085)
 
 Откройте отдельный терминал и выполните:
 
@@ -62,14 +82,18 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2.5 Запустить сервер
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8085
 ```
 
 Что произойдёт при первом запуске:
 - автоматически создастся файл БД `msb.db` (SQLite) рядом с `main.py`;
-- создадутся все таблицы;
-- запишутся демо-данные (пользователи, город, точка, прайс, запчасти, несколько
-  завершённых ремонтов для статистики).
+- создадутся все таблицы и применятся data-миграции (`app/db/datamigrate.py`);
+- запишутся базовые справочники: город **Ашхабад** (`Asia/Ashgabat`), точка,
+  администратор из `SEED_ADMIN_*`, каналы чата, комплектация, шаблон бланка.
+
+Демо-ремонтов, прайса и запчастей **нет** — система стартует пустой, данные
+вносятся через приёмку и админку (статистика и AI-прогноз появятся, когда
+накопятся завершённые ремонты).
 
 **Проверка:** откройте в браузере http://localhost:8085/health — должно вернуться
 `{"status":"ok",...}`. Swagger (документация API): http://localhost:8085/docs
@@ -79,7 +103,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ---
 
-## 3. Запуск frontend (Next.js, порт 3000)
+## 3. Запуск frontend (Next.js, порт 3030)
 
 Откройте **второй** терминал (backend оставьте работать):
 
@@ -90,8 +114,8 @@ cd system/apps/web
 # 3.2 Установить зависимости (один раз)
 npm install
 
-# 3.3 Запустить в режиме разработки
-npm run dev
+# 3.3 Запустить в режиме разработки (порт 3030 — его ждёт прокси и документация)
+npm run dev -- -p 3030
 ```
 
 **Проверка:** откройте http://localhost:3030 — увидите экран входа MSB.
@@ -116,6 +140,36 @@ SEED_ADMIN_PASSWORD=измените-до-продакшена
 ---
 
 ## 5. Печать бланков (Epson L3250)
+
+### Сначала — кириллический шрифт
+
+Бланк и этикетка рендерятся в PDF библиотекой ReportLab, для кириллицы ей нужен
+**DejaVu Sans**. API ищет шрифт по списку стандартных путей
+(`app/services/print.py → FONT_CANDIDATES`): `/usr/share/fonts/truetype/dejavu/`,
+`/usr/share/fonts/dejavu/`, macOS `/Library/Fonts/`, Windows `%SystemRoot%\Fonts\`
+и т.д., плюс переопределение через `MSB_FONT_PATH` / `MSB_FONT_PATH_BOLD`.
+
+Если шрифта нет, печать не «ломается молча», а возвращает понятную ошибку:
+
+```
+503 Не найден кириллический шрифт DejaVu Sans. Установите пакет
+fonts-dejavu-core (Debian/Ubuntu: `sudo apt-get install fonts-dejavu-core`)
+или укажите путь к DejaVuSans.ttf в переменной окружения MSB_FONT_PATH.
+Проверены пути: …
+```
+
+Проверка, что шрифт на месте:
+
+```bash
+fc-list | grep -i dejavu          # Linux
+
+# или спросить у самого backend (из папки apps/api, с активированным .venv):
+python -c "from app.services.print import _resolve_font_paths; print(_resolve_font_paths())"
+# → ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', '…-Bold.ttf')
+```
+
+В Docker шрифт уже установлен в образе API (`Dockerfile` ставит
+`fonts-dejavu-core`).
 
 Есть **два способа** подключить принтер — выбирается в админке
 (`Админ → Принтер`), где указывается IP-адрес принтера и режим печати.
@@ -301,26 +355,32 @@ MSB_API_URL=http://192.168.8.81:8085 python agent.py
 → не установлены зависимости. Выполните `pip install -r requirements.txt`
 (backend) или `npm install` (frontend).
 
-**Порт 8000 или 3000 уже занят**
+**Порт 8085 или 3030 уже занят**
 → либо закройте процесс, который его держит, либо запустите на другом порту:
 ```bash
 # backend
-uvicorn app.main:app --reload --port 8001
-# frontend (тогда задайте адрес backend):
-NEXT_PUBLIC_API_URL=http://localhost:8085 npm run dev -- -p 3031
+uvicorn app.main:app --reload --port 8086
+# frontend (тогда задайте адрес backend — прокси next.config.mjs берёт его отсюда):
+NEXT_PUBLIC_API_URL=http://localhost:8086 npm run dev -- -p 3031
 ```
 
-**Хочу «с чистого листа» (удалить данные и демо)**
-→ остановите backend, удалите файл `system/apps/api/msb.db`, запустите
-снова — БД пересоздастся с демо-данными.
+**Хочу «с чистого листа»**
+→ остановите backend, удалите файл `system/apps/api/msb.db` (и папку
+`system/apps/api/uploads`, если нужно стереть фото), запустите снова — БД
+пересоздастся с базовыми справочниками и администратором из `SEED_ADMIN_*`.
 
 **Печать не происходит**
 → проверьте, что print-agent запущен и команда печати (`MSB_PRINT_CMD`)
 указывает на существующий принтер. Логи agent выводит в консоль.
 
 **«мало данных» на дашборде**
-→ это честное поведение статистики/AI: не хватает завершённых ремонтов.
-Демо-данные добавляются при первом запуске (12 завершённых ремонтов).
+→ это честное поведение статистики/AI: не хватает завершённых ремонтов
+(порог `n < 3`). Демо-данные при первом запуске не создаются — заведите
+несколько ремонтов и закройте их, плитки заполнятся.
+
+**503 «Не найден кириллический шрифт DejaVu Sans» при печати**
+→ не установлен шрифт: `sudo apt-get install fonts-dejavu-core` (или укажите
+`MSB_FONT_PATH=/путь/к/DejaVuSans.ttf` и перезапустите backend).
 
 ---
 

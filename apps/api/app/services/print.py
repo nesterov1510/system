@@ -19,13 +19,69 @@ from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader, simpleSplit
 from reportlab.pdfgen import canvas
 
-# Cyrillic-capable font.
-FONT_PATH = os.environ.get(
-    "MSB_FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-)
-FONT_PATH_BOLD = os.environ.get(
-    "MSB_FONT_PATH_BOLD", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-)
+# --------------------------------------------------------------------------
+# Кириллический шрифт (DejaVu Sans).
+#
+# Без него ReportLab не может нарисовать ни русский, ни туркменский текст.
+# Раньше путь был захардкожен под Debian/Ubuntu, поэтому на Windows, macOS и
+# в минимальном Linux-образе печать падала с TTFError -> необработанный 500.
+# Теперь перебираем известные расположения во всех ОС (см. RUN_LOCAL.md).
+# --------------------------------------------------------------------------
+FONT_CANDIDATES = [
+    os.environ.get("MSB_FONT_PATH", ""),
+    # Linux (Debian/Ubuntu)
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    # Linux (RHEL/Fedora/Alpine с пакетом dejavu)
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+    # macOS
+    "/Library/Fonts/DejaVuSans.ttf",
+    "/opt/homebrew/share/fonts/dejavu/DejaVuSans.ttf",
+    "/usr/local/share/fonts/dejavu/DejaVuSans.ttf",
+    # Windows
+    os.path.expandvars(r"%SystemRoot%\Fonts\DejaVuSans.ttf"),
+    r"C:\Program Files\DejaVu\DejaVuSans.ttf",
+]
+
+FONT_CANDIDATES_BOLD = [
+    os.environ.get("MSB_FONT_PATH_BOLD", ""),
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans-Bold.ttf",
+    "/Library/Fonts/DejaVuSans-Bold.ttf",
+    "/opt/homebrew/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/local/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    os.path.expandvars(r"%SystemRoot%\Fonts\DejaVuSans-Bold.ttf"),
+    r"C:\Program Files\DejaVu\DejaVuSans-Bold.ttf",
+]
+
+
+class FontNotAvailable(RuntimeError):
+    """Кириллический шрифт не найден ни по одному из известных путей."""
+
+
+def _find_font(candidates: list[str]) -> str:
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    tried = ", ".join(c for c in candidates if c)
+    raise FontNotAvailable(
+        "Не найден кириллический шрифт DejaVu Sans. Установите пакет "
+        "fonts-dejavu-core (Debian/Ubuntu: `sudo apt-get install "
+        "fonts-dejavu-core`) или укажите путь к DejaVuSans.ttf в переменной "
+        f"окружения MSB_FONT_PATH. Проверены пути: {tried}"
+    )
+
+
+def _resolve_font_paths() -> tuple[str, str]:
+    """Найти обычный и жирный шрифт (жирный при отсутствии заменяется обычным)."""
+    regular = _find_font(FONT_CANDIDATES)
+    try:
+        bold = _find_font(FONT_CANDIDATES_BOLD)
+    except FontNotAvailable:
+        bold = regular  # лучше без жирного, чем без печати вовсе
+    return regular, bold
+
 
 FONT = "DejaVu"
 FONT_BOLD = "DejaVu-Bold"
@@ -84,14 +140,44 @@ def normalize_template(body: dict) -> dict:
     return t
 
 
+_fonts_registered = False
+
+
 def _register_fonts() -> None:
+    """Зарегистрировать шрифты один раз на процесс.
+
+    Бросает `FontNotAvailable` с внятным текстом — роутеры печати перехватывают
+    её и отдают 503 с инструкцией вместо «внутренней ошибки сервера».
+    """
+    global _fonts_registered
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    if FONT not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(FONT, FONT_PATH))
-    if FONT_BOLD not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(FONT_BOLD, FONT_PATH_BOLD))
+    if _fonts_registered:
+        return
+
+    regular, bold = _resolve_font_paths()
+    try:
+        if FONT not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(FONT, regular))
+        if FONT_BOLD not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(FONT_BOLD, bold))
+    except FontNotAvailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 — битый/нечитаемый TTF
+        raise FontNotAvailable(
+            f"Не удалось зарегистрировать шрифт {regular}: {exc}"
+        ) from exc
+    _fonts_registered = True
+
+
+def fonts_available() -> bool:
+    """Проверка для диагностики (health/админка): найдется ли шрифт."""
+    try:
+        _resolve_font_paths()
+        return True
+    except FontNotAvailable:
+        return False
 
 
 def _qr_png(data: str, *, border: int = 1) -> io.BytesIO:

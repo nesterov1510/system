@@ -430,8 +430,12 @@ def test_admin_sms_templates_save_and_use(
     assert r.status_code == 200, r.text
     assert r.json()["templates"]["ready"].startswith("Клиент")
 
+    # Отдельный номер: клиент с номером по умолчанию уже создан другим тестом,
+    # а приёмка больше НЕ переименовывает существующего клиента молча
+    # (расхождение имени фиксируется в журнале аудита).
     repair = _mk_repair_via_api(
-        client, operator_headers, city_id, "sms-tpl-1", name="Пётр"
+        client, operator_headers, city_id, "sms-tpl-1",
+        name="Пётр", phone="+993 71 555666",
     )
     r2 = client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
     assert r2.status_code == 200, r2.text

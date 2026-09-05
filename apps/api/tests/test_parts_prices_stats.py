@@ -91,7 +91,25 @@ def test_repairs_list_paginated_with_stage(client, admin_headers, created_repair
     assert body["page_size"] == 5
     assert body["items"], "ожидали как минимум один ремонт в «new»"
     assert all(x["status"] == "Принято" for x in body["items"])
-    assert any(x["id"] == created_repair["id"] for x in body["items"])
+    assert len(body["items"]) <= 5, "page_size не соблюдён"
+
+    # created_repair обязан быть в срезе «new», но не обязательно на первой
+    # странице: список сортируется по дате приёма, и другие тесты создают
+    # более свежие ремонты. Поэтому ищем его по всем страницам — так тест
+    # проверяет именно пагинацию, а не порядок запуска тестов.
+    found = any(x["id"] == created_repair["id"] for x in body["items"])
+    pages = (body["total"] + body["page_size"] - 1) // body["page_size"]
+    for page in range(2, pages + 1):
+        if found:
+            break
+        nxt = client.get(
+            "/api/repairs", headers=admin_headers,
+            params={"stage": "new", "page": page, "page_size": 5},
+        )
+        assert nxt.status_code == 200
+        assert nxt.json()["page"] == page
+        found = any(x["id"] == created_repair["id"] for x in nxt.json()["items"])
+    assert found, "created_repair не найден ни на одной странице среза «new»"
 
     done = client.get(
         "/api/repairs", headers=admin_headers, params={"stage": "done"}
