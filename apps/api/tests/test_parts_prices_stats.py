@@ -158,3 +158,42 @@ def test_ai_predict_eta_honest(client, admin_headers):
         json={"device_type": "НесуществующийТип"},
     )
     assert r2.json()["message"] == "мало данных"
+
+
+def test_duplicate_sku_returns_409_not_500(client, admin_headers):
+    """Повторный артикул — понятная ошибка, а не «Internal Server Error»."""
+    payload = {
+        "name": "Дублирующая деталь",
+        "sku": "DUP-SKU-001",
+        "category": "Запчасти",
+        "stock_qty": 3,
+        "min_stock": 1,
+    }
+    first = client.post("/api/parts", headers=admin_headers, json=payload)
+    assert first.status_code == 201, first.text
+
+    second = client.post("/api/parts", headers=admin_headers, json=payload)
+    assert second.status_code == 409, second.text
+    assert "артикул" in second.json()["detail"].lower()
+
+
+def test_duplicate_sku_on_update_returns_409(client, admin_headers):
+    a = client.post(
+        "/api/parts",
+        headers=admin_headers,
+        json={"name": "Деталь А", "sku": "DUP-A", "stock_qty": 1, "min_stock": 0},
+    )
+    b = client.post(
+        "/api/parts",
+        headers=admin_headers,
+        json={"name": "Деталь Б", "sku": "DUP-B", "stock_qty": 1, "min_stock": 0},
+    )
+    assert a.status_code == 201 and b.status_code == 201
+
+    r = client.patch(
+        f"/api/parts/{b.json()['id']}", headers=admin_headers, json={"sku": "DUP-A"}
+    )
+    assert r.status_code == 409, r.text
+    # Значение не изменилось и деталь осталась пригодной.
+    after = client.get("/api/parts", headers=admin_headers, params={"q": "Деталь Б"})
+    assert after.status_code == 200

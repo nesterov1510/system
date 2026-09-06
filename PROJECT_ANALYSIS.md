@@ -573,7 +573,7 @@ data={"message": f"Платёж отменён: {payment.amount:,.0f} ₽"}
 ### Проверка
 
 ```bash
-cd apps/api && python -m pytest tests/ -q     # 184 passed
+cd apps/api && python -m pytest tests/ -q     # 186 passed
 cd apps/web && npx tsc --noEmit               # без ошибок
 cd apps/web && npm run build                  # сборка успешна, /repairs/[id] = 13.6 kB
 ```

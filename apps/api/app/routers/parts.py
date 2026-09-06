@@ -3,10 +3,12 @@
 Adding a part to a repair also debits stock and writes a repair event, so the
 repair card and stats see the parts cost.
 """
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession, require_roles
@@ -27,7 +29,29 @@ from app.schemas.parts import (
     RepairPartOut,
 )
 
+log = logging.getLogger("msb.parts")
+
 router = APIRouter(tags=["parts"])
+
+
+def _duplicate_sku_error(exc: Exception) -> HTTPException:
+    """Дубль артикула — это 409 с понятным текстом, а не 500 в логе.
+
+    `parts.sku` уникален, поэтому повторный артикул (в том числе у
+    деактивированной позиции) отклоняется базой: без этой обработки оператор
+    получал «Internal Server Error» и не понимал, что именно не так.
+    """
+    from app.db.conflicts import constraint_name
+
+    where = constraint_name(exc).lower()
+    if "sku" in where or "parts" in where:
+        return HTTPException(
+            409,
+            "Запчасть с таким артикулом (SKU) уже есть — укажите другой артикул "
+            "или оставьте поле пустым.",
+        )
+    log.warning("Склад отклонил запись: %s", exc)
+    return HTTPException(409, "Такая позиция на складе уже есть — проверьте артикул.")
 
 CanEditParts = require_roles(*STOCK_CATALOG_ROLES)
 
@@ -86,7 +110,11 @@ async def create_part(
 ):
     p = Part(**payload.model_dump())
     db.add(p)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise _duplicate_sku_error(exc) from exc
     await db.refresh(p)
     return _to_part_out(p)
 
@@ -104,7 +132,11 @@ async def update_part(
         raise HTTPException(404, "Запчасть не найдена")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(p, field, value)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise _duplicate_sku_error(exc) from exc
     return _to_part_out(p)
 
 
