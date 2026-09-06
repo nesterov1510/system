@@ -1,7 +1,9 @@
+import base64
 import uuid
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
@@ -25,9 +27,11 @@ from app.schemas.admin import (
     SettingOut,
 )
 from app.schemas.user import UserCreate, UserOut, UserUpdate
+from app.services import audit
 from app.services.print import (
     AVAILABLE_FIELDS,
     DEFAULT_TEMPLATE,
+    FontNotAvailable,
     body_to_template,
     normalize_template,
     render_blank_pdf,
@@ -36,6 +40,7 @@ from app.services.print import (
 from app.services.sms import (
     AVAILABLE_MASTER_FIELDS as AVAILABLE_SMS_MASTER_FIELDS,
     AVAILABLE_READY_FIELDS as AVAILABLE_SMS_READY_FIELDS,
+    AVAILABLE_REMINDER_FIELDS as AVAILABLE_SMS_REMINDER_FIELDS,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[AdminOnly])
@@ -104,7 +109,7 @@ async def list_users(db: DbSession):
 
 
 @router.post("/users", response_model=UserOut, status_code=201)
-async def create_user(payload: UserCreate, db: DbSession):
+async def create_user(payload: UserCreate, db: DbSession, actor: CurrentUser):
     existing = await db.execute(select(User).where(User.email == payload.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Email уже занят")
@@ -121,13 +126,24 @@ async def create_user(payload: UserCreate, db: DbSession):
         active=payload.active,
     )
     db.add(user)
+    await db.flush()  # нужен user.id для журнала аудита
+    await audit.record(
+        db,
+        audit.ACTION_USER_CREATE,
+        actor_id=actor.id,
+        entity="user",
+        entity_id=user.id,
+        meta={"email": user.email, "role": user.role, "roles": user.roles},
+    )
     await db.commit()
     await db.refresh(user)
     return user
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-async def update_user(user_id: uuid.UUID, payload: UserUpdate, db: DbSession):
+async def update_user(
+    user_id: uuid.UUID, payload: UserUpdate, db: DbSession, actor: CurrentUser
+):
     user = await db.get(User, user_id)
     if user is None:
         raise HTTPException(404, "Пользователь не найден")
@@ -141,6 +157,20 @@ async def update_user(user_id: uuid.UUID, payload: UserUpdate, db: DbSession):
         user.extra_roles = [r for r in roles if r and r != base_role] or None
     if password:
         user.password_hash = hash_password(password)
+    await audit.record(
+        db,
+        audit.ACTION_USER_UPDATE,
+        actor_id=actor.id,
+        entity="user",
+        entity_id=user_id,
+        meta={
+            "fields": sorted(data.keys()),
+            "password_changed": bool(password),
+            "roles_changed": roles is not None,
+            "role": user.role,
+            "roles": user.roles,
+        },
+    )
     await db.commit()
     return user
 
@@ -153,6 +183,14 @@ async def deactivate_user(user_id: uuid.UUID, db: DbSession, user: CurrentUser):
     if target.id == user.id:
         raise HTTPException(400, "Нельзя отключить самого себя")
     target.active = False
+    await audit.record(
+        db,
+        audit.ACTION_USER_DEACTIVATE,
+        actor_id=user.id,
+        entity="user",
+        entity_id=user_id,
+        meta={"email": target.email, "role": target.role},
+    )
     await db.commit()
     return {"ok": True}
 
@@ -165,7 +203,7 @@ async def list_settings(db: DbSession):
 
 
 @router.put("/settings/{key}", response_model=SettingOut)
-async def upsert_setting(key: str, payload: SettingIn, db: DbSession):
+async def upsert_setting(key: str, payload: SettingIn, db: DbSession, actor: CurrentUser):
     row = await db.execute(select(Setting).where(Setting.key == key))
     setting = row.scalar_one_or_none()
     if setting is None:
@@ -174,6 +212,16 @@ async def upsert_setting(key: str, payload: SettingIn, db: DbSession):
     else:
         setting.value = payload.value
         setting.description = payload.description
+    # В настройках могут лежать секреты (пароль SMS-шлюза) — в аудит пишем
+    # только имя ключа, без значений.
+    await audit.record(
+        db,
+        audit.ACTION_SETTING_UPDATE,
+        actor_id=actor.id,
+        entity="setting",
+        entity_id=key,
+        meta={"key": key, "sensitive": key in ("sms_server",)},
+    )
     await db.commit()
     return setting
 
@@ -259,13 +307,20 @@ async def set_label_printer_config(db: DbSession, body: dict):
 @router.post("/printer/test")
 async def test_print(db: DbSession):
     """Создаёт тестовое задание печати (маленький PDF), чтобы проверить принтер."""
-    import base64
-
-    from app.services.print import render_blank_pdf
     from app.services.settings import get_printer
 
     printer = await get_printer(db)
-    pdf = render_blank_pdf(
+    try:
+        pdf = _render_test_pdf()
+    except FontNotAvailable as exc:
+        # Не 500: админ должен увидеть, что нужно установить шрифты.
+        raise HTTPException(503, str(exc))
+    return await _queue_test_print(db, pdf, printer, template_id="test")
+
+
+def _render_test_pdf() -> bytes:
+    """Тестовый бланк без реальных данных (проверка принтера и шрифтов)."""
+    return render_blank_pdf(
         template={"copies": 1, "signature": False},
         number="ТЕСТ-ПЕЧАТЬ",
         accepted_at="—",
@@ -284,9 +339,13 @@ async def test_print(db: DbSession):
         storage_until="—",
         qr_url="",
     )
+
+
+async def _queue_test_print(db, pdf: bytes, printer: dict, *, template_id: str) -> dict:
+    """Положить готовый PDF в очередь печати."""
     job = PrintJob(
         repair_id=None,
-        template_id="test",
+        template_id=template_id,
         payload={
             "pdf_base64": base64.b64encode(pdf).decode("ascii"),
             "printer": printer,
@@ -312,16 +371,19 @@ async def test_label_print(db: DbSession):
         raise HTTPException(400, "Не настроен удалённый CUPS-принтер этикеток")
 
     repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs"
-    pdf = render_repair_label_pdf(
-        repair_number="ТЕСТ-58x38",
+    try:
+        pdf = render_repair_label_pdf(
+            repair_number="ТЕСТ-58x38",
         client_name="Тестовый клиент",
         client_phone="+993 61 000000",
         repair_url=repair_url,
         complectation="Пульт, Шнур питания",
         defects="Царапины, Линии на экране",
-        width_mm=printer.get("width_mm", 58),
-        height_mm=printer.get("height_mm", 38),
-    )
+            width_mm=printer.get("width_mm", 58),
+            height_mm=printer.get("height_mm", 38),
+        )
+    except FontNotAvailable as exc:
+        raise HTTPException(503, str(exc))
     job = PrintJob(
         repair_id=None,
         template_id="label-test",
@@ -336,7 +398,7 @@ async def test_label_print(db: DbSession):
     db.add(job)
     await db.commit()
     await db.refresh(job)
-    return {"job_id": job.id, "status": job.status}
+    return {"job_id": job.id, "status": job.status, "repair_url": repair_url}
 
 
 # --- SMS gateway settings ---
@@ -355,6 +417,7 @@ async def get_sms_config(db: DbSession):
         "template_fields": {
             "master_assign": AVAILABLE_SMS_MASTER_FIELDS,
             "ready": AVAILABLE_SMS_READY_FIELDS,
+            "pickup_reminder": AVAILABLE_SMS_REMINDER_FIELDS,
         },
     }
 
@@ -403,6 +466,11 @@ async def set_sms_templates(db: DbSession, body: dict):
             body.get("master_assign", current.get("master_assign", ""))
         ).strip(),
         "ready": str(body.get("ready", current.get("ready", ""))).strip(),
+        # Ежедневное напоминание «заберите технику». Пустая строка = текст по
+        # умолчанию (название сервиса + адрес), см. services/sms.py.
+        "pickup_reminder": str(
+            body.get("pickup_reminder", current.get("pickup_reminder", ""))
+        ).strip(),
     }
     await set_setting(db, "sms_templates", value, "Шаблоны текстов SMS")
     return {"templates": value}
@@ -423,6 +491,133 @@ async def test_sms(db: DbSession, body: dict):
             502, f"Не удалось отправить тестовое SMS: {result.get('detail', 'ошибка шлюза')}"
         )
     return {"ok": True, "detail": result.get("detail")}
+
+
+# --- Ежедневные напоминания «заберите технику» ---
+@router.get("/reminders")
+async def reminders_queue(db: DbSession):
+    """Очередь напоминаний: какие ремонты и когда получат следующее SMS.
+
+    Нужно администратору, чтобы проверить, что рассылка жива: после «Ремонт
+    закончен» ремонт должен появиться здесь с датой следующего напоминания.
+    """
+    from app.services.reminders import (
+        REMINDER_STATUSES,
+        days_waiting,
+        in_sending_window,
+        local_now,
+    )
+
+    rows = await db.execute(
+        select(Repair)
+        .options(selectinload(Repair.client))
+        .where(Repair.reminder_next_at.isnot(None))
+        .order_by(Repair.reminder_next_at)
+        .limit(200)
+    )
+    repairs = rows.scalars().all()
+    return {
+        "enabled": settings.REMINDER_ENABLED,
+        "sms_window_open": in_sending_window(),
+        "local_time": local_now().isoformat(),
+        "schedule": {
+            "every_hours": settings.REMINDER_EVERY_HOURS,
+            "first_delay_hours": settings.REMINDER_FIRST_DELAY_HOURS,
+            "check_interval_min": settings.REMINDER_CHECK_INTERVAL_MIN,
+            "quiet_hours": f"{settings.REMINDER_SEND_FROM_HOUR}:00–"
+            f"{settings.REMINDER_SEND_TO_HOUR}:00 {settings.REMINDER_TIMEZONE}",
+            "max_count": settings.REMINDER_MAX_COUNT,
+            "statuses": list(REMINDER_STATUSES),
+        },
+        "items": [
+            {
+                "id": str(r.id),
+                "number": r.number,
+                "status": r.status,
+                "client_name": r.client.full_name if r.client else None,
+                "client_phone": r.client.phone if r.client else None,
+                "ready_at": r.ready_at.isoformat() if r.ready_at else None,
+                "days_waiting": days_waiting(r),
+                "sent_count": r.reminder_count or 0,
+                "last_sent_at": (
+                    r.reminder_last_at.isoformat() if r.reminder_last_at else None
+                ),
+                "next_at": r.reminder_next_at.isoformat() if r.reminder_next_at else None,
+            }
+            for r in repairs
+        ],
+    }
+
+
+@router.post("/reminders/run")
+async def run_reminders_now(db: DbSession, user: CurrentUser):
+    """Прогнать очередь напоминаний вручную (проверка шлюза и расписания).
+
+    Отправляет только те напоминания, срок которых уже подошёл, — так же, как
+    фоновая задача. Двойной запуск не приведёт к дублю SMS: строка ремонта
+    «заявляется» условным UPDATE.
+    """
+    from app.services import audit as audit_service
+    from app.services.reminders import send_due_reminders
+
+    report = await send_due_reminders(db)
+    await audit_service.record(
+        db,
+        "reminders.run",
+        actor_id=user.id,
+        entity="system",
+        meta={k: report.get(k) for k in ("sent", "failed", "skipped", "due", "reason")},
+    )
+    await db.commit()
+    return report
+
+
+# --- Audit log ---
+@router.get("/audit")
+async def list_audit(
+    db: DbSession,
+    action: str | None = None,
+    entity: str | None = None,
+    entity_id: str | None = None,
+    limit: int = 100,
+):
+    """Журнал значимых действий (касса, финансы, удаления, назначения).
+
+    `repair_events` для этого не подходит: он удаляется вместе с ремонтом.
+    """
+    from app.db.models import AuditLog
+
+    limit = max(1, min(int(limit or 100), 500))
+    q = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
+    if action:
+        q = q.where(AuditLog.action == action)
+    if entity:
+        q = q.where(AuditLog.entity == entity)
+    if entity_id:
+        q = q.where(AuditLog.entity_id == str(entity_id))
+    rows = (await db.execute(q)).scalars().all()
+
+    # Кто совершил действие — одним запросом, без N+1.
+    actor_ids = {r.actor_id for r in rows if r.actor_id}
+    names: dict = {}
+    if actor_ids:
+        users = await db.execute(select(User).where(User.id.in_(actor_ids)))
+        names = {u.id: u.name for u in users.scalars().all()}
+
+    return [
+        {
+            "id": r.id,
+            "created_at": r.created_at,
+            "action": r.action,
+            "entity": r.entity,
+            "entity_id": r.entity_id,
+            "actor_id": r.actor_id,
+            "actor_name": names.get(r.actor_id),
+            "meta": r.meta,
+            "ip": r.ip,
+        }
+        for r in rows
+    ]
 
 
 # --- Print templates (бланк) ---
@@ -521,26 +716,31 @@ async def preview_print_template(db: DbSession, body: dict):
 
         ctx = await build_context(db, repair)
     else:
+        # Пример для превью — из региона развёртывания (Ашхабад, +993, ман.),
+        # а не из старой «московской» версии системы.
         ctx = {
-            "number": "TV-MSK-2026-00000",
+            "number": "TV-ASG-2026-00000",
             "accepted_at": "26.08.2026 14:02",
-            "city_name": "Москва",
+            "city_name": "Ашхабад",
             "branch_name": "Центральная точка",
-            "client_name": "Иванов Иван Иванович",
-            "client_phone": "+7 900 000-00-00",
-            "device": "ТВ Samsung UE55",
+            "client_name": "Мерданов Мердан",
+            "client_phone": "+993 61 000000",
+            "device": "Телевизор Samsung UE55",
             "serial": "SN123456",
             "complectation": "ПДУ, Кабель питания",
             "fault": "не включается",
             "accepted_by": "Оператор Анна",
-            "master": "Мастер Сергей",
+            "master": "Мастер Сердар",
             "eta_days": "6",
             "legal_text": "Техника хранится в сервисном центре бесплатно в течение 3 (трёх) месяцев с момента уведомления о готовности.",
             "storage_until": "26.11.2026 14:02",
             "qr_url": f"{settings.PUBLIC_BASE_URL}/r/example-token",
         }
 
-    pdf = render_blank_pdf(template=template, **ctx)
+    try:
+        pdf = render_blank_pdf(template=template, **ctx)
+    except FontNotAvailable as exc:
+        raise HTTPException(503, str(exc))
     return PDFResponse(
         content=pdf,
         media_type="application/pdf",

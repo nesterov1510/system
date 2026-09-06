@@ -1,13 +1,13 @@
 """Call-center queue: согласовать цену / сказать «готово» / просрочка хранения."""
 import uuid
 
-
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.deps import CurrentUser, DbSession, require_roles
-from app.db.models import Repair, RepairMaster, UserRole
+from app.core.deps import CurrentUser, DbSession
+from app.core.permissions import can_view_callcenter_queue
+from app.db.models import Repair, RepairMaster
 from app.routers.repairs import _serialize
 
 router = APIRouter(prefix="/callcenter", tags=["callcenter"])
@@ -55,13 +55,6 @@ async def callcenter_queue(
 ):
     # Очередь видит callcenter + админ + менеджер + оператор (оператор — всё
     # кроме аналитики). Мастер остаётся на своей доске /repairs.
-    if not user.has_role(
-        UserRole.CALLCENTER.value,
-        UserRole.ADMIN.value,
-        UserRole.MANAGER.value,
-        UserRole.OPERATOR.value,
-    ):
-        from fastapi import HTTPException
-
+    if not can_view_callcenter_queue(user):
         raise HTTPException(403, "Недостаточно прав для очереди call-центра")
     return await _queue(db, kind, limit)

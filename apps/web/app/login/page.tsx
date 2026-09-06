@@ -31,12 +31,11 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Автозаполнение формы, если в прошлый раз отметили «Запомнить вход».
+  // Автозаполняем только email: пароль в браузере больше не хранится.
   useEffect(() => {
     const saved = getRememberedLogin();
     if (saved) {
-      setEmail(saved.email);
-      setPassword(saved.password);
+      setEmail(saved);
       setRemember(true);
     }
   }, []);
@@ -47,9 +46,11 @@ export default function LoginPage() {
     setError(null);
     try {
       const res = await api.login(email, password);
-      setSession(res.access_token, res.user);
+      // «Запомнить вход» = запоминаем email и кладём refresh-токен, чтобы
+      // сессия продлевалась сама. Пароль не сохраняется ни в каком виде.
+      setSession(res.access_token, res.user, remember ? res.refresh_token : null);
       if (remember) {
-        saveRememberedLogin(email, password);
+        saveRememberedLogin(email);
       } else {
         clearRememberedLogin();
       }
@@ -109,6 +110,9 @@ export default function LoginPage() {
               />
               <span>Запомнить вход</span>
             </label>
+            <p className="-mt-1 text-xs text-slate-400">
+              Запомним только email — пароль в браузере не сохраняется.
+            </p>
 
             {error && (
               <div className="flex items-center gap-2 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">

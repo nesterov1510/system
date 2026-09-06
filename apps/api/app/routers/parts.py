@@ -3,14 +3,24 @@
 Adding a part to a repair also debits stock and writes a repair event, so the
 repair card and stats see the parts cost.
 """
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession, require_roles
+from app.core.permissions import (
+    STOCK_CATALOG_ROLES,
+    can_add_repair_part,
+    can_edit_stock_catalog,
+    can_remove_repair_part,
+    can_set_repair_part_price,
+)
 from app.db.models import Part, Repair, RepairEvent, RepairPart, UserRole
+from app.services import audit
 from app.schemas.parts import (
     PartCreate,
     PartOut,
@@ -19,9 +29,35 @@ from app.schemas.parts import (
     RepairPartOut,
 )
 
+log = logging.getLogger("msb.parts")
+
 router = APIRouter(tags=["parts"])
 
-CanEditParts = require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value)
+
+def _duplicate_sku_error(exc: Exception) -> HTTPException:
+    """Дубль артикула — это 409 с понятным текстом, а не 500 в логе.
+
+    `parts.sku` уникален, поэтому повторный артикул (в том числе у
+    деактивированной позиции) отклоняется базой: без этой обработки оператор
+    получал «Internal Server Error» и не понимал, что именно не так.
+    """
+    from app.db.conflicts import constraint_name
+
+    where = constraint_name(exc).lower()
+    if "sku" in where or "parts" in where:
+        return HTTPException(
+            409,
+            "Запчасть с таким артикулом (SKU) уже есть — укажите другой артикул "
+            "или оставьте поле пустым.",
+        )
+    log.warning("Склад отклонил запись: %s", exc)
+    return HTTPException(409, "Такая позиция на складе уже есть — проверьте артикул.")
+
+CanEditParts = require_roles(*STOCK_CATALOG_ROLES)
+
+
+def _forbid(detail: str) -> HTTPException:
+    return HTTPException(status_code=403, detail=detail)
 
 
 def _to_part_out(p: Part) -> PartOut:
@@ -74,7 +110,11 @@ async def create_part(
 ):
     p = Part(**payload.model_dump())
     db.add(p)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise _duplicate_sku_error(exc) from exc
     await db.refresh(p)
     return _to_part_out(p)
 
@@ -92,7 +132,11 @@ async def update_part(
         raise HTTPException(404, "Запчасть не найдена")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(p, field, value)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise _duplicate_sku_error(exc) from exc
     return _to_part_out(p)
 
 
@@ -144,6 +188,17 @@ async def add_repair_part(
     repair = await db.get(Repair, repair_id)
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+
+    # Права: списывать запчасть под ремонт могут не все роли.
+    if not can_add_repair_part(user):
+        raise _forbid("Недостаточно прав, чтобы добавлять запчасти к ремонту")
+
+    # Цену запчасти вправе задавать только старшие роли: иначе мастер может
+    # списать деталь по произвольной (заниженной/завышенной) цене и исказить
+    # себестоимость и прибыль.
+    wants_price = payload.price is not None
+    if wants_price and not can_set_repair_part_price(user):
+        raise _forbid("Цену запчасти указывает администратор, менеджер или оператор")
 
     is_manual = False
     if payload.part_id:
@@ -215,6 +270,22 @@ async def add_repair_part(
             data={"message": f"Добавлена запчасть: {part.name} ×{payload.qty}{suffix}"},
         )
     )
+    # Списание со склада — материально значимая операция, пишем в аудит.
+    await audit.record(
+        db,
+        audit.ACTION_PART_ADD,
+        actor_id=user.id,
+        entity="repair",
+        entity_id=repair_id,
+        meta={
+            "part_id": str(part.id),
+            "part_name": part.name,
+            "qty": payload.qty,
+            "price": float(rp.price) if rp.price is not None else None,
+            "is_manual": is_manual,
+            "stock_qty_after": part.stock_qty,
+        },
+    )
     await db.commit()
     await db.refresh(rp)
     rp.part = part  # part is already loaded in this session
@@ -228,6 +299,8 @@ async def remove_repair_part(
     rp = await db.get(RepairPart, rp_id)
     if rp is None or rp.repair_id != repair_id:
         raise HTTPException(404, "Запчасть не найдена")
+    if not can_remove_repair_part(user):
+        raise _forbid("Убирать запчасть из ремонта может администратор, менеджер или оператор")
     # Return stock (вручную внесённые — без возврата, их не было на складе).
     part = await db.get(Part, rp.part_id)
     if part and not rp.is_manual:
@@ -239,6 +312,19 @@ async def remove_repair_part(
             actor_id=user.id,
             data={"message": f"Убрана запчасть: {part.name if part else '—'} ×{rp.qty}"},
         )
+    )
+    await audit.record(
+        db,
+        audit.ACTION_PART_REMOVE,
+        actor_id=user.id,
+        entity="repair",
+        entity_id=repair_id,
+        meta={
+            "part_name": part.name if part else None,
+            "qty": rp.qty,
+            "is_manual": rp.is_manual,
+            "stock_qty_after": part.stock_qty if part else None,
+        },
     )
     await db.delete(rp)
     await db.commit()

@@ -132,7 +132,7 @@ class City(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
     slug: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
-    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow")
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Ashgabat")
 
     branches: Mapped[list["Branch"]] = relationship(
         back_populates="city", cascade="all, delete-orphan"
@@ -241,6 +241,16 @@ class Repair(Base, TimestampMixin):
 
     # Заказ доставлен курьером / забран с адреса (не принесён лично в сервис).
     is_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # --- Ежедневные SMS-напоминания «заберите технику» ---
+    # reminder_next_at = NULL  → напоминания не запланированы (ремонт не готов
+    # или техника уже выдана). Иначе фоновая задача шлёт SMS, когда время пришло,
+    # и сдвигает дату на REMINDER_EVERY_HOURS вперёд.
+    reminder_next_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
+    reminder_last_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reminder_count: Mapped[int] = mapped_column(Integer, default=0)
 
     client: Mapped["Client"] = relationship(back_populates="repairs")
     accepted_by_user: Mapped["User"] = relationship(foreign_keys=[accepted_by])

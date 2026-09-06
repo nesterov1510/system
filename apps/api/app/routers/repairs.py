@@ -1,12 +1,25 @@
+import logging
 import uuid
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
+from app.core.permissions import (
+    can_access_repair,
+    can_assign_masters,
+    can_delete_client,
+    can_delete_repair,
+    can_edit_device_info,
+    can_edit_finances,
+    can_finish_repair,
+    is_master_only,
+)
+from app.db.conflicts import CLIENT_PHONE, NUMBER, OTHER, classify, constraint_name
 from app.db.models import (
     Client,
     City,
@@ -33,6 +46,7 @@ from app.schemas.repair import (
     RepairUpdate,
     RepairsPage,
 )
+from app.services import audit
 from app.services.chat import send_assignment_notice
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.sms import (
@@ -40,28 +54,38 @@ from app.services.sms import (
     send_master_assignment_sms,
     send_sms,
 )
-from app.services.settings import get_storage_months
-from app.services.storage import object_key_for, public_url, save_object
+from app.services.reminders import (
+    REMINDER_STATUSES,
+    STOP_STATUSES,
+    cancel_reminders,
+    schedule_reminders,
+)
+from app.services.settings import get_repair_statuses, get_storage_months
+from app.services.storage import (
+    object_key_for,
+    public_url,
+    remove_objects,
+    save_object,
+)
 from app.ws.manager import manager
+
+log = logging.getLogger("msb.repairs")
 
 router = APIRouter(prefix="/repairs", tags=["repairs"])
 
+# Сколько раз пробуем выделить номер ремонта при одновременной приёмке.
+MAX_NUMBER_ATTEMPTS = 5
 
+
+# Проверки прав вынесены в app.core.permissions — единая матрица «роль ×
+# операция». Обёртки ниже оставлены, чтобы не переписывать все вызовы в файле.
 def _is_master_only(user) -> bool:
-    """У пользователя есть роль мастера, но нет «старших» ролей с полным доступом."""
-    return user.has_role(UserRole.MASTER.value) and not user.has_role(
-        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
-    )
+    return is_master_only(user)
 
 
 def _can_access(user, repair: Repair) -> bool:
-    """Masters see only their own repairs; others see all."""
-    if _is_master_only(user):
-        if repair.master_id == user.id:
-            return True
-        # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
-        return any(m.user_id == user.id for m in repair.masters)
-    return True
+    """Мастера видят только свои ремонты; остальные роли — все."""
+    return can_access_repair(user, repair)
 
 
 def _is_assigner(user) -> bool:
@@ -75,11 +99,36 @@ def _is_assigner(user) -> bool:
 
 def _can_assign_masters(user) -> bool:
     """Назначить мастеров/помощников на ремонт могут только admin и operator."""
-    return user.has_role(UserRole.ADMIN.value, UserRole.OPERATOR.value)
+    return can_assign_masters(user)
+
+
+def _num(value):
+    """Decimal/float/bool -> JSON-безопасное значение для meta аудита."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+# Финансовые поля ремонта: цена, себестоимость, выплата мастерам, «оплачено».
+FINANCIAL_FIELDS = ("price_final", "cost_amount", "master_payout", "paid")
+# Цена «вилки» тоже влияет на деньги и на печать в бланке.
+FINANCIAL_FIELDS += ("price_min", "price_max")
+
+# Паспорт техники: марка, модель, серийный номер. Правятся после приёмки
+# (операторы ошибаются), но только старшими ролями и со следом в истории.
+DEVICE_FIELDS = ("brand", "model", "serial")
 
 
 def _master_scope(user_id) -> "object":
-    """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters."""
+    """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters.
+
+    Своя приёмка сюда НЕ входит: мастер видит только те заказы, которые ему
+    назначили (администратор или оператор). Печать этикетки на свою приёмку
+    при этом разрешена — см. `permissions.can_print`.
+    """
     from sqlalchemy import or_, select as _select
 
     subq = _select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
@@ -145,6 +194,9 @@ def _serialize(repair: Repair) -> RepairOut:
         contact2_name=repair.contact2_name,
         contact2_phone=repair.contact2_phone,
         is_delivery=repair.is_delivery,
+        reminder_next_at=repair.reminder_next_at,
+        reminder_last_at=repair.reminder_last_at,
+        reminder_count=repair.reminder_count or 0,
         client_name=repair.client.full_name,
         client_phone=repair.client.phone,
         master_name=repair.master.name if repair.master else None,
@@ -323,12 +375,98 @@ def _require_admin(user) -> None:
         raise HTTPException(403, "Только администратор")
 
 
+class ClientUpdate(BaseModel):
+    """Переименование/правка контакта клиента.
+
+    Отдельный эндпоинт нужен потому, что раньше единственным способом
+    изменить имя было создать ремонт на тот же номер — и имя перезаписывалось
+    молча, вместе со всей историей прежнего человека.
+    """
+
+    full_name: str | None = Field(default=None, min_length=1, max_length=255)
+    phone: str | None = Field(default=None, min_length=5, max_length=32)
+
+
+@router.patch("/clients/{client_id}")
+async def update_client(
+    client_id: uuid.UUID, payload: ClientUpdate, db: DbSession, user: CurrentUser
+):
+    """Изменить имя/телефон клиента — админ, менеджер или оператор."""
+    if not user.has_role(
+        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
+    ):
+        raise HTTPException(403, "Недостаточно прав для изменения данных клиента")
+
+    row = await db.execute(
+        select(Client).where(Client.id == client_id, Client.deleted_at.is_(None))
+    )
+    client = row.scalar_one_or_none()
+    if client is None:
+        raise HTTPException(404, "Клиент не найден")
+
+    data = payload.model_dump(exclude_unset=True)
+    old_full_name = client.full_name
+    old_phone = client.phone
+
+    new_phone = data.get("phone")
+    if new_phone is not None:
+        phone_norm = normalize_phone(new_phone)
+        if not phone_norm:
+            raise HTTPException(400, "В телефоне нет ни одной цифры")
+        clash = await db.execute(
+            select(Client).where(
+                Client.phone_norm == phone_norm, Client.id != client_id
+            )
+        )
+        clash_client = clash.scalar_one_or_none()
+        if clash_client is not None:
+            # Важно сказать, что карточка удалена: иначе админ не понимает,
+            # почему номер «занят», хотя в поиске его не видно.
+            detail = "Клиент с таким номером уже есть"
+            if clash_client.deleted_at is not None:
+                detail += (
+                    " (карточка удалена — приёмка с этим номером восстановит её, "
+                    "а здесь номер занять нельзя)"
+                )
+            raise HTTPException(409, detail)
+        client.phone = new_phone
+        client.phone_norm = phone_norm
+
+    if data.get("full_name") is not None:
+        client.full_name = data["full_name"].strip()
+
+    # RepairEvent привязан к конкретному ремонту, поэтому изменение карточки
+    # клиента фиксируем только в журнале аудита.
+    await audit.record(
+        db,
+        "client.update",
+        actor_id=user.id,
+        entity="client",
+        entity_id=client_id,
+        meta={
+            "full_name_before": old_full_name,
+            "full_name_after": client.full_name,
+            "phone_before": old_phone,
+            "phone_after": client.phone,
+        },
+    )
+    await db.commit()
+    await db.refresh(client)
+    return {
+        "id": str(client.id),
+        "full_name": client.full_name,
+        "phone": client.phone,
+        "phone_norm": client.phone_norm,
+    }
+
+
 @router.delete("/clients/{client_id}")
 async def delete_client(
     client_id: uuid.UUID, db: DbSession, user: CurrentUser
 ):
     """Удалить клиента (мягкое удаление) — только админ."""
-    _require_admin(user)
+    if not can_delete_client(user):
+        raise HTTPException(403, "Только администратор")
     from app.db.base import utcnow
 
     row = await db.execute(select(Client).where(Client.id == client_id))
@@ -336,6 +474,14 @@ async def delete_client(
     if client is None or client.deleted_at is not None:
         raise HTTPException(404, "Клиент не найден")
     client.deleted_at = utcnow()
+    await audit.record(
+        db,
+        audit.ACTION_CLIENT_DELETE,
+        actor_id=user.id,
+        entity="client",
+        entity_id=client_id,
+        meta={"full_name": client.full_name, "phone": client.phone},
+    )
     await db.commit()
     return {"ok": True}
 
@@ -343,10 +489,32 @@ async def delete_client(
 @router.delete("/{repair_id}")
 async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     """Полное удаление ремонта со всеми зависимостями — только админ."""
-    _require_admin(user)
+    if not can_delete_repair(user):
+        raise HTTPException(403, "Только администратор")
     repair = await db.get(Repair, repair_id)
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+
+    # Фото лежат на диске: строки RepairPhoto удалятся, а файлы остались бы
+    # навсегда. Собираем ключи ДО удаления строк.
+    photo_rows = await db.execute(
+        select(RepairPhoto.object_key).where(RepairPhoto.repair_id == repair_id)
+    )
+    object_keys = [k for (k,) in photo_rows.all() if k]
+
+    # Снимок ключевых полей — после удаления восстановить их будет неоткуда,
+    # а `repair_events` уходит вместе с ремонтом.
+    snapshot = {
+        "number": repair.number,
+        "status": repair.status,
+        "client_id": str(repair.client_id),
+        "price_final": float(repair.price_final) if repair.price_final is not None else None,
+        "cost_amount": float(repair.cost_amount) if repair.cost_amount is not None else None,
+        "master_payout": float(repair.master_payout) if repair.master_payout is not None else None,
+        "paid": bool(repair.paid),
+        "photos": len(object_keys),
+    }
+
     for model in (
         Notification,
         PrintJob,
@@ -361,7 +529,20 @@ async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
             delete(model).where(model.repair_id == repair_id)
         )
     await db.delete(repair)
+    await audit.record(
+        db,
+        audit.ACTION_REPAIR_DELETE,
+        actor_id=user.id,
+        entity="repair",
+        entity_id=repair_id,
+        meta=snapshot,
+    )
     await db.commit()
+
+    # Файлы удаляем уже после commit — чтобы откат транзакции не оставил
+    # записи в БД без картинок.
+    remove_objects(object_keys)
+
     await manager.broadcast({"type": "repair.deleted", "repair": {"id": str(repair_id)}})
     return {"ok": True}
 
@@ -373,7 +554,13 @@ async def create_repair(
     user: CurrentUser,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    # Idempotency: repeated submit with same key returns the existing repair.
+    """Приёмка техники.
+
+    Номер ремонта выделяется последовательно по (тип, город, год), поэтому при
+    одновременной приёмке двумя операторами возможен конфликт уникального
+    индекса — в этом случае пробуем ещё раз с новым номером.
+    """
+    # Идемпотентность: повторная отправка с тем же ключом отдаёт готовый ремонт.
     if idempotency_key:
         row = await db.execute(
             select(Repair).where(Repair.idempotency_key == idempotency_key)
@@ -387,36 +574,165 @@ async def create_repair(
     if city is None:
         raise HTTPException(400, "Город не найден")
 
-    # Upsert client by normalized phone.
+    # Телефон обязан содержать цифры: иначе phone_norm получается пустым, и все
+    # такие клиенты сливаются в одну запись (phone_norm — UNIQUE).
     phone_norm = normalize_phone(payload.client.phone)
-    row = await db.execute(select(Client).where(Client.phone_norm == phone_norm))
-    client = row.scalar_one_or_none()
+    if not phone_norm:
+        raise HTTPException(400, "В телефоне клиента нет ни одной цифры")
+
+    # Мастера назначает только администратор или оператор. Мастер, принявший
+    # технику, себя НЕ назначает автоматически — «Мастер» остаётся пустым.
+    if payload.master_id is not None and not _can_assign_masters(user):
+        raise HTTPException(403, "Мастера назначает администратор или оператор")
+
+    # Повтор идёт после rollback(), который «протухает» (expire) все объекты
+    # сессии: чтение `user.id` или `city.slug` внутри async-кода падало с
+    # MissingGreenlet, то есть честный повтор номера не работал вовсе. Поэтому
+    # дальше передаём только простые значения.
+    user_id = user.id
+    city_slug = city.slug
+
+    repair_id: uuid.UUID | None = None
+    last_error: Exception | None = None
+    conflict = NUMBER
+    for attempt in range(MAX_NUMBER_ATTEMPTS):
+        try:
+            repair_id = await _persist_repair(
+                db, payload, user_id, city_slug, phone_norm, idempotency_key
+            )
+            break
+        except IntegrityError as exc:
+            # Откатываем и пробуем заново: счётчик номера сдвинется.
+            await db.rollback()
+            last_error = exc
+            conflict = classify(exc)
+            log.warning(
+                "конфликт при приёмке (%s, ограничение %s, попытка %d/%d): %s",
+                conflict,
+                constraint_name(exc),
+                attempt + 1,
+                MAX_NUMBER_ATTEMPTS,
+                exc,
+            )
+            if conflict == OTHER:
+                # Причина не в номере и не в телефоне клиента — повтор не поможет.
+                break
+    if repair_id is None:
+        if conflict == OTHER:
+            log.error("Приёмка отклонена базой: %s", last_error)
+        raise HTTPException(409, _intake_conflict_message(conflict)) from last_error
+
+    repair = await _get_repair_or_404(db, repair_id)
+
+    # --- побочные эффекты ПОСЛЕ успешного commit (не повторяются при retry) ---
+    # Мастеру назначен ремонт (сразу при приёмке): в личку сообщаем только
+    # если назначил кто-то другой, а вот SMS на телефон мастера (если указан
+    # в профиле) уходит в любом случае — даже когда мастер принял заявку сам.
+    if repair.master is not None:
+        if _is_assigner(user) and repair.master.id != user.id:
+            await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
+        await send_master_assignment_sms(repair.master, repair, db=db)
+
+    await manager.broadcast(
+        {
+            "type": "repair.created",
+            "repair": {"number": repair.number, "status": repair.status},
+        }
+    )
+    return _serialize(repair)
+
+
+async def _persist_repair(
+    db,
+    payload: RepairCreate,
+    user_id: uuid.UUID,
+    city_slug: str | None,
+    phone_norm: str,
+    idempotency_key: str | None,
+) -> uuid.UUID:
+    """Создать клиента (при необходимости) и ремонт. Возвращает id ремонта.
+
+    Бросает `IntegrityError` при конфликте номера — вызывающий код повторяет
+    попытку. На вход принимаются только простые значения (`user_id`,
+    `city_slug`): повтор идёт после `rollback()`, а он делает объекты сессии
+    «протухшими», и ленивое чтение их атрибутов в async-коде падает.
+
+    Ничего, кроме БД, здесь не происходит: SMS и рассылки делаются снаружи,
+    чтобы не дублироваться при повторе.
+    """
+    from app.db.base import utcnow
+
+    # --- Клиент: ищем по нормализованному номеру ---
+    # Мягко удалённых (deleted_at) смотрим тоже: индекс phone_norm уникальный
+    # без оговорок, поэтому «невидимый» удалённый клиент делал приёмку с этим
+    # номером невозможной НАВСЕГДА — INSERT падал в UniqueViolation, retry-цикл
+    # принимал это за конфликт номера ремонта, и оператор получал «не удалось
+    # выделить номер» пять раз подряд.
+    row = await db.execute(
+        select(Client)
+        .where(Client.phone_norm == phone_norm)
+        # Живой клиент приоритетнее удалённого (false < true).
+        .order_by(Client.deleted_at.isnot(None))
+    )
+    client = row.scalars().first()
+    new_name = (payload.client.full_name or "").strip()
     if client is None:
         client = Client(
-            full_name=payload.client.full_name,
+            full_name=new_name,
             phone=payload.client.phone,
             phone_norm=phone_norm,
         )
         db.add(client)
         await db.flush()
     else:
-        client.full_name = payload.client.full_name
+        if client.deleted_at is not None:
+            # Клиент снова принёс технику: снимаем мягкое удаление, иначе его
+            # история ремонтов осталась бы «закрытой», а новый ремонт повис бы
+            # на втором, невидимом в поиске, клиенте с тем же номером.
+            client.deleted_at = None
+            await audit.record(
+                db,
+                audit.ACTION_CLIENT_RESTORE,
+                actor_id=user_id,
+                entity="client",
+                entity_id=client.id,
+                meta={
+                    "full_name": client.full_name,
+                    "phone": client.phone,
+                    "phone_norm": phone_norm,
+                    "reason": "приёмка с тем же номером телефона",
+                },
+            )
+            log.info(
+                "Клиент %s (phone_norm=%s) восстановлен при приёмке",
+                client.id,
+                phone_norm,
+            )
+        if new_name and new_name != client.full_name:
+            # Раньше имя перезаписывалось молча: приём техники от другого
+            # человека с тем же номером стирал прежнее имя вместе со всей его
+            # историей. Теперь имя остаётся прежним, а расхождение фиксируется
+            # в аудите — правится явно через PATCH /repairs/clients/{id}.
+            await audit.record(
+                db,
+                audit.ACTION_CLIENT_MERGE_BLOCKED,
+                actor_id=user_id,
+                entity="client",
+                entity_id=client.id,
+                meta={
+                    "kept_name": client.full_name,
+                    "submitted_name": new_name,
+                    "phone_norm": phone_norm,
+                },
+            )
 
-    from app.db.base import utcnow
-
-    number = await next_repair_number(db, city, payload.device_type)
+    number = await next_repair_number(db, city_slug, payload.device_type)
     storage_months = await get_storage_months(db)
     now = utcnow()
 
-    # Мастера назначает только администратор или оператор. Мастер, принявший
-    # технику, себя НЕ назначает автоматически — «Мастер» остаётся пустым.
-    if payload.master_id is not None and not _can_assign_masters(user):
-        raise HTTPException(403, "Мастера назначает администратор или оператор")
     master_id = payload.master_id
-
     # Как только у ремонта есть основной мастер — он сразу начинает работу,
-    # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято» (даже
-    # если мастер сам принял заявку на себя).
+    # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято».
     initial_status = "Диагностика" if master_id else "Принято"
 
     repair = Repair(
@@ -436,7 +752,7 @@ async def create_repair(
         contact2_phone=payload.contact2_phone,
         is_delivery=payload.is_delivery,
         consent_repair_at=now if payload.consent_repair else None,
-        accepted_by=user.id,
+        accepted_by=user_id,
         master_id=master_id,
         status=initial_status,
         eta_days=payload.eta_days,
@@ -453,7 +769,7 @@ async def create_repair(
         RepairEvent(
             repair_id=repair.id,
             type="status_change",
-            actor_id=user.id,
+            actor_id=user_id,
             data={"to": "Принято", "from": None},
         )
     )
@@ -462,33 +778,35 @@ async def create_repair(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
-                actor_id=user.id,
+                actor_id=user_id,
                 data={"to": initial_status, "from": "Принято"},
             )
         )
+    if master_id:
+        db.add(
+            RepairMaster(repair_id=repair.id, user_id=master_id, position=0)
+        )
     await db.commit()
+    return repair.id
 
-    repair = await _get_repair_or_404(db, repair.id)
 
-    # Мастеру назначен ремонт (сразу при приёмке): в личку сообщаем только
-    # если назначил кто-то другой, а вот SMS на телефон мастера (если указан
-    # в профиле) уходит в любом случае — даже когда мастер принял заявку сам.
-    if repair.master is not None:
-        if (
-            _is_assigner(user)
-            and repair.master.id != user.id
-        ):
-            await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
-        await send_master_assignment_sms(repair.master, repair, db=db)
-
-    # Notify the chat: new acceptance.
-    await manager.broadcast(
-        {
-            "type": "repair.created",
-            "repair": {"number": repair.number, "status": repair.status},
-        }
+def _intake_conflict_message(conflict: str) -> str:
+    """Человеческий текст 409 при приёмке — по настоящей причине конфликта."""
+    if conflict == CLIENT_PHONE:
+        return (
+            "Не удалось сохранить клиента: этот номер телефона уже привязан к "
+            "другой карточке клиента. Найдите клиента поиском по телефону и "
+            "повторите приёмку либо укажите другой номер."
+        )
+    if conflict == OTHER:
+        return (
+            "Приёмка не сохранена: база отклонила запись. Повторите попытку, а "
+            "если ошибка повторится — сообщите администратору (детали в логе API)."
+        )
+    return (
+        "Не удалось выделить номер ремонта — приёмку пытаются оформить "
+        "одновременно. Повторите попытку."
     )
-    return _serialize(repair)
 
 
 # Группы-этапы для страницы «Все ремонты» (вкладки).
@@ -551,6 +869,11 @@ def _repairs_filters(
         like = f"%{q.strip()}%"
         filters.append(
             or_(
+                # Номер ремонта и серийник — то, что напечатано на этикетке:
+                # оператор читает её с техники и ищет карточку. Раньше поиск по
+                # номеру не работал вовсе (в условии не было Repair.number).
+                Repair.number.ilike(like),
+                Repair.serial.ilike(like),
                 Repair.client.has(Client.phone.ilike(like)),
                 Repair.client.has(Client.full_name.ilike(like)),
                 Repair.brand.ilike(like),
@@ -774,6 +1097,42 @@ async def update_repair(
         or "master_id" in data
     ) and not _can_assign_masters(user):
         raise HTTPException(403, "Мастера назначает администратор или оператор")
+
+    # Финансовые поля (цена, себестоимость, выплата мастерам, «оплачено») —
+    # только старшие роли. Иначе мастер, ведущий ремонт, может сам назначить
+    # себе выплату и завысить цену.
+    touched_financials = [f for f in FINANCIAL_FIELDS if f in data]
+    if touched_financials and not can_edit_finances(user):
+        raise HTTPException(
+            403,
+            "Цену, расходы и выплату указывает администратор, менеджер или оператор",
+        )
+
+    # Марка/модель/серийник — тоже не для мастера: это данные бланка и этикетки.
+    touched_device = [f for f in DEVICE_FIELDS if f in data]
+    if touched_device and not can_edit_device_info(user):
+        raise HTTPException(
+            403,
+            "Марку, модель и серийный номер меняет администратор, менеджер или оператор",
+        )
+    # Запомним старое-новое, чтобы честно показать изменение в истории ремонта.
+    device_changes = [
+        (f, getattr(repair, f), data[f])
+        for f in touched_device
+        if (getattr(repair, f) or None) != (data[f] or None)
+    ]
+
+    # Статус — только из настраиваемого списка. Произвольная строка ломала
+    # доску (STAGE_STATUSES), очередь call-центра и статистику: все они
+    # фильтруют по точному совпадению, и ремонт становился невидимым.
+    if data.get("status") is not None:
+        allowed = await get_repair_statuses(db)
+        if data["status"] not in allowed:
+            raise HTTPException(
+                422,
+                f"Недопустимый статус. Доступные: {', '.join(allowed)}",
+            )
+
     for field, value in data.items():
         setattr(repair, field, value)
 
@@ -910,6 +1269,31 @@ async def update_repair(
             repair.ready_at = utcnow()
         if repair.status == "Выдано":
             repair.issued_at = utcnow()
+        # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
+        # готов к выдаче, и снимаются, как только технику выдали/закрыли.
+        if repair.status in REMINDER_STATUSES:
+            schedule_reminders(repair)
+        elif repair.status in STOP_STATUSES:
+            cancel_reminders(repair)
+
+    # Правка паспорта техники видна в ленте: кто и что именно поменял.
+    if device_changes:
+        _labels = {"brand": "марка", "model": "модель", "serial": "серийный №"}
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="device",
+                actor_id=user.id,
+                data={
+                    "message": "Исправлены данные техники: "
+                    + "; ".join(
+                        f"{_labels.get(f, f)} «{old or '—'}» → «{new or '—'}»"
+                        for f, old, new in device_changes
+                    ),
+                    "changes": {f: {"from": old, "to": new} for f, old, new in device_changes},
+                },
+            )
+        )
 
     # Финализация починки: оператор указал расходы/цену/оплату.
     if payload.cost_amount is not None or payload.price_final is not None:
@@ -933,6 +1317,53 @@ async def update_repair(
                 actor_id=user.id,
                 data={"message": "Отмечено как оплаченное"},
             )
+        )
+
+    # Аудит значимых изменений (деньги, статус, назначение).
+    if repair.status != old_status:
+        await audit.record(
+            db,
+            audit.ACTION_REPAIR_STATUS,
+            actor_id=user.id,
+            entity="repair",
+            entity_id=repair.id,
+            meta={"from": old_status, "to": repair.status, "number": repair.number},
+        )
+    if device_changes:
+        await audit.record(
+            db,
+            audit.ACTION_REPAIR_DEVICE,
+            actor_id=user.id,
+            entity="repair",
+            entity_id=repair.id,
+            meta={
+                "number": repair.number,
+                "changes": {f: {"from": old, "to": new} for f, old, new in device_changes},
+            },
+        )
+    if touched_financials:
+        await audit.record(
+            db,
+            audit.ACTION_REPAIR_FINANCE,
+            actor_id=user.id,
+            entity="repair",
+            entity_id=repair.id,
+            meta={
+                "number": repair.number,
+                "fields": {f: _num(getattr(repair, f, None)) for f in touched_financials},
+            },
+        )
+    if newly_assigned_ids:
+        await audit.record(
+            db,
+            audit.ACTION_REPAIR_ASSIGN,
+            actor_id=user.id,
+            entity="repair",
+            entity_id=repair.id,
+            meta={
+                "number": repair.number,
+                "assigned": [str(x) for x in newly_assigned_ids],
+            },
         )
 
     await db.commit()
@@ -964,14 +1395,14 @@ async def update_repair(
     return _serialize(repair)
 
 
-# Кнопка «Ремонт закончен» доступна админу и оператору.
-_FINISH_ROLES = (UserRole.ADMIN.value, UserRole.OPERATOR.value)
+# Кнопка «Ремонт закончен» доступна админу и оператору
+# (см. app.core.permissions.FINISH_ROLES).
 # Статусы, «после» готовности — назад в «Готово к выдаче» не переводим.
 _FINISH_TERMINAL = {"Выдано", "Не забрано", "Архив", "Отказ"}
 
 
 def _require_finisher(user) -> None:
-    if not user.has_role(*_FINISH_ROLES):
+    if not can_finish_repair(user):
         raise HTTPException(403, "Только админ или оператор")
 
 
@@ -996,6 +1427,10 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
         repair.status = "Готово к выдаче"
         repair.ready_at = utcnow()
+        # С этого момента клиенту раз в сутки напоминает о себе сервис:
+        # первое напоминание — через сутки (сегодня он уже получил SMS
+        # «ремонт готов»), дальше каждый день, пока технику не заберут.
+        schedule_reminders(repair)
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,

@@ -1,21 +1,17 @@
+"""Аналитика «курс ремонта» — только для админа и менеджера."""
 import uuid
 
-from fastapi import APIRouter
-from sqlalchemy import select
-
-import uuid
-
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 
 from app.core.deps import DbSession, require_roles
-from app.db.models import UserRole
+from app.core.permissions import ANALYTICS_ROLES
 from app.services import stats as stats_service
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 # Аналитика/отчёты доступны только админу и менеджеру
 # (по ролям оператору и мастеру она недоступна).
-CanViewAnalytics = Depends(require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value))
+CanViewAnalytics = Depends(require_roles(*ANALYTICS_ROLES))
 
 
 @router.get("/overview", dependencies=[CanViewAnalytics])

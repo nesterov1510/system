@@ -2,13 +2,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.core.deps import DbSession, require_roles
-from app.db.models import UserRole
+from app.core.permissions import ANALYTICS_ROLES
 from app.services import ai as ai_service
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 # AI-прогнозы и сводки относятся к аналитике — только админ/менеджер.
-CanViewAnalytics = Depends(require_roles(UserRole.ADMIN.value, UserRole.MANAGER.value))
+CanViewAnalytics = Depends(require_roles(*ANALYTICS_ROLES))
 
 
 class PredictETABody(BaseModel):

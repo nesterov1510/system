@@ -50,20 +50,45 @@ class Settings(BaseSettings):
 
     # --- SMS gateway ---
     # Реальные значения (URL/логин/пароль/вкл-выкл) настраиваются в админке
-    # (Admin → SMS, хранится в БД как Setting["sms_server"]). Поля ниже — это
-    # только запасной дефолт для окружений без БД (юнит-тесты и т.п.).
-    SMS_ENABLED: bool = True
-    SMS_GATEWAY_URL: str = "https://192.168.8.81/api/3rdparty/v1/messages"
-    SMS_GATEWAY_USERNAME: str = "KJV7XJ"
-    SMS_GATEWAY_PASSWORD: str = "fbsybvpoothupl"
-    # Сертификат шлюза самоподписанный — аналог `curl -k`.
-    SMS_VERIFY_SSL: bool = False
+    # (Admin → SMS, хранится в БД как Setting["sms_server"]) либо через env.
+    #
+    # ВАЖНО: здесь намеренно НЕТ боевых логина/пароля. Секреты не должны
+    # попадать в исходники и в git-историю — только env или настройки в БД.
+    # При пустом URL/логине отправка просто возвращает {"ok": False}.
+    SMS_ENABLED: bool = False
+    SMS_GATEWAY_URL: str = ""
+    SMS_GATEWAY_USERNAME: str = ""
+    SMS_GATEWAY_PASSWORD: str = ""
+    # Сертификат шлюза может быть самоподписанным — тогда это аналог `curl -k`.
+    # Включайте только для доверенной внутренней сети.
+    SMS_VERIFY_SSL: bool = True
     SMS_TIMEOUT_SEC: float = 10.0
+
+    # --- Ежедневные напоминания «заберите технику» ---
+    #
+    # После «Ремонт закончен» клиенту раз в сутки уходит SMS с просьбой забрать
+    # технику, пока ремонт не выдан (статусы «Готово к выдаче» / «Не забрано»).
+    # Текст — шаблон `pickup_reminder` в «Админ → SMS».
+    REMINDER_ENABLED: bool = True
+    # Как часто фоновая задача просматривает очередь напоминаний (минуты).
+    REMINDER_CHECK_INTERVAL_MIN: int = 15
+    # Периодичность напоминаний одному клиенту (часы). 24 = раз в сутки.
+    REMINDER_EVERY_HOURS: int = 24
+    # Первое напоминание — через столько часов после «Ремонт закончен»
+    # (в тот же день клиент уже получил SMS о готовности).
+    REMINDER_FIRST_DELAY_HOURS: int = 24
+    # Тихие часы: не будим клиента ночью (по местному времени сервиса).
+    REMINDER_SEND_FROM_HOUR: int = 9
+    REMINDER_SEND_TO_HOUR: int = 20
+    REMINDER_TIMEZONE: str = "Asia/Ashgabat"
+    # 0 = напоминать, пока технику не заберут. Иначе — не больше N напоминаний.
+    REMINDER_MAX_COUNT: int = 0
 
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"
     SEED_ADMIN_PASSWORD: str = "admin123"  # только dev; в ENV=prod обязательно заменить
-    SEED_ADMIN_PHONE: str = "+70000000000"
+    # Регион развёртывания — Туркменистан (+993).
+    SEED_ADMIN_PHONE: str = "+99300000000"
 
 
 @lru_cache

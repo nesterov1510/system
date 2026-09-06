@@ -15,6 +15,33 @@ interface SmsServerConfig {
 interface SmsTemplates {
   master_assign: string;
   ready: string;
+  /** Ежедневное напоминание «заберите технику» после «Ремонт закончен». */
+  pickup_reminder: string;
+}
+
+interface ReminderQueue {
+  enabled: boolean;
+  sms_window_open: boolean;
+  local_time: string;
+  schedule: {
+    every_hours: number;
+    first_delay_hours: number;
+    check_interval_min: number;
+    quiet_hours: string;
+    max_count: number;
+    statuses: string[];
+  };
+  items: Array<{
+    id: string;
+    number: string;
+    status: string;
+    client_name?: string | null;
+    client_phone?: string | null;
+    days_waiting?: number | null;
+    sent_count: number;
+    last_sent_at?: string | null;
+    next_at?: string | null;
+  }>;
 }
 
 const DEFAULT_SERVER: SmsServerConfig = {
@@ -35,15 +62,25 @@ const FIELD_LABELS: Record<string, string> = {
   client_phone: "Телефон клиента",
   fault: "Неисправность",
   eta_days: "Срок (дней)",
+  days: "Сколько дней ждёт",
+  ready_date: "Дата готовности",
+};
+
+const DEFAULT_TEMPLATES: SmsTemplates = {
+  master_assign: "",
+  ready: "",
+  pickup_reminder: "",
 };
 
 export default function SmsSettingsPage() {
   const [server, setServer] = useState<SmsServerConfig>(DEFAULT_SERVER);
-  const [templates, setTemplates] = useState<SmsTemplates>({ master_assign: "", ready: "" });
-  const [fields, setFields] = useState<{ master_assign: string[]; ready: string[] }>({
-    master_assign: [],
-    ready: [],
-  });
+  const [templates, setTemplates] = useState<SmsTemplates>(DEFAULT_TEMPLATES);
+  const [fields, setFields] = useState<{
+    master_assign: string[];
+    ready: string[];
+    pickup_reminder: string[];
+  }>({ master_assign: [], ready: [], pickup_reminder: [] });
+  const [queue, setQueue] = useState<ReminderQueue | null>(null);
   const [testPhone, setTestPhone] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -54,10 +91,14 @@ export default function SmsSettingsPage() {
       .getSmsConfig()
       .then((r) => {
         setServer({ ...DEFAULT_SERVER, ...r.server });
-        setTemplates(r.templates);
+        setTemplates({ ...DEFAULT_TEMPLATES, ...r.templates });
         setFields(r.template_fields);
       })
       .catch((e) => setError(e.message));
+    api
+      .remindersQueue()
+      .then(setQueue)
+      .catch(() => setQueue(null));
   }, []);
 
   useEffect(load, [load]);
@@ -77,7 +118,7 @@ export default function SmsSettingsPage() {
     }
   }
 
-  function insertPlaceholder(target: "master_assign" | "ready", field: string) {
+  function insertPlaceholder(target: keyof SmsTemplates, field: string) {
     setTemplates((t) => ({ ...t, [target]: `${t[target]}{${field}}` }));
   }
 
@@ -287,6 +328,132 @@ export default function SmsSettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* --- Ежедневное напоминание «заберите технику» --- */}
+      <div className="msb-card-solid space-y-4 p-4 sm:p-6">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">
+            Ежедневное напоминание клиенту («заберите технику»)
+          </h2>
+          <p className="mt-1 text-xs text-slate-500">
+            После «Ремонт закончен» клиент получает SMS о готовности, а затем —
+            это напоминание <b>раз в сутки</b>, пока технику не заберут (статусы
+            «Готово к выдаче» и «Не забрано»). После выдачи рассылка прекращается.
+          </p>
+        </div>
+        <textarea
+          className="msb-input resize-y"
+          rows={4}
+          value={templates.pickup_reminder}
+          placeholder="Уважаемый клиент, просим забрать вашу технику из нашего сервиса MERYOSAB. Находимся по адресу: Парахат 3/2, ж14."
+          onChange={(e) => setTemplates({ ...templates, pickup_reminder: e.target.value })}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {fields.pickup_reminder.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => insertPlaceholder("pickup_reminder", f)}
+              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200"
+              title={`Вставить {${f}}`}
+            >
+              {FIELD_LABELS[f] ?? f}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400">
+          Пустой текст = напоминание по умолчанию (название сервиса и адрес, как
+          в подсказке выше). Название и адрес меняются здесь, без правки кода.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => run(() => api.saveSmsTemplates(templates), "Шаблоны SMS сохранены")}
+            disabled={busy}
+            className="msb-btn-primary"
+          >
+            💾 Сохранить шаблоны
+          </button>
+        </div>
+      </div>
+
+      {/* --- Очередь напоминаний --- */}
+      {queue && (
+        <div className="msb-card-solid space-y-4 p-4 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">Очередь напоминаний</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Каждые {queue.schedule.check_interval_min} мин система проверяет
+                список и шлёт SMS в разрешённое время ({queue.schedule.quiet_hours}).
+                {queue.enabled ? "" : " Рассылка выключена (REMINDER_ENABLED=false)."}
+                {!queue.sms_window_open && " Сейчас тихие часы — отправка приостановлена."}
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                run(async () => {
+                  const r = await api.runReminders();
+                  if (r.reason === "sms_disabled") {
+                    throw new Error("SMS-шлюз выключен или не настроен — напоминания не отправлены");
+                  }
+                  if (r.reason === "quiet_hours") {
+                    throw new Error("Сейчас тихие часы: напоминания уйдут в разрешённое время");
+                  }
+                  if (r.reason === "reminder_disabled") {
+                    throw new Error("Рассылка напоминаний выключена (REMINDER_ENABLED=false)");
+                  }
+                  return r;
+                }, "Прогон выполнен — см. результат в списке")
+              }
+              disabled={busy}
+              className="msb-btn-secondary text-xs"
+              title="Отправить подошедшие напоминания прямо сейчас"
+            >
+              ▶ Прогнать сейчас
+            </button>
+          </div>
+
+          {queue.items.length === 0 ? (
+            <div className="rounded-xl border-2 border-dashed border-slate-200 py-6 text-center text-sm text-slate-400">
+              В очереди никого нет — напоминания появятся после «Ремонт закончен»
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                    <th className="py-2 pr-3 font-medium">Ремонт</th>
+                    <th className="py-2 pr-3 font-medium">Клиент</th>
+                    <th className="py-2 pr-3 font-medium">Ждёт</th>
+                    <th className="py-2 pr-3 font-medium">Отправлено</th>
+                    <th className="py-2 font-medium">Следующее</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {queue.items.map((i) => (
+                    <tr key={i.id}>
+                      <td className="py-2 pr-3 font-mono text-xs text-slate-800">{i.number}</td>
+                      <td className="py-2 pr-3 text-slate-600">
+                        {i.client_name || "—"}
+                        {i.client_phone && (
+                          <span className="ml-1 font-mono text-xs text-slate-400">{i.client_phone}</span>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">
+                        {i.days_waiting != null ? `${i.days_waiting} дн.` : "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">{i.sent_count}</td>
+                      <td className="py-2 text-xs text-slate-500">
+                        {i.next_at ? new Date(i.next_at).toLocaleString("ru") : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

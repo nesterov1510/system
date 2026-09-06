@@ -91,7 +91,25 @@ def test_repairs_list_paginated_with_stage(client, admin_headers, created_repair
     assert body["page_size"] == 5
     assert body["items"], "ожидали как минимум один ремонт в «new»"
     assert all(x["status"] == "Принято" for x in body["items"])
-    assert any(x["id"] == created_repair["id"] for x in body["items"])
+    assert len(body["items"]) <= 5, "page_size не соблюдён"
+
+    # created_repair обязан быть в срезе «new», но не обязательно на первой
+    # странице: список сортируется по дате приёма, и другие тесты создают
+    # более свежие ремонты. Поэтому ищем его по всем страницам — так тест
+    # проверяет именно пагинацию, а не порядок запуска тестов.
+    found = any(x["id"] == created_repair["id"] for x in body["items"])
+    pages = (body["total"] + body["page_size"] - 1) // body["page_size"]
+    for page in range(2, pages + 1):
+        if found:
+            break
+        nxt = client.get(
+            "/api/repairs", headers=admin_headers,
+            params={"stage": "new", "page": page, "page_size": 5},
+        )
+        assert nxt.status_code == 200
+        assert nxt.json()["page"] == page
+        found = any(x["id"] == created_repair["id"] for x in nxt.json()["items"])
+    assert found, "created_repair не найден ни на одной странице среза «new»"
 
     done = client.get(
         "/api/repairs", headers=admin_headers, params={"stage": "done"}
@@ -140,3 +158,42 @@ def test_ai_predict_eta_honest(client, admin_headers):
         json={"device_type": "НесуществующийТип"},
     )
     assert r2.json()["message"] == "мало данных"
+
+
+def test_duplicate_sku_returns_409_not_500(client, admin_headers):
+    """Повторный артикул — понятная ошибка, а не «Internal Server Error»."""
+    payload = {
+        "name": "Дублирующая деталь",
+        "sku": "DUP-SKU-001",
+        "category": "Запчасти",
+        "stock_qty": 3,
+        "min_stock": 1,
+    }
+    first = client.post("/api/parts", headers=admin_headers, json=payload)
+    assert first.status_code == 201, first.text
+
+    second = client.post("/api/parts", headers=admin_headers, json=payload)
+    assert second.status_code == 409, second.text
+    assert "артикул" in second.json()["detail"].lower()
+
+
+def test_duplicate_sku_on_update_returns_409(client, admin_headers):
+    a = client.post(
+        "/api/parts",
+        headers=admin_headers,
+        json={"name": "Деталь А", "sku": "DUP-A", "stock_qty": 1, "min_stock": 0},
+    )
+    b = client.post(
+        "/api/parts",
+        headers=admin_headers,
+        json={"name": "Деталь Б", "sku": "DUP-B", "stock_qty": 1, "min_stock": 0},
+    )
+    assert a.status_code == 201 and b.status_code == 201
+
+    r = client.patch(
+        f"/api/parts/{b.json()['id']}", headers=admin_headers, json={"sku": "DUP-A"}
+    )
+    assert r.status_code == 409, r.text
+    # Значение не изменилось и деталь осталась пригодной.
+    after = client.get("/api/parts", headers=admin_headers, params={"q": "Деталь Б"})
+    assert after.status_code == 200

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   api,
@@ -14,41 +13,7 @@ import { canView, isAdminRole } from "@/lib/catalog";
 import { subscribeChat, connectChat, disconnectChat } from "@/lib/chatSocket";
 import { playNotify, primeAudio } from "@/lib/sound";
 import MobileNav from "@/components/MobileNav";
-
-// role  -> какие страницы доступны. См. lib/catalog.ts (canView).
-const NAV_ITEMS = [
-  {
-    group: "Основное",
-    items: [
-      { href: "/repairs", label: "Все ремонты", icon: "📋" },
-      { href: "/repairs/new", label: "Приёмка", icon: "➕" },
-      { href: "/clients", label: "Контакты", icon: "👥" },
-      { href: "/callcenter", label: "Call-центр", icon: "📞" },
-      { href: "/chat", label: "Чат", icon: "💬" },
-      { href: "/dashboard", label: "Курс", icon: "📊" },
-      { href: "/profile", label: "Профиль", icon: "👤" },
-    ],
-  },
-  {
-    group: "Админ",
-    adminOnly: true,
-    items: [
-      { href: "/parts", label: "Склад", icon: "📦" },
-      { href: "/admin/users", label: "Сотрудники", icon: "👥" },
-      { href: "/admin/print-templates", label: "Шаблоны", icon: "🖨️" },
-      { href: "/admin/printer", label: "Принтер", icon: "🖨️" },
-      { href: "/admin/sms", label: "SMS", icon: "✉️" },
-    ],
-  },
-];
-
-const STATUS_BADGES: Record<string, string> = {
-  admin: "bg-msb-600 text-white",
-  manager: "bg-emerald-600 text-white",
-  operator: "bg-cyan-600 text-white",
-  master: "bg-amber-600 text-white",
-  callcenter: "bg-purple-600 text-white",
-};
+import SideDrawer from "@/components/SideDrawer";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Админ",
@@ -58,18 +23,25 @@ const ROLE_LABELS: Record<string, string> = {
   callcenter: "Call-центр",
 };
 
+const STATUS_BADGES: Record<string, string> = {
+  admin: "bg-msb-600 text-white",
+  manager: "bg-emerald-600 text-white",
+  operator: "bg-cyan-600 text-white",
+  master: "bg-amber-600 text-white",
+  callcenter: "bg-purple-600 text-white",
+};
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Десктопная боковая панель по умолчанию свёрнута до узкой полосы с
-  // иконками — освобождает место под контент. Разворачивается по клику на
-  // стрелку и остаётся развёрнутой, пока пользователь сам её не свернёт.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  // Меню открывается поверх страницы и НИКОГДА не сдвигает контент, поэтому
+  // состояние всего одно: открыто/закрыто. Никакого «свёрнуто до иконок» —
+  // именно оно раньше двигало таблицу при каждом клике.
+  const [navOpen, setNavOpen] = useState(false);
   const [chatUnread, setChatUnread] = useState(0);
-  // Внутренние уведомления админам (напр. эскалация ошибки печати — item 4).
+  // Внутренние уведомления админам (напр. эскалация ошибки печати).
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifItems, setNotifItems] = useState<
     Array<{ id: string; title: string; body?: string | null; read_at?: string | null; created_at: string }>
@@ -87,6 +59,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, [pathname, router]);
 
+  // Переход на другую страницу закрывает меню.
+  useEffect(() => {
+    setNavOpen(false);
+    setNotifOpen(false);
+  }, [pathname]);
+
   const refreshUnread = useCallback(() => {
     api
       .chatUnreadTotal()
@@ -94,8 +72,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .catch(() => {});
   }, []);
 
-  // Уведомления видны только тем, кто имеет роль admin (item 4: эскалация
-  // ошибки печати главному разработчику через внутреннее уведомление).
+  // Уведомления видны только тем, кто имеет роль admin.
   useEffect(() => {
     if (!ready || !user || !isAdminRole(user.role, user.roles)) return;
     const load = () => api.notifications().then(setNotifItems).catch(() => {});
@@ -125,10 +102,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     const unsub = subscribeChat((event) => {
       if (event?.type !== "chat.message") return;
       const authorId = event?.message?.author?.id;
-      const isMine = authorId && authorId === user.id;
-      if (isMine) return;
-      // Если это сообщение в канал, который сейчас открыт у пользователя —
-      // не звучим (он его уже видит), чат-страница сама помечает прочитанным.
+      if (authorId && authorId === user.id) return;
+      // Если это сообщение в канал, который сейчас открыт, — не звучим
+      // (пользователь его уже видит), чат-страница сама помечает прочитанным.
       const active = (window as unknown as { __msbActiveChat?: string }).__msbActiveChat;
       const onScreen = active && active === event.channel_id;
       if (!onScreen) {
@@ -147,6 +123,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       unsub();
       clearInterval(t);
       window.removeEventListener("msb:unread-refresh", onUnreadRefresh);
+      disconnectChat();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, user?.id]);
@@ -159,8 +136,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   // На мобильных экранная клавиатура часто перекрывает поле, которое человек
-  // заполняет (особенно у нижней части формы). Прокручиваем сфокусированное
-  // поле в видимую область с запасом, когда клавиатура уже открылась.
+  // заполняет. Прокручиваем сфокусированное поле в видимую область с запасом,
+  // когда клавиатура уже открылась.
   useEffect(() => {
     function onFocusIn(e: FocusEvent) {
       const el = e.target as HTMLElement | null;
@@ -178,10 +155,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   function isActive(href: string) {
-    if (href === "/repairs" && pathname === "/repairs") return true;
-    if (href !== "/repairs" && pathname.startsWith(href)) return true;
-    return false;
+    if (href === "/repairs") return pathname === "/repairs";
+    return pathname.startsWith(href);
   }
+
+  const logout = useCallback(() => {
+    clearSession();
+    disconnectChat();
+    router.replace("/login");
+  }, [router]);
 
   if (!ready || !user) {
     return (
@@ -196,18 +178,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
-      {/* Desktop Header */}
+      <SideDrawer
+        open={navOpen}
+        user={user}
+        chatUnread={chatUnread}
+        isActive={isActive}
+        onClose={() => setNavOpen(false)}
+        onLogout={logout}
+      />
+
+      {/* Header */}
       <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-[1600px] items-center justify-between px-4 lg:px-6">
-          <div className="flex items-center gap-2 lg:gap-4">
-            {/* Mobile menu toggle */}
+        <div className="flex h-16 items-center justify-between gap-2 px-3 sm:px-4 lg:px-6">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            {/* Кнопка меню видна на всех экранах: панель одна и та же,
+                открывается поверх страницы и не смещает контент. */}
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="lg:hidden msb-btn-ghost p-2"
-              aria-label="Меню"
+              onClick={() => setNavOpen((v) => !v)}
+              className="msb-btn-ghost -ml-1 shrink-0 p-2 text-slate-600 hover:text-slate-900"
+              aria-label={navOpen ? "Закрыть меню" : "Открыть меню"}
+              aria-expanded={navOpen}
+              aria-controls="msb-side-drawer"
+              title="Меню"
             >
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                {sidebarOpen ? (
+                {navOpen ? (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 ) : (
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -215,38 +210,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </svg>
             </button>
 
-            {/* Desktop sidebar collapse/expand toggle */}
-            <button
-              onClick={() => setSidebarCollapsed((v) => !v)}
-              className="hidden lg:inline-flex msb-btn-ghost p-2 text-slate-500 hover:text-slate-700"
-              aria-label={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
-              title={sidebarCollapsed ? "Развернуть панель" : "Свернуть панель"}
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-
-            {/* Logo */}
-            <Link href="/repairs" className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-msb-600 to-msb-800 shadow-sm">
-                <span className="text-sm font-extrabold text-white">MSB</span>
-              </div>
-              <div className="hidden sm:block">
-                <span className="text-base font-bold text-slate-900">MSB</span>
-                <span className="ml-2 text-xs text-slate-500"></span>
-              </div>
-            </Link>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-msb-600 to-msb-800 text-sm font-extrabold text-white shadow-sm">
+                MSB
+              </span>
+              <span className="hidden text-base font-bold text-slate-900 sm:block">MSB</span>
+            </div>
           </div>
 
           {/* User area */}
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-1 sm:gap-3">
             {isAdminRole(user.role, user.roles) && (
               <div className="relative">
                 <button
                   onClick={() => setNotifOpen((v) => !v)}
                   className="msb-btn-ghost relative p-2 text-slate-500 hover:text-slate-700"
                   title="Уведомления"
+                  aria-label="Уведомления"
+                  aria-expanded={notifOpen}
                 >
                   <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -259,23 +240,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   )}
                 </button>
                 {notifOpen && (
-                  <div className="absolute right-0 z-40 mt-2 w-80 rounded-2xl bg-white p-2 shadow-lg ring-1 ring-slate-200 animate-slide-up">
+                  <div className="animate-slide-up absolute right-0 z-40 mt-2 w-80 max-w-[calc(100vw-1.5rem)] rounded-2xl bg-white p-2 shadow-lg ring-1 ring-slate-200">
                     <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-slate-400">
                       Уведомления
                     </p>
-                    <div className="max-h-80 space-y-1 overflow-y-auto custom-scroll">
+                    <div className="custom-scroll max-h-80 space-y-1 overflow-y-auto">
                       {notifItems.length === 0 && (
                         <p className="px-3 py-4 text-center text-sm text-slate-400">Пусто</p>
                       )}
                       {notifItems.map((n) => (
                         <button key={n.id} onClick={() => openNotif(n)}
                           className={`block w-full rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-                            n.read_at ? "text-slate-500 hover:bg-slate-50" : "bg-amber-50 text-slate-800 hover:bg-amber-100"}`}>
-                          <div className="font-medium">{n.title}</div>
-                          {n.body && <div className="mt-0.5 text-xs text-slate-500">{n.body}</div>}
-                          <div className="mt-1 text-[10px] text-slate-400">
+                            n.read_at ? "text-slate-500 hover:bg-slate-50" : "bg-amber-50 text-slate-800 hover:bg-amber-100"}`}
+                        >
+                          <span className="block font-medium">{n.title}</span>
+                          {n.body && <span className="mt-0.5 block text-xs text-slate-500">{n.body}</span>}
+                          <span className="mt-1 block text-[10px] text-slate-400">
                             {new Date(n.created_at).toLocaleString("ru")}
-                          </div>
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -283,26 +265,34 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 )}
               </div>
             )}
-            <Link href="/profile" title="Профиль"
-              className="hidden items-center gap-2 sm:flex">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
+
+            <button
+              onClick={() => router.push("/profile")}
+              title="Профиль"
+              className="flex items-center gap-2 rounded-xl px-1 py-1 transition-colors hover:bg-slate-100 sm:px-2"
+            >
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white shadow-sm">
                 {user.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="text-right">
-                <div className="text-sm font-medium text-slate-800">{user.name}</div>
-                <div className="text-xs text-slate-500">{user.email}</div>
-              </div>
-            </Link>
-            <span className={`hidden rounded-full px-2.5 py-0.5 text-xs font-semibold sm:inline-block ${STATUS_BADGES[user.role] ?? "bg-slate-100 text-slate-600"}`}>
+              </span>
+              <span className="hidden text-right lg:block">
+                <span className="block max-w-[12rem] truncate text-sm font-medium text-slate-800">
+                  {user.name}
+                </span>
+                <span className="block max-w-[12rem] truncate text-xs text-slate-500">
+                  {user.email}
+                </span>
+              </span>
+            </button>
+
+            <span className={`hidden rounded-full px-2.5 py-0.5 text-xs font-semibold xl:inline-block ${STATUS_BADGES[user.role] ?? "bg-slate-100 text-slate-600"}`}>
               {ROLE_LABELS[user.role] ?? user.role}
             </span>
+
             <button
-              onClick={() => {
-                clearSession();
-                router.replace("/login");
-              }}
-              className="msb-btn-ghost text-sm text-slate-500 hover:text-red-600"
+              onClick={logout}
+              className="msb-btn-ghost p-2 text-slate-500 hover:text-red-600"
               title="Выйти"
+              aria-label="Выйти"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -312,167 +302,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <div className="mx-auto flex min-w-0 max-w-[1600px]">
-        {/* Desktop Sidebar — по умолчанию свёрнута до узкой полосы с иконками,
-            разворачивается по кнопке в шапке (см. sidebarCollapsed). */}
-        <aside
-          className={`hidden shrink-0 border-r border-slate-200/70 transition-[width] duration-200 lg:block ${
-            sidebarCollapsed ? "lg:w-[68px]" : "lg:w-56 xl:w-64"
-          }`}
-        >
-          <nav
-            className={`sticky top-16 space-y-6 overflow-y-auto overflow-x-hidden py-6 ${
-              sidebarCollapsed ? "px-2" : "px-4 lg:px-6"
-            }`}
-            style={{ maxHeight: "calc(100vh - 4rem)" }}
-          >
-            {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
-              return (
-                <div key={group.group}>
-                  {!sidebarCollapsed && (
-                    <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                      {group.group}
-                    </div>
-                  )}
-                  <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        title={sidebarCollapsed ? item.label : undefined}
-                        className={`flex items-center rounded-xl text-sm font-medium transition-all duration-200 ${
-                          sidebarCollapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5"
-                        } ${
-                          isActive(item.href)
-                            ? "bg-gradient-to-r from-msb-50 to-msb-100/50 text-msb-700 shadow-sm"
-                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-800"
-                        }`}
-                      >
-                        <span className="relative text-base leading-none">
-                          {item.icon}
-                          {sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
-                            <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-2 ring-white" />
-                          )}
-                        </span>
-                        {!sidebarCollapsed && <span>{item.label}</span>}
-                        {!sidebarCollapsed && item.href === "/chat" && chatUnread > 0 && (
-                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
-                            {chatUnread > 99 ? "99+" : chatUnread}
-                          </span>
-                        )}
-                        {!sidebarCollapsed && isActive(item.href) && item.href !== "/chat" && (
-                          <span className="ml-auto h-1.5 w-1.5 rounded-full bg-msb-600" />
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-          </nav>
-        </aside>
-
-        {/* Mobile Sidebar Overlay */}
-        {sidebarOpen && (
-          <div
-            className="fixed inset-0 z-20 bg-slate-900/30 backdrop-blur-sm lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          />
-        )}
-
-        {/* Mobile Sidebar */}
-        <aside
-          className={`fixed inset-y-0 left-0 z-30 w-72 transform border-r border-slate-200 bg-white/95 backdrop-blur-xl transition-transform duration-300 lg:hidden ${
-            sidebarOpen ? "translate-x-0" : "-translate-x-full"
-          }`}
-        >
-          <div className="flex h-16 items-center justify-between border-b border-slate-200 px-4">
-            <Link href="/repairs" className="flex items-center gap-2.5" onClick={() => setSidebarOpen(false)}>
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-msb-600 to-msb-800 shadow-sm">
-                <span className="text-sm font-extrabold text-white">MSB</span>
-              </div>
-              <span className="text-base font-bold text-slate-900">MSB</span>
-            </Link>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className="msb-btn-ghost p-2"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <nav className="space-y-6 overflow-y-auto px-4 py-6" style={{ maxHeight: "calc(100vh - 4rem)" }}>
-            {NAV_ITEMS.map((group) => {
-              if (group.adminOnly && !isAdminRole(user.role, user.roles)) return null;
-              return (
-                <div key={group.group}>
-                  <div className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-slate-400">
-                    {group.group}
-                  </div>
-                  <div className="space-y-0.5">
-                    {group.items.filter((item) => canView(user.role, item.href, user.roles)).map((item) => (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => setSidebarOpen(false)}
-                        className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                          isActive(item.href)
-                            ? "bg-gradient-to-r from-msb-50 to-msb-100/50 text-msb-700"
-                            : "text-slate-600 hover:bg-slate-100"
-                        }`}
-                      >
-                        <span className="text-base leading-none">{item.icon}</span>
-                        <span>{item.label}</span>
-                        {item.href === "/chat" && chatUnread > 0 && (
-                          <span className="ml-auto flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white ring-2 ring-red-300">
-                            {chatUnread > 99 ? "99+" : chatUnread}
-                          </span>
-                        )}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* User info in mobile sidebar */}
-            <div className="msb-divider pt-4" />
-            <div className="flex items-center gap-3 px-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-msb-500 to-msb-700 text-xs font-bold text-white">
-                {user.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1">
-                <div className="text-sm font-medium text-slate-800">{user.name}</div>
-                <div className="text-xs text-slate-500">{ROLE_LABELS[user.role] ?? user.role}</div>
-              </div>
-              <button
-                onClick={() => {
-                  clearSession();
-                  router.replace("/login");
-                }}
-                className="msb-btn-ghost p-2 text-red-500"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
-            </div>
-          </nav>
-        </aside>
-
-        {/* Main Content */}
-        <main className="min-h-[calc(100vh-4rem)] min-w-0 flex-1 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-6 lg:pb-6 xl:px-10">
-          {/* Не ограничиваем ширину искусственно узким контейнером — когда
-              панель слева свёрнута, страницы (таблицы, формы) используют
-              освободившееся место. Отдельные узкие формы (профиль и т.п.)
-              сами задают себе max-w на уровне страницы. */}
-          <div className="mx-auto min-w-0 max-w-[1400px] animate-fade-in">
-            {children}
-          </div>
-        </main>
-      </div>
+      {/* Контент занимает ВСЮ ширину всегда: меню накладывается поверх него,
+          поэтому открытие/закрытие не вызывает ни малейшего сдвига. */}
+      <main className="min-h-[calc(100vh-4rem)] min-w-0 px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 sm:pt-6 lg:px-6 lg:pb-6 xl:px-8">
+        {/* Отдельные узкие формы (профиль, карточка ремонта) сами задают себе
+            max-w на уровне страницы. */}
+        <div className="animate-fade-in mx-auto min-w-0 max-w-[1400px]">{children}</div>
+      </main>
 
       <MobileNav />
     </div>

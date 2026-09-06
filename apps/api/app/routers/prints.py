@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
+from app.core.permissions import PRINT_QUEUE_ROLES, can_print
 from app.db.models import (
     Branch,
     City,
@@ -28,10 +29,12 @@ from app.db.models import (
     UserRole,
 )
 from app.services.print import (
+    FontNotAvailable,
     body_to_template,
     render_blank_pdf,
     render_repair_label_pdf,
 )
+from app.services import audit
 from app.services.settings import (
     get_consent_repair_text,
     get_currency,
@@ -42,22 +45,9 @@ from app.services.settings import (
 
 router = APIRouter(tags=["print"])
 
-PRINT_QUEUE_ROLES = {
-    UserRole.ADMIN.value,
-    UserRole.MANAGER.value,
-    UserRole.OPERATOR.value,
-}
-
-
 def _can_print(user, repair: Repair) -> bool:
     """Мастер может печатать только назначенный ему ремонт."""
-    if user.has_role(
-        UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.OPERATOR.value
-    ) or not user.has_role(UserRole.MASTER.value):
-        return True
-    return repair.master_id == user.id or any(
-        link.user_id == user.id for link in repair.masters
-    )
+    return can_print(user, repair)
 
 
 def _label_complectation(value: dict | None) -> str:
@@ -239,9 +229,13 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
     template = await get_default_template(db)
     ctx = await build_context(db, repair)
     currency = await get_currency(db)
-    pdf = render_blank_pdf(
-        template=template, currency_symbol=currency.get("symbol", "ман."), **ctx
-    )
+    try:
+        pdf = render_blank_pdf(
+            template=template, currency_symbol=currency.get("symbol", "ман."), **ctx
+        )
+    except FontNotAvailable as exc:
+        # Не 500: оператор должен увидеть, что делать (установить шрифты).
+        raise HTTPException(503, str(exc))
 
     # Конфигурация принтера попадает в payload, чтобы print-agent знал,
     # куда и как печатать (IPP напрямую или через драйвер ОС).
@@ -306,16 +300,19 @@ async def create_label_print_job(
     repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs/{repair.id}"
     width_mm = printer.get("width_mm", 58)
     height_mm = printer.get("height_mm", 38)
-    pdf = render_repair_label_pdf(
-        repair_number=repair.number,
-        client_name=repair.client.full_name,
-        client_phone=repair.client.phone,
-        repair_url=repair_url,
-        complectation=_label_complectation(repair.complectation),
-        defects=repair.condition_notes or "",
-        width_mm=width_mm,
-        height_mm=height_mm,
-    )
+    try:
+        pdf = render_repair_label_pdf(
+            repair_number=repair.number,
+            client_name=repair.client.full_name,
+            client_phone=repair.client.phone,
+            repair_url=repair_url,
+            complectation=_label_complectation(repair.complectation),
+            defects=repair.condition_notes or "",
+            width_mm=width_mm,
+            height_mm=height_mm,
+        )
+    except FontNotAvailable as exc:
+        raise HTTPException(503, str(exc))
 
     job = PrintJob(
         repair_id=repair.id,
@@ -386,6 +383,15 @@ async def report_print_failure(
                 "message": f"Зарегистрировано без печати: {reason}",
             },
         )
+    )
+
+    await audit.record(
+        db,
+        audit.ACTION_PRINT_FAILURE,
+        actor_id=user.id,
+        entity="repair",
+        entity_id=repair.id,
+        meta={"number": repair.number, "reason": reason},
     )
 
     admins_row = await db.execute(select(User).where(User.active.is_(True)))
