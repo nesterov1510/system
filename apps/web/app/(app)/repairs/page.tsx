@@ -78,8 +78,13 @@ const COLUMNS: Array<{
   {
     key: "total",
     label: "🏁 Итог",
-    title: "Итоговая сумма ремонта",
-    hint: "Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».",
+    title: "Остаток после расходов",
+    hint: "Сколько остаётся сервису: сумма ремонта минус расходы (запчасти и выплаты мастерам). Отрицательное значение показывается красным — ремонт в минусе.",
+    details: [
+      "Формула та же, что у плитки «Общая прибыль» над таблицей, поэтому колонка и плитка сходятся",
+      "«—» — цена ремонта ещё не указана (нет ни итоговой цены, ни вилки из прайса)",
+      "Рядом отметка об оплате клиентом: «✓ оплачено» или «долг»",
+    ],
     align: "right",
   },
 ];
@@ -456,6 +461,12 @@ export default function RepairsBoardPage() {
                 const stage = stageOf(r.status);
                 const hasMasters = (r.master_names?.length ?? 0) > 0;
                 const sum = sumOf(r);
+                // Что остаётся сервису после расходов: сумма − запчасти − выплаты
+                // мастерам. Та же формула, что в плитке «Общая прибыль» над
+                // таблицей (backend /api/repairs/stats), поэтому колонка и
+                // плитка сходятся.
+                const expenses = (r.parts_cost ?? 0) + (r.master_payout ?? 0);
+                const rest = sum != null ? sum - expenses : null;
                 const partsNames = r.parts_names ?? [];
                 const helperNames = r.helper_names ?? [];
                 return (
@@ -547,12 +558,21 @@ export default function RepairsBoardPage() {
                         <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    {/* 10. Итоговая сумма ремонта + рассчитался ли клиент */}
+                    {/* 10. Остаток после расходов + рассчитался ли клиент */}
                     <td className="whitespace-nowrap px-3 py-3 text-right">
-                      {sum != null ? (
-                        <span className="text-sm font-bold text-slate-900">{money(sum)}</span>
+                      {rest != null ? (
+                        <span
+                          className={`text-sm font-bold ${
+                            rest < 0 ? "text-red-600" : "text-emerald-700"
+                          }`}
+                          title={`Сумма ${money(sum ?? 0)} − расходы ${money(expenses)} (запчасти + выплаты мастерам)`}
+                        >
+                          {money(rest)}
+                        </span>
                       ) : (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400" title="Цена ремонта ещё не указана">
+                          —
+                        </span>
                       )}
                       <span
                         className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${

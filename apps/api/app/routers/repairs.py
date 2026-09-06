@@ -123,20 +123,16 @@ DEVICE_FIELDS = ("brand", "model", "serial")
 
 
 def _master_scope(user_id) -> "object":
-    """SQL-условие: ремонт назначен мастеру либо принят им самим.
+    """SQL-условие: ремонт назначен мастеру напрямую или через repair_masters.
 
-    Своя приёмка входит в область видимости: исполнитель назначается
-    администратором/оператором, поэтому без этого условия только что созданный
-    мастером ремонт тут же пропадал у него из списка и доски.
+    Своя приёмка сюда НЕ входит: мастер видит только те заказы, которые ему
+    назначили (администратор или оператор). Печать этикетки на свою приёмку
+    при этом разрешена — см. `permissions.can_print`.
     """
     from sqlalchemy import or_, select as _select
 
     subq = _select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
-    return or_(
-        Repair.master_id == user_id,
-        Repair.id.in_(subq),
-        Repair.accepted_by == user_id,
-    )
+    return or_(Repair.master_id == user_id, Repair.id.in_(subq))
 
 
 def _serialize(repair: Repair) -> RepairOut:
