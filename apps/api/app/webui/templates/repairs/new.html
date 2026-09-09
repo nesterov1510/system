@@ -222,7 +222,7 @@ window.msbCapsIdent = (function () {
           </div>
         </div>
 
-        <details style="margin-top:12px" open>
+        <details style="margin-top:12px">
           <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
           <div class="tv-customer-grid" style="margin-top:10px">
             <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
@@ -419,6 +419,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.querySelector('[data-tv-intake-form]');
   if (!form) return;
   const sync = () => {
+    const brand = form.querySelector('[name="brand_manual"]');
+    const model = form.querySelector('[name="model_manual"]');
+    const sn = form.querySelector('[name="serial_manual"]');
+    if (window.msbCapsIdent && (brand?.value.trim() || model?.value.trim() || sn?.value.trim())) {
+      msbCapsIdent.fromPart(brand || model || sn);
+    }
     const map = [['brand_manual','brand'],['model_manual','model'],['serial_manual','serial']];
     for (const [manual, hidden] of map) {
       const m = form.querySelector(`[name="${manual}"]`);
