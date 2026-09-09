@@ -25,3 +25,6 @@ out/
 # Build
 dist/
 build/
+
+# Debug logs of the Jinja UI / on_off_debug module
+apps/api/app/on_off_debug/log_folder/

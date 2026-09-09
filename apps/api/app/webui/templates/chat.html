@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Чат{% endblock %}
+{% block page_name %}Чат команды{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Чат команды</h1>
+    <p>Внутренние каналы и диалоги по ремонтам.</p>
+  </div>
+</section>
+<div class="card chat-layout" style="padding:0;overflow:hidden">
+  <div class="chat-list" style="border-right:1px solid var(--line);overflow-y:auto">
+    <div class="card-h"><h3>Каналы и диалоги</h3></div>
+    <div style="padding:6px">
+      {% for c in channels %}
+        <a href="/chat?channel={{ c.id }}"
+           class="nav {% if current_id == c.id|string %}active{% endif %}"
+           style="display:flex;gap:8px;padding:10px 12px;border-radius:10px;color:var(--ink);align-items:center">
+          <span>{{ '💬' if c.kind == 'public' else '👤' }}</span>
+          <span style="flex:1">{{ c.name }}</span>
+          {% if c.unread %}<span class="chip red">{{ c.unread }}</span>{% endif %}
+        </a>
+      {% else %}
+        <p class="muted" style="padding:10px">Нет каналов</p>
+      {% endfor %}
+      <hr style="border:0;border-top:1px solid var(--line);margin:10px 6px">
+      <details style="padding:6px">
+        <summary class="btn sm sec" style="display:inline-block">➕ Личное сообщение</summary>
+        <div style="margin-top:8px">
+          {% for u in users %}
+            <form method="post" action="/chat/direct/{{ u.id }}" style="margin:2px 0">
+              <button class="btn sm ghost" type="submit" style="width:100%;text-align:left">👤 {{ u.name }} <span class="muted">{{ u.role }}</span></button>
+            </form>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="chat-main">
+    <div class="card-h" style="border-bottom:1px solid var(--line)"><h3>{{ current_name or 'Выберите канал' }}</h3></div>
+    <div class="chat-msgs" id="chat-msgs">
+      {% for m in messages %}
+        <div class="msg {% if m.author.id|string == me_id %}mine{% endif %}" data-channel="{{ m.channel_id }}">
+          {% if m.author.id|string != me_id %}<div class="meta" style="font-weight:700">{{ m.author.name }}</div>{% endif %}
+          <div>{{ m.text }}</div>
+          {% if m.repair_ref %}
+            <div style="margin-top:4px"><a class="chip" href="/repairs/by-number/{{ m.repair_ref }}">🔧 {{ m.repair_ref }}</a></div>
+          {% endif %}
+          <div class="meta">{{ m.created_at.strftime('%d.%m %H:%M') }}</div>
+        </div>
+      {% endfor %}
+    </div>
+    {% if current_id %}
+    <form class="chat-input" id="chat-form" method="post" action="/chat/send" data-channel="{{ current_id }}">
+      <input type="hidden" name="channel_id" value="{{ current_id }}">
+      <input type="text" name="text" id="chat-text" placeholder="Сообщение… (№ ремонта, напр. TV-ASG-2026-00001, станет ссылкой)" autocomplete="off" required>
+      <button class="btn btn-primary" type="submit">Отправить</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function(){
+  var channelId = "{{ current_id or '' }}";
+  var meId = "{{ me_id }}";
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  // Токен берётся из httpOnly-cookie на стороне сервера — JS его не видит и не передаёт.
+  var ws = new WebSocket(proto + '://' + location.host + '/ws');
+  var msgs = document.getElementById('chat-msgs');
+
+  ws.onmessage = function(ev){
+    var data;
+    try { data = JSON.parse(ev.data); } catch(e){ return; }
+    if(data.type === 'chat.message' && String(data.channel_id) === channelId){
+      var m = data.message;
+      var div = document.createElement('div');
+      div.className = 'msg ' + (m.author && String(m.author.id) === meId ? 'mine' : '');
+      var name = (m.author && String(m.author.id) !== meId) ? '<div class="meta" style="font-weight:700">'+m.author.name+'</div>' : '';
+      var ref = m.repair_ref ? '<div style="margin-top:4px"><a class="chip" href="/repairs/by-number/'+m.repair_ref+'">🔧 '+m.repair_ref+'</a></div>' : '';
+      div.innerHTML = name + '<div></div>' + ref;
+      div.querySelector('div').textContent = m.text;
+      msgs.appendChild(div);
+      msgs.scrollTop = msgs.scrollHeight;
+    } else if(data.type && data.type.indexOf('repair.') === 0){
+      // Статусы ремонтов: не мешаем, можно обновить доску.
+    }
+  };
+
+  // Отправка сообщения — обычной HTML-формой (POST /chat/send, PRG-редирект).
+  // WebSocket остаётся только для мгновенного приёма новых сообщений.
+  var msgsBox = document.getElementById('chat-msgs');
+  if(msgsBox){ msgsBox.scrollTop = msgsBox.scrollHeight; }
+})();
+</script>
+{% endblock %}

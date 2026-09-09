@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Repair
 
-# Типы техники из справочника UI (apps/web/lib/catalog.ts -> DEVICE_CLASSES).
+# Типы техники из справочника UI (webui/catalog.py -> DEVICE_CLASSES).
 # Ключи ОБЯЗАНЫ совпадать со значениями, которые фронтенд шлёт в device_type,
 # иначе все номера деградируют в общий префикс "RE".
 DEVICE_PREFIX = {

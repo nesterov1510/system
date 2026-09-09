@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Прайс-лист{% endblock %}
+{% block page_name %}Прайс-лист{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Справочник</p>
+    <h1>Прайс-лист услуг</h1>
+    <p>Ориентировочные цены по типам техники и неисправностям. Используются при приёмке и согласовании стоимости ремонта.</p>
+  </div>
+</div>
+
+<form class="row" method="get" action="/prices" style="margin-bottom:16px">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: неисправность, марка, техника…" style="max-width:420px" autofocus>
+  <button class="btn sm" type="submit">Найти</button>
+</form>
+
+{% if can_edit_prices %}
+<div class="msb-form-card">
+  <div class="msb-form-card__head"><h2>Добавить позицию прайса</h2></div>
+  <form method="post" action="/prices/create" class="msb-form-card__body">
+    <div class="msb-form-grid">
+      <label class="fld"><span class="lbl">Тип техники</span>
+        <select name="device_type">
+          <option value="">— любой —</option>
+          {% for c in device_classes %}
+          <option value="{{ c.value }}">{{ c.value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="fld"><span class="lbl">Марка</span>
+        <input type="text" name="brand" list="brand-list" placeholder="Samsung / любая">
+        <datalist id="brand-list">
+          {% for b in ['Samsung','LG','Xiaomi','Sony','Toshiba','Philips','Hisense','Haier','HP','Lenovo','Apple','Asus'] %}
+          <option value="{{ b }}">{% endfor %}
+        </datalist>
+      </label>
+      <label class="fld"><span class="lbl">Неисправность / услуга *</span>
+        <input type="text" name="fault" required placeholder="напр. замена разъёма питания"></label>
+      <label class="fld"><span class="lbl">Модель / линейка</span>
+        <input type="text" name="model_or_line" placeholder="UE-series / —"></label>
+      <label class="fld"><span class="lbl">Цена от (ман.)</span>
+        <input type="text" name="price_min" inputmode="decimal" placeholder="100"></label>
+      <label class="fld"><span class="lbl">Цена до (ман.)</span>
+        <input type="text" name="price_max" inputmode="decimal" placeholder="300"></label>
+      <label class="fld"><span class="lbl">Средняя (ман.)</span>
+        <input type="text" name="price_avg" inputmode="decimal" placeholder="200"></label>
+      <label class="fld"><span class="lbl">Обычный срок (дней)</span>
+        <input type="number" name="typical_days" min="0" placeholder="2"></label>
+    </div>
+    <div><button class="btn green" type="submit">＋ Добавить в прайс</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr>
+      <th>Техника</th><th>Марка</th><th>Услуга / неисправность</th>
+      <th class="num">Цена от</th><th class="num">Цена до</th><th class="num">Средняя</th>
+      <th class="num">Срок</th>{% if can_edit_prices %}<th></th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for p in price_items %}
+      <tr>
+        <td>{{ p.device_type or '—' }}</td>
+        <td>{{ p.brand or '—' }}</td>
+        <td><b>{{ p.fault or '—' }}</b>{% if p.model_or_line %}<br><small class="muted">{{ p.model_or_line }}</small>{% endif %}</td>
+        <td class="num">{{ p.price_min | money('ман.') if p.price_min else '—' }}</td>
+        <td class="num">{{ p.price_max | money('ман.') if p.price_max else '—' }}</td>
+        <td class="num"><b>{{ p.price_avg | money('ман.') if p.price_avg else '—' }}</b></td>
+        <td class="num">{% if p.typical_days %}{{ p.typical_days }} дн{% else %}—{% endif %}</td>
+        {% if can_edit_prices %}
+        <td class="num">
+          <form method="post" action="/prices/{{ p.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Удалить позицию из прайса?')">
+            <button class="btn sm sec" type="submit">Удалить</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 8 if can_edit_prices else 7 }}" style="padding:28px;text-align:center;color:#8a949f">
+        {% if q %}По запросу «{{ q }}» ничего не найдено.{% else %}Прайс пока пуст. Добавьте первую позицию.{% endif %}
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

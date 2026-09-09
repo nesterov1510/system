@@ -16,6 +16,8 @@ class UserOut(BaseModel):
     # Дополнительные роли (помимо основной `role`). Одному сотруднику можно
     # назначить несколько ролей: напр. admin ещё и master.
     roles: list[str] = []
+    # Индивидуальные права на функции, выданные сверх роли (ключи FEATURES).
+    permissions: list[str] = []
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool = True
@@ -30,6 +32,7 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=6)
     role: str = "operator"
     roles: list[str] | None = None
+    permissions: list[str] | None = None
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool = True
@@ -41,6 +44,7 @@ class UserUpdate(BaseModel):
     telegram: str | None = None
     role: str | None = None
     roles: list[str] | None = None
+    permissions: list[str] | None = None
     city_id: uuid.UUID | None = None
     branch_id: uuid.UUID | None = None
     active: bool | None = None

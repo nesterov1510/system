@@ -19,7 +19,9 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "warranty_text": "VARCHAR(64)",
         "contact2_name": "VARCHAR(255)",
         "contact2_phone": "VARCHAR(32)",
+        "contact2_relation": "VARCHAR(128)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
+        "delivery_district": "VARCHAR(255)",
         "master_payout": "NUMERIC(12, 2)",
         # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
         "reminder_next_at": "TIMESTAMP",
@@ -29,6 +31,7 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     "users": {
         "telegram": "VARCHAR(128)",
         "roles": "JSON",
+        "permissions": "JSON",
     },
     "chat_channel_members": {
         "last_read_at": "TIMESTAMP",

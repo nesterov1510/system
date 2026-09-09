@@ -391,8 +391,14 @@ def _render_turkmen_form(
     payment_text: str = "",
     issued_at: str = "",
     ready_at: str = "",
+    print_stub: dict | None = None,
 ) -> bytes:
     _register_fonts()
+
+    stub = print_stub or {}
+
+    def S(key: str, default: str) -> str:
+        return (stub.get(key) or "").strip() or default
 
     masters = [m for m in (master_names or []) if m]
     fault_list = [f for f in (faults or []) if f]
@@ -437,30 +443,11 @@ def _render_turkmen_form(
         draw_field(left_label, left_value, left_margin, y)
         draw_field(right_label, right_value, left_margin + content_w / 2 + 5 * mm, y)
 
-    y = h - 15 * mm
-    draw("MSB", left_margin, y, 14, bold=True)
-    draw("", left_margin + 22 * mm, y + 1 * mm, 7, bold=True)
+    # Печать начинается ближе к верхнему краю, без хедера «MSB» (по просьбе
+    # заказчика). QR-код печатается только в отрывной части для клиента (внизу).
+    y = h - 8 * mm
+    draw(f"№ {number}", left_margin, y, 11, bold=True)
     y -= 6 * mm
-
-    # Заголовок бланка и подзаголовок ("Сервисный центр ...") не печатаются.
-
-    c.setStrokeColorRGB(0.2, 0.2, 0.2)
-    c.setLineWidth(0.8)
-    c.line(left_margin, y, right_margin, y)
-    y -= 6 * mm
-
-    try:
-        qr_buf = _qr_png(qr_url)
-        qr_size = 20 * mm
-        qr_x = right_margin - qr_size - 2 * mm
-        qr_y = y - qr_size
-        c.drawImage(ImageReader(qr_buf), qr_x, qr_y, width=qr_size, height=qr_size)
-        draw("QR", qr_x + qr_size / 2, qr_y - 3 * mm, 5, align="center")
-    except Exception:
-        pass
-
-    draw(f"№ {number}", left_margin, y, 10, bold=True)
-    y -= 5 * mm
 
     draw("Gelen wagty:", left_margin, y, 7, bold=True)
     draw(accepted_at, left_margin + 25 * mm, y, 7)
@@ -593,10 +580,77 @@ def _render_turkmen_form(
     draw_line(left_margin + 125 * mm, y - 0.5 * mm, 30 * mm)
     y -= 8 * mm
 
-    draw_line(left_margin, y, content_w)
-    y -= 5 * mm
-    footer = t.get("footer") or "MSB"
-    draw(footer, w / 2, y, 6, color=(0.35, 0.35, 0.35), align="center")
+    # ------------------------------------------------------------------
+    # Отрывная часть для клиента (низ листа A4): условия хранения, слова о
+    # ремонте и QR-код для отслеживания статуса. Отделена пунктирной линией
+    # разреза — лист можно разрезать и отдать нижнюю часть клиенту.
+    # ------------------------------------------------------------------
+    y -= 2 * mm
+
+    c.setDash(3, 3)
+    c.setStrokeColorRGB(0.45, 0.45, 0.45)
+    c.setLineWidth(0.5)
+    c.line(left_margin, y, right_margin, y)
+    c.setDash()
+    c.setFont(FONT, 6.5)
+    c.setFillColorRGB(0.45, 0.45, 0.45)
+    c.drawCentredString(w / 2, y - 3.4 * mm, S("cut_hint", "— ✂ отрывная часть для клиента ✂ —"))
+    y -= 9.5 * mm
+
+    draw(S("title", "KLIENTE / ДЛЯ КЛИЕНТА"), left_margin, y, 9, bold=True)
+    draw(f"№ {number}", right_margin, y, 9, bold=True, align="right")
+    y -= 5.5 * mm
+    client_line = " • ".join(filter(None, [client_name, device]))
+    if client_line:
+        draw(_ellipsis(c, client_line, FONT, 6.5, content_w), left_margin, y, 6.5)
+        y -= 4.5 * mm
+
+    # QR-код слева; тексты условий — справа от него.
+    qr_size = 21 * mm
+    qr_top = y
+    qr_ok = False
+    try:
+        qr_buf = _qr_png(qr_url)
+        c.drawImage(ImageReader(qr_buf), left_margin, y - qr_size,
+                    width=qr_size, height=qr_size)
+        qr_ok = True
+    except Exception:
+        pass
+
+    text_x = left_margin + qr_size + 6 * mm
+    text_w = right_margin - text_x
+
+    def _stub_paragraph(title: str, body: str) -> None:
+        nonlocal y
+        if y < 24 * mm:  # место кончилось — не уходим за нижний край листа
+            return
+        draw(title, text_x, y, 6.5, bold=True)
+        y -= 3.6 * mm
+        for chunk in simpleSplit(str(body or ""), FONT, 6.3, text_w):
+            if y < 24 * mm:
+                break
+            draw(chunk, text_x, y, 6.3)
+            y -= 3.3 * mm
+        y -= 1.5 * mm
+
+    _stub_paragraph(S("terms_label", "Условия хранения:"), legal_text)
+    _stub_paragraph(S("consent_label", "О ремонте:"), consent_repair_text)
+
+    # Подпись клиента и дата — сразу под содержимым талона (но не ниже 14 мм
+    # от края листа).
+    if qr_ok:
+        label_y = qr_top - qr_size - 3.2 * mm
+        draw(S("qr_caption", "Сканируйте — статус ремонта"),
+             left_margin + qr_size / 2, label_y, 5.5, align="center")
+        sig_y = max(14 * mm, min(y - 1.5 * mm, label_y - 2 * mm))
+    else:
+        sig_y = max(14 * mm, y - 1.5 * mm)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(0.5)
+    c.line(left_margin, sig_y, left_margin + 58 * mm, sig_y)
+    draw(S("sign_client", "Подпись клиента"), left_margin, sig_y - 4 * mm, 6.5)
+    c.line(right_margin - 40 * mm, sig_y, right_margin, sig_y)
+    draw(S("sign_date", "Дата"), right_margin - 40 * mm, sig_y - 4 * mm, 6.5)
 
     c.save()
     return buf.getvalue()
@@ -635,6 +689,7 @@ def render_blank_pdf(
     payment_text: str = "",
     issued_at: str = "",
     ready_at: str = "",
+    print_stub: dict | None = None,
 ) -> bytes:
     t = normalize_template(template)
     _register_fonts()
@@ -657,6 +712,7 @@ def render_blank_pdf(
             work_done=work_done, warranty_text=warranty_text,
             repair_price=repair_price, payment_text=payment_text,
             issued_at=issued_at, ready_at=ready_at,
+            print_stub=print_stub,
         )
 
     copies = max(1, int(t.get("copies", 2) or 2))

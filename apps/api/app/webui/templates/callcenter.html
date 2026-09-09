@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Колл-центр{% endblock %}
+{% block page_name %}Очередь колл-центра{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Колл-центр</h1>
+    <p>Очередь обзвона: согласование стоимости, готовые к выдаче, просрочка хранения.</p>
+  </div>
+</section>
+<div class="tabs">
+  <a href="/callcenter?kind=all" class="{% if kind=='all' %}active{% endif %}">Все активные</a>
+  <a href="/callcenter?kind=agree" class="{% if kind=='agree' %}active{% endif %}">Согласовать</a>
+  <a href="/callcenter?kind=ready" class="{% if kind=='ready' %}active{% endif %}">Готовы</a>
+  <a href="/callcenter?kind=overdue" class="{% if kind=='overdue' %}active{% endif %}">Просрочка хранения</a>
+</div>
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Номер</th><th>Техника</th><th>Статус</th><th>Клиент</th><th>Телефон</th><th>Хранение до</th></tr></thead>
+    <tbody>
+    {% for r in queue %}
+      <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
+        <td class="mono">{{ r.number }}</td>
+        <td>{{ r.device_type | class_icon }} {{ r.brand or '' }} {{ r.model or '' }}</td>
+        <td><span class="chip {{ r.status | status_chip }}">{{ r.status }}</span></td>
+        <td>{{ r.client_name or '—' }}</td>
+        <td class="mono">{{ r.client_phone or '—' }}</td>
+        <td>{{ r.storage_until.date() if r.storage_until else '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center;padding:30px">Очередь пуста</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

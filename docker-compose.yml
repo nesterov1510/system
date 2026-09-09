@@ -28,7 +28,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-msb}:${POSTGRES_PASSWORD:-msb}@postgres:5432/${POSTGRES_DB:-msb}
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3030}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8085}
       CORS_ORIGINS: '["${WEB_ORIGIN:-http://localhost:3030}"]'
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@msb.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin123}

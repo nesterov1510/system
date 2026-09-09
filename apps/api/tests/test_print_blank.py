@@ -151,3 +151,66 @@ def test_blank_without_data_is_still_printable(client, operator_headers, city_id
     assert "Kemçilik" in text
     assert "Kepillik" in text
     assert repair["number"] in text
+
+
+def test_blank_has_client_stub_with_terms_and_qr(client, operator_headers, city_id):
+    """Внизу бланка A4 — отрывная часть для клиента: условия хранения, слова о
+    ремонте и QR-код для отслеживания статуса."""
+    repair = _new_repair(client, operator_headers, city_id, "blank-stub")
+    text = _pdf_text(client, operator_headers, repair["id"])
+    assert "KLIENTE / ДЛЯ КЛИЕНТА" in text
+    assert "Условия хранения" in text
+    assert "О ремонте" in text
+    assert "Подпись клиента" in text
+    assert "отрывная часть" in text
+
+
+def test_blank_stub_texts_are_editable(client, operator_headers, city_id):
+    """Заголовки талона клиента редактируются в настройках и попадают в PDF."""
+    import asyncio
+
+    from app.db.session import async_session_factory
+    from app.services import settings as settings_svc
+
+    async def set_stub():
+        async with async_session_factory() as db:
+            await settings_svc.set_setting(
+                db, "print_stub",
+                {
+                    "title": "МОЙ ТАЛОН",
+                    "terms_label": "Правила хранения:",
+                    "consent_label": "Про ремонт:",
+                    "qr_caption": "Проверить статус",
+                    "sign_client": "Заказчик",
+                    "sign_date": "Число",
+                    "cut_hint": "— разрезать тут —",
+                },
+            )
+
+    asyncio.run(set_stub())
+    try:
+        repair = _new_repair(client, operator_headers, city_id, "blank-stub-custom")
+        text = _pdf_text(client, operator_headers, repair["id"])
+        assert "МОЙ ТАЛОН" in text
+        assert "Правила хранения:" in text
+        assert "Про ремонт:" in text
+        assert "Заказчик" in text
+        assert "Проверить статус" in text
+    finally:
+        # Вернуть дефолт, чтобы не влиять на другие тесты сессии.
+        async def reset_stub():
+            async with async_session_factory() as db:
+                await settings_svc.set_setting(
+                    db, "print_stub",
+                    {
+                        "title": "KLIENTE / ДЛЯ КЛИЕНТА",
+                        "terms_label": "Условия хранения:",
+                        "consent_label": "О ремонте:",
+                        "qr_caption": "Сканируйте — статус ремонта",
+                        "sign_client": "Подпись клиента",
+                        "sign_date": "Дата",
+                        "cut_hint": "— ✂ отрывная часть для клиента ✂ —",
+                    },
+                )
+
+        asyncio.run(reset_stub())

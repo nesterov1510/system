@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}Приёмка{% endblock %}
+{% block page_name %}Приёмка{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/msb/priemka/priemka.css">
+<link rel="stylesheet" href="/static/msb/priemka/televisions.css">
+{% endblock %}
+{% block content %}
+
+{% if not sel_type %}
+{# ============ ЭКРАН ВЫБОРА ТИПА ТЕХНИКИ (как в эталоне) ============ #}
+<section class="intake-page" aria-labelledby="intakeTitle">
+  <header class="intake-head">
+    <div>
+      <p class="intake-head__eyebrow">Новый ремонт</p>
+      <h1 id="intakeTitle">Выберите тип техники</h1>
+      <p>После выбора откроется карточка приёмки с полями клиента, техники, комплектации, состояния и неисправности.</p>
+    </div>
+  </header>
+
+  <div class="intake-type-grid" role="list" aria-label="Категории ремонта">
+    <a class="intake-type-card intake-type-card--tv" href="/repairs/new?type=Телевизоры" role="listitem">
+      <span class="intake-type-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><rect x="8" y="12" width="48" height="34" rx="5"></rect><path d="M22 54h20M26 46l-3 8M38 46l3 8"></path><path d="M16 20h32v18H16z"></path></svg>
+      </span>
+      <span class="intake-type-card__content"><strong>Телевизоры</strong><small>TV / Smart TV / LED / OLED</small></span>
+      <span class="intake-type-card__arrow" aria-hidden="true">›</span>
+    </a>
+
+    <a class="intake-type-card intake-type-card--monitor" href="/repairs/new?type=Мониторы" role="listitem">
+      <span class="intake-type-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><rect x="7" y="10" width="50" height="34" rx="5"></rect><path d="M32 44v9M20 54h24"></path><circle cx="49" cy="38" r="1.5"></circle></svg>
+      </span>
+      <span class="intake-type-card__content"><strong>Мониторы</strong><small>LCD / LED / Gaming / Office</small></span>
+      <span class="intake-type-card__arrow" aria-hidden="true">›</span>
+    </a>
+
+    <a class="intake-type-card intake-type-card--android" href="/repairs/new?type=ТВ-приставки" role="listitem">
+      <span class="intake-type-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><rect x="9" y="18" width="46" height="30" rx="7"></rect><path d="M22 18l-4-7M42 18l4-7"></path><circle cx="24" cy="31" r="2"></circle><circle cx="40" cy="31" r="2"></circle><path d="M22 39h20"></path></svg>
+      </span>
+      <span class="intake-type-card__content"><strong>Android тюнеры</strong><small>TV Box / Android Box / приставки</small></span>
+      <span class="intake-type-card__arrow" aria-hidden="true">›</span>
+    </a>
+
+    <a class="intake-type-card intake-type-card--pc" href="/repairs/new?type=Компьютеры" role="listitem">
+      <span class="intake-type-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><rect x="7" y="12" width="34" height="27" rx="4"></rect><path d="M14 47h28l5 7H9l5-7z"></path><rect x="45" y="15" width="12" height="31" rx="3"></rect><circle cx="51" cy="39" r="1.5"></circle></svg>
+      </span>
+      <span class="intake-type-card__content"><strong>ПК / ноутбук</strong><small>Компьютеры / ноутбуки / системные блоки</small></span>
+      <span class="intake-type-card__arrow" aria-hidden="true">›</span>
+    </a>
+
+    <a class="intake-type-card intake-type-card--other" href="/repairs/new?type=Другое" role="listitem">
+      <span class="intake-type-card__icon" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><path d="M25 10h14l3 8 8 3v14l-8 3-3 8H25l-3-8-8-3V21l8-3 3-8z"></path><circle cx="32" cy="28" r="7"></circle><path d="M32 35v12M26 47h12"></path></svg>
+      </span>
+      <span class="intake-type-card__content"><strong>Другой ремонт</strong><small>Бытовая техника и прочая электроника</small></span>
+      <span class="intake-type-card__arrow" aria-hidden="true">›</span>
+    </a>
+  </div>
+</section>
+
+{% else %}
+{# ============ ФОРМА ПРИЁМКИ (тип уже выбран) — по эталону televisions ============ #}
+<section class="tv-intake" data-tv-intake>
+  <div class="tv-intake__toolbar">
+    <a class="intake-category-back" href="/repairs/new">← Все категории</a>
+    <div class="tv-intake__toolbar-actions">
+      <button class="tv-delivery-trigger" type="button" data-delivery-open aria-haspopup="dialog" aria-controls="tvDeliveryModal" aria-expanded="false">
+        <span class="tv-delivery-trigger__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7z"></path><circle cx="7" cy="18" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg>
+        </span>
+        <span class="tv-delivery-trigger__copy"><strong data-delivery-label>Доставка</strong><small data-delivery-summary>Не указана</small></span>
+        <span class="tv-delivery-trigger__check" aria-hidden="true">✓</span>
+      </button>
+    </div>
+  </div>
+
+  {% if error %}<div class="flash err" style="margin:12px 0">{{ error }}</div>{% endif %}
+
+  <div class="tv-delivery-modal" id="tvDeliveryModal" data-delivery-modal hidden aria-hidden="true">
+    <div class="tv-delivery-modal__backdrop" data-delivery-close></div>
+    <div class="tv-delivery-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="tvDeliveryTitle">
+      <header>
+        <span class="tv-delivery-modal__icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h11v10H3zM14 9h4l3 3v4h-7z"></path><circle cx="7" cy="18" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></span>
+        <div><h2 id="tvDeliveryTitle">Доставка</h2><p>Укажите район, куда нужно доставить технику после ремонта.</p></div>
+        <button type="button" class="tv-delivery-modal__close" data-delivery-close aria-label="Закрыть">×</button>
+      </header>
+      <div class="tv-delivery-modal__body">
+        <label class="tv-field" for="tvDeliveryDistrict"><span>Район доставки *</span><input id="tvDeliveryDistrict" type="text" autocomplete="off" placeholder="Например: Парахат 3/2" data-delivery-district value="{{ form.get('delivery_district','') }}"></label>
+        <p>После сохранения возле доставки появится галочка, а район будет виден прямо на странице приёмки.</p>
+      </div>
+      <footer>
+        <button type="button" class="tv-delivery-remove" data-delivery-remove hidden>Убрать доставку</button>
+        <span></span>
+        <button type="button" class="tv-delivery-cancel" data-delivery-close>Отмена</button>
+        <button type="button" class="tv-delivery-save" data-delivery-save>Сохранить</button>
+      </footer>
+    </div>
+  </div>
+
+  <form class="tv-intake-form" method="post" action="/repairs/new" enctype="multipart/form-data" data-tv-intake-form novalidate>
+    <input type="hidden" name="device_type" value="{{ form.get('device_type', sel_type) }}">
+    <input type="hidden" name="is_delivery" value="0" data-delivery-enabled>
+    <input type="hidden" name="delivery_district" value="{{ form.get('delivery_district','') }}" data-delivery-district-input>
+    <input type="hidden" name="city_id" value="{{ cities[0].id if cities else '' }}">
+
+    <section class="tv-form-card tv-form-card--identity">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">01</div>
+        <div>
+          <h2>{{ sel_type }}</h2>
+          <p>Марка, модель и серийный номер одной строкой.</p>
+        </div>
+      </header>
+
+      <div class="tv-field">
+        <label for="tvIdentity">Марка — Модель — SN</label>
+        <div class="tv-identity-input-wrap">
+          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" placeholder="Samsung-QE55Q70-SN123456" data-tv-identity>
+          <span class="tv-identity-input-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 21h8M12 19v2"></path></svg>
+          </span>
+        </div>
+        <p class="tv-field__hint">Пример: <b>Samsung-QE55Q70-SN123456</b>. Если внутри модели/SN есть дефисы: <b>Samsung - QE55-Q70 - SN-12-345</b>. Можно заполнить поля ниже вручную.</p>
+
+        <input type="hidden" name="brand" data-tv-brand-input value="{{ form.get('brand','') }}">
+        <input type="hidden" name="model" data-tv-model-input value="{{ form.get('model','') }}">
+        <input type="hidden" name="serial" data-tv-sn-input value="{{ form.get('serial','') }}">
+
+        <div class="tv-identity-result" aria-live="polite">
+          <div class="tv-identity-part" data-tv-identity-part="brand">
+            <span>Марка</span><strong data-tv-brand>{% if form.get('brand') %}{{ form.get('brand') }}{% else %}Не указана{% endif %}</strong>
+          </div>
+          <div class="tv-identity-separator" aria-hidden="true">→</div>
+          <div class="tv-identity-part" data-tv-identity-part="model">
+            <span>Модель</span><strong data-tv-model>{% if form.get('model') %}{{ form.get('model') }}{% else %}Не указана{% endif %}</strong>
+          </div>
+          <div class="tv-identity-separator" aria-hidden="true">→</div>
+          <div class="tv-identity-part" data-tv-identity-part="sn">
+            <span>SN</span><strong data-tv-sn>{% if form.get('serial') %}{{ form.get('serial') }}{% else %}Не указан{% endif %}</strong>
+          </div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
+          <div class="tv-customer-grid" style="margin-top:10px">
+            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" placeholder="Samsung" value="{{ form.get('brand','') }}"></label>
+            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" placeholder="QE55Q70" value="{{ form.get('model','') }}"></label>
+            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" placeholder="SN123456" value="{{ form.get('serial','') }}"></label>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">02</div>
+        <div>
+          <h2>Комплектация</h2>
+          <p>Что клиент передал вместе с техникой.</p>
+        </div>
+      </header>
+
+      <div class="tv-check-grid" role="group" aria-label="Комплектация">
+        <label class="tv-check"><input type="checkbox" name="equipment" value="remote"><span class="tv-check__box"></span><span>Пульт</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="power_cable"><span class="tv-check__box"></span><span>Шнур питания</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="legs"><span class="tv-check__box"></span><span>Ножки / подставка</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="wall_mount"><span class="tv-check__box"></span><span>Настенное крепление</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="box_ir_eye"><span class="tv-check__box"></span><span>Глазок / ИК-приёмник</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="box"><span class="tv-check__box"></span><span>Коробка</span></label>
+        <label class="tv-check tv-check--complete-box"><input type="checkbox" name="equipment" value="all_in_box"><span class="tv-check__box"></span><span>Всё в комплекте в коробке</span></label>
+      </div>
+
+      <div class="tv-field tv-field--spaced">
+        <label for="tvEquipmentOther">Другое в комплекте</label>
+        <input id="tvEquipmentOther" name="equipment_other" type="text" placeholder="Например: HDMI-кабель, приставка, документы…">
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head tv-form-card__head--photo">
+        <div class="tv-form-card__number">03</div>
+        <div>
+          <h2>Состояние при приёмке</h2>
+          <p>Зафиксируйте внешнее состояние до начала ремонта.</p>
+        </div>
+        <div class="tv-photo-actions">
+          <button class="tv-camera-btn" type="button" data-camera-open>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+            Сфотографировать
+          </button>
+          <button class="tv-gallery-btn" type="button" data-gallery-open>＋ Из файлов</button>
+        </div>
+      </header>
+
+      <input class="tv-photo-input" type="file" accept="image/*" capture="environment" data-camera-input name="photo_camera" aria-label="Сфотографировать состояние">
+      <input class="tv-photo-input" type="file" accept="image/*" multiple data-gallery-input name="photos" aria-label="Добавить фотографии из файлов">
+
+      <div class="tv-check-grid tv-check-grid--condition" role="group" aria-label="Состояние техники">
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="screen_scratches"><span class="tv-check__box"></span><span>Царапины на экране</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="body_scratches"><span class="tv-check__box"></span><span>Царапины на корпусе</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="broken_parts"><span class="tv-check__box"></span><span>Есть сломанные места</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="other_service"><span class="tv-check__box"></span><span>Был в другом сервисе</span></label>
+      </div>
+
+      <div class="tv-field tv-field--spaced">
+        <label for="tvConditionOther">Дополнительное описание состояния</label>
+        <textarea id="tvConditionOther" name="condition_other" rows="3" placeholder="Например: трещина снизу корпуса, отсутствует винт, следы вскрытия…">{{ form.get('condition_other','') }}</textarea>
+      </div>
+
+      <div class="tv-photo-list" data-photo-list hidden>
+        <div class="tv-photo-list__head">
+          <strong>Фото при приёмке</strong>
+          <span data-photo-count>0 фото</span>
+        </div>
+        <div class="tv-photo-grid" data-photo-grid></div>
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">04</div>
+        <div>
+          <h2>Что не работает</h2>
+          <p>Не диагноз мастера — только описание со слов заказчика.</p>
+        </div>
+      </header>
+      <div class="tv-field">
+        <label for="tvCustomerComplaint">Неисправность по словам заказчика</label>
+        <textarea id="tvCustomerComplaint" name="fault_client" rows="5" placeholder="Например: включается, есть звук, но нет изображения. Иногда перезагружается…">{{ form.get('fault_client','') }}</textarea>
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">05</div>
+        <div>
+          <h2>Заказчик</h2>
+          <p>Основной владелец или человек, который сдаёт технику.</p>
+        </div>
+      </header>
+
+      <div class="tv-customer-grid">
+        <div class="tv-field">
+          <label for="tvCustomerName">Имя заказчика *</label>
+          <input id="tvCustomerName" name="full_name" type="text" autocomplete="name" placeholder="Имя и фамилия" value="{{ form.get('full_name','') }}" required>
+        </div>
+        <div class="tv-field">
+          <label for="tvCustomerPhone">Номер телефона *</label>
+          <input id="tvCustomerPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+993 6X XX XX XX" value="{{ form.get('phone','') }}" required>
+        </div>
+      </div>
+
+      <div class="tv-extra-phones" data-extra-phones></div>
+      <button class="tv-inline-add" type="button" data-add-phone>
+        <span>＋</span> Добавить ещё номер телефона
+      </button>
+
+      <div class="tv-contact-divider"><span>Дополнительный человек</span></div>
+
+      <button class="tv-secondary-contact-add" type="button" data-secondary-contact-open aria-expanded="false">
+        <span class="tv-secondary-contact-add__icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="4"></circle><path d="M2 21c0-4.2 2.6-7 7-7 2.1 0 3.8.6 5 1.7M18 8v6M15 11h6"></path></svg>
+        </span>
+        <span><strong>Добавить доставщика / второго хозяина</strong><small>Имя, телефон и зачем этот человек добавлен к приёмке</small></span>
+        <b data-secondary-contact-sign>＋</b>
+      </button>
+
+      <div class="tv-secondary-contact" data-secondary-contact hidden>
+        <div class="tv-secondary-contact__head">
+          <div>
+            <strong>Дополнительный контакт</strong>
+            <span>Человек, которому можно сообщать информацию по этому ремонту.</span>
+          </div>
+          <button type="button" data-secondary-contact-remove>Удалить</button>
+        </div>
+
+        <div class="tv-customer-grid">
+          <div class="tv-field">
+            <label for="tvSecondName">Имя</label>
+            <input id="tvSecondName" name="contact2_name" type="text" placeholder="Имя и фамилия" value="{{ form.get('contact2_name','') }}">
+          </div>
+          <div class="tv-field">
+            <label for="tvSecondPhone">Телефон</label>
+            <input id="tvSecondPhone" name="contact2_phone" type="tel" inputmode="tel" placeholder="+993 6X XX XX XX" value="{{ form.get('contact2_phone','') }}">
+          </div>
+        </div>
+
+        <div class="tv-field tv-field--spaced">
+          <label for="tvSecondRelation">Кто он / зачем добавлен</label>
+          <input id="tvSecondRelation" name="contact2_relation" type="text" list="secondaryRelationOptions" placeholder="Например: доставщик, второй хозяин, брат заказчика…" value="{{ form.get('contact2_relation','') }}">
+          <datalist id="secondaryRelationOptions">
+            <option value="Доставщик"></option>
+            <option value="Второй хозяин"></option>
+            <option value="Родственник"></option>
+            <option value="Представитель компании"></option>
+          </datalist>
+        </div>
+      </div>
+
+      <div class="tv-contact-divider"><span>Организация и согласия</span></div>
+      <div class="tv-customer-grid">
+        <label class="tv-field"><span>Город / филиал</span>
+          <select name="city_id_select" disabled>
+            {% for c in cities %}<option>{{ c.name }}</option>{% endfor %}
+          </select>
+        </label>
+        <label class="tv-field"><span>Мастер-исполнитель</span>
+          <select name="master_id">
+            <option value="">— в очередь (не назначен) —</option>
+            {% for m in masters %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="tv-check-grid" style="margin-top:12px">
+        <label class="tv-check"><input type="checkbox" name="consent_pdn" required><span class="tv-check__box"></span><span>Согласие на обработку персональных данных *</span></label>
+        <label class="tv-check"><input type="checkbox" name="consent_storage" required><span class="tv-check__box"></span><span>Ознакомлен с условиями хранения техники *</span></label>
+        <label class="tv-check"><input type="checkbox" name="consent_repair"><span class="tv-check__box"></span><span>Согласие на диагностику и ремонт</span></label>
+      </div>
+    </section>
+
+    <footer class="tv-intake-footer">
+      <div>
+        <strong>Форма приёмки · {{ sel_type }}</strong>
+        <span>После сохранения будет создан ремонт и напечатана этикетка.</span>
+      </div>
+      <button class="tv-intake-preview-btn" type="submit" style="background:var(--accent,#ff6a00)">💾 Сохранить</button>
+    </footer>
+  </form>
+</section>
+{% endif %}
+{% endblock %}
+{% block page_js %}
+<script src="/static/msb/priemka/televisions.js"></script>
+<script>
+// Ручные поля марки/модели/SN приоритетны над разбором строки identity.
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.querySelector('[data-tv-intake-form]');
+  if (!form) return;
+  const sync = () => {
+    const map = [['brand_manual','brand'],['model_manual','model'],['serial_manual','serial']];
+    for (const [manual, hidden] of map) {
+      const m = form.querySelector(`[name="${manual}"]`);
+      const h = form.querySelector(`[name="${hidden}"]`);
+      if (m && h && m.value.trim()) h.value = m.value.trim();
+    }
+  };
+  // Проверка обязательных полей перед сохранением (кнопка одна — «Сохранить»).
+  const check = () => {
+    const fields = [
+      form.querySelector('[data-tv-identity]'),
+      form.querySelector('#tvCustomerComplaint'),
+      form.querySelector('#tvCustomerName'),
+      form.querySelector('#tvCustomerPhone'),
+    ].filter(Boolean);
+    form.querySelectorAll('.tv-form-card.has-check-error').forEach(c => c.classList.remove('has-check-error'));
+    const missing = fields.filter(f => !String(f.value || '').trim());
+    if (missing.length) {
+      missing.forEach(f => f.closest('.tv-form-card')?.classList.add('has-check-error'));
+      missing[0]?.focus();
+      return false;
+    }
+    return true;
+  };
+  form.addEventListener('submit', (e) => {
+    sync();
+    if (!check()) e.preventDefault();
+  });
+  form.querySelectorAll('[name="brand_manual"],[name="model_manual"],[name="serial_manual"]')
+      .forEach(i => i.addEventListener('input', sync));
+});
+</script>
+{% endblock %}

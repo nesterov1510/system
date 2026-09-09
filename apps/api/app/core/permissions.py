@@ -44,6 +44,107 @@ CALLCENTER_ROLES = (CALLCENTER, ADMIN, MANAGER, OPERATOR)
 PRINT_QUEUE_ROLES = (ADMIN, MANAGER, OPERATOR)
 
 
+# ---------------------------------------------------------------------------
+# Каталог функций, которые администратор может выдавать пользователю
+# индивидуально — в дополнение к тому, что даёт роль (страница /admin/users,
+# блок «Права доступа»). Ключ `key` хранится в User.extra_permissions;
+# `roles` — роли, у которых функция включена по умолчанию (без гранта).
+# ---------------------------------------------------------------------------
+FEATURES: list[dict] = [
+    {
+        "key": "cash",
+        "label": "Касса",
+        "desc": "Принимать платежи от клиентов.",
+        "roles": CASHIER_ROLES,
+    },
+    {
+        "key": "refund",
+        "label": "Сторно платежей",
+        "desc": "Отменять (сторнировать) проведённые платежи.",
+        "roles": (ADMIN, MANAGER),
+    },
+    {
+        "key": "finance",
+        "label": "Финансы ремонта",
+        "desc": "Менять цену, себестоимость и выплату мастерам в ремонте.",
+        "roles": FINANCE_ROLES,
+    },
+    {
+        "key": "stock",
+        "label": "Каталог запчастей",
+        "desc": "Создавать, менять и архивировать позиции склада.",
+        "roles": STOCK_CATALOG_ROLES,
+    },
+    {
+        "key": "assign",
+        "label": "Назначение мастеров",
+        "desc": "Назначать и менять мастеров на ремонты.",
+        "roles": ASSIGN_ROLES,
+    },
+    {
+        "key": "finish",
+        "label": "Закрытие ремонтов",
+        "desc": "Переводить ремонт в «Готово к выдаче» и отправлять клиенту SMS.",
+        "roles": FINISH_ROLES,
+    },
+    {
+        "key": "analytics",
+        "label": "Аналитика",
+        "desc": "Просматривать аналитику и отчёты.",
+        "roles": ANALYTICS_ROLES,
+    },
+    {
+        "key": "callcenter",
+        "label": "Call-центр",
+        "desc": "Работать с очередью call-центра.",
+        "roles": CALLCENTER_ROLES,
+    },
+    {
+        "key": "device",
+        "label": "Паспорт техники",
+        "desc": "Менять марку/модель/серийник уже принятого ремонта.",
+        "roles": SENIOR_ROLES,
+    },
+    {
+        "key": "logs",
+        "label": "Мониторинг логов",
+        "desc": "Просматривать журнал отладки (Мониторинг в админке).",
+        "roles": (ADMIN,),
+    },
+]
+
+FEATURE_KEYS: set[str] = {f["key"] for f in FEATURES}
+FEATURE_BY_KEY: dict[str, dict] = {f["key"]: f for f in FEATURES}
+
+
+def role_grants_feature(user, key: str) -> bool:
+    """Даёт ли РОЛЬ пользователя эту функцию (без учёта индивидуального гранта)."""
+    feat = FEATURE_BY_KEY.get(key)
+    if not feat or not user:
+        return False
+    return has_any_role(user, *feat["roles"])
+
+
+def user_grants(user) -> set[str]:
+    """Индивидуально выданные пользователю права (ключи функций)."""
+    perms = getattr(user, "permissions", None)
+    if isinstance(perms, list):
+        return {p for p in perms if p in FEATURE_KEYS}
+    return set()
+
+
+def has_feature(user, key: str) -> bool:
+    """Есть ли у пользователя право на функцию: роль ИЛИ индивидуальный грант.
+
+    Администратор имеет все права всегда.
+    """
+    if not user:
+        return False
+    if user.has_role(ADMIN):
+        return True
+    return key in user_grants(user)
+
+
 def has_any_role(user, *roles: str) -> bool:
     """Есть ли у пользователя хотя бы одна из ролей (учитывая дополнительные)."""
     return bool(user) and user.has_role(*roles)
@@ -59,21 +160,21 @@ def is_master_only(user) -> bool:
 # --------------------------------------------------------------------------
 def can_take_payment(user) -> bool:
     """Принять платёж от клиента (касса)."""
-    return has_any_role(user, *CASHIER_ROLES)
+    return has_any_role(user, *CASHIER_ROLES) or has_feature(user, "cash")
 
 
 def can_refund_payment(user) -> bool:
     """Отменить (сторнировать) платёж."""
-    return has_any_role(user, ADMIN, MANAGER)
+    return has_any_role(user, ADMIN, MANAGER) or has_feature(user, "refund")
 
 
 def can_edit_finances(user) -> bool:
     """Менять price_final / cost_amount / master_payout / paid."""
-    return has_any_role(user, *FINANCE_ROLES)
+    return has_any_role(user, *FINANCE_ROLES) or has_feature(user, "finance")
 
 
 def can_view_analytics(user) -> bool:
-    return has_any_role(user, *ANALYTICS_ROLES)
+    return has_any_role(user, *ANALYTICS_ROLES) or has_feature(user, "analytics")
 
 
 # --------------------------------------------------------------------------
@@ -81,7 +182,7 @@ def can_view_analytics(user) -> bool:
 # --------------------------------------------------------------------------
 def can_edit_stock_catalog(user) -> bool:
     """Создавать/менять/архивировать позиции каталога запчастей."""
-    return has_any_role(user, *STOCK_CATALOG_ROLES)
+    return has_any_role(user, *STOCK_CATALOG_ROLES) or has_feature(user, "stock")
 
 
 def can_add_repair_part(user) -> bool:
@@ -113,17 +214,17 @@ def can_edit_device_info(user) -> bool:
     Паспорт техники — это то, что напечатано в бланке и на этикетке, поэтому
     меняют его старшие роли. Мастеру достаточно сообщить оператору.
     """
-    return has_any_role(user, *SENIOR_ROLES)
+    return has_any_role(user, *SENIOR_ROLES) or has_feature(user, "device")
 
 
 def can_assign_masters(user) -> bool:
     """Назначать/менять мастеров и помощников на ремонт."""
-    return has_any_role(user, *ASSIGN_ROLES)
+    return has_any_role(user, *ASSIGN_ROLES) or has_feature(user, "assign")
 
 
 def can_finish_repair(user) -> bool:
     """Перевести в «Готово к выдаче» и отправить клиенту SMS."""
-    return has_any_role(user, *FINISH_ROLES)
+    return has_any_role(user, *FINISH_ROLES) or has_feature(user, "finish")
 
 
 def accepted_by_me(user, repair) -> bool:
@@ -176,4 +277,13 @@ def can_delete_client(user) -> bool:
 
 
 def can_view_callcenter_queue(user) -> bool:
-    return has_any_role(user, *CALLCENTER_ROLES)
+    return has_any_role(user, *CALLCENTER_ROLES) or has_feature(user, "callcenter")
+
+
+def can_view_logs(user) -> bool:
+    """Просмотр мониторинга логов — отдельная функция, не только роль admin.
+
+    Администратор видит мониторинг всегда (см. `has_feature`); остальным
+    право выдаётся индивидуально на странице «Сотрудники».
+    """
+    return has_feature(user, "logs")

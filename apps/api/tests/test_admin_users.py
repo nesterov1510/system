@@ -50,6 +50,53 @@ def test_admin_user_crud(client, admin_headers, operator_headers):
     assert r6.status_code in (401, 403)
 
 
+def test_admin_user_permissions_grant_revoke(client, admin_headers):
+    # Создаём оператора без прав
+    r = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={
+            "name": "Сотрудник",
+            "email": "staff@msb.local",
+            "password": "staff123",
+            "role": "operator",
+            "permissions": ["cash"],
+        },
+    )
+    assert r.status_code == 201
+    uid = r.json()["id"]
+    assert r.json()["permissions"] == ["cash"]
+
+    # Выдаём дополнительные права
+    r2 = client.patch(
+        f"/api/admin/users/{uid}",
+        headers=admin_headers,
+        json={"permissions": ["cash", "analytics", "finish"]},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["permissions"] == ["cash", "analytics", "finish"]
+
+    # Снятие всех прав -> []
+    r3 = client.patch(
+        f"/api/admin/users/{uid}",
+        headers=admin_headers,
+        json={"permissions": []},
+    )
+    assert r3.status_code == 200
+    assert r3.json()["permissions"] == []
+
+    # Неизвестные ключи отбрасываются
+    r4 = client.patch(
+        f"/api/admin/users/{uid}",
+        headers=admin_headers,
+        json={"permissions": ["cash", "superpower"]},
+    )
+    assert r4.status_code == 200
+    assert r4.json()["permissions"] == ["cash"]
+
+    client.delete(f"/api/admin/users/{uid}", headers=admin_headers)
+
+
 def test_operator_cannot_manage_users(client, operator_headers):
     r = client.get("/api/admin/users", headers=operator_headers)
     assert r.status_code == 403

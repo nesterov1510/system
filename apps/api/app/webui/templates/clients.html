@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Клиенты{% endblock %}
+{% block page_name %}Клиенты{% endblock %}
+{% block topbar_actions %}<a class="btn sm" href="/repairs/new">➕ Новая приёмка</a>{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Клиенты</h1>
+    <p>База заказчиков и история их ремонтов.</p>
+  </div>
+  <a class="btn btn-primary" href="/repairs/new">＋ Новая приёмка</a>
+</section>
+<form class="row" method="get" action="/clients" style="margin-bottom:14px">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск по имени или телефону…" style="max-width:380px" autofocus>
+  <button class="btn sm" type="submit">Найти</button>
+</form>
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Клиент</th><th>Телефон</th><th class="num">Ремонтов</th></tr></thead>
+    <tbody>
+    {% for item in clients %}
+      <tr class="clickable" onclick="location.href='/clients/{{ item.c.id }}'">
+        <td><b>{{ item.c.full_name }}</b>{% if item.c.deleted_at %} <span class="chip red">удалён</span>{% endif %}</td>
+        <td class="mono">{{ item.c.phone }}</td>
+        <td class="num"><span class="chip">{{ item.count }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="muted" style="text-align:center;padding:30px">Клиенты не найдены</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

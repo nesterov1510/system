@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#101820">
+  <title>Ремонт {{ d.number }} — MSB-CBMRS</title>
+  <link rel="stylesheet" href="/static/msb/base.css">
+  <style>
+    .pub-wrap{min-height:100vh;display:grid;place-items:center;padding:24px;background:linear-gradient(155deg,#0d151c 0%,#14232e 58%,#192d39 100%)}
+    .pub-card{width:min(520px,100%);background:#fff;border:1px solid #dde3e8;border-radius:20px;padding:30px;box-shadow:0 28px 70px rgba(6,12,18,.35)}
+    .pub-logo{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+    .pub-logo .badge{width:54px;height:42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(145deg,#ff932e,#ff6a00);color:#fff;font-weight:900;box-shadow:0 12px 28px rgba(255,122,0,.22)}
+    .pub-logo strong{display:block;font-size:15px}.pub-logo small{display:block;color:#7f929f;font-size:11px;margin-top:2px}
+    .pub-kicker{font-size:11px;font-weight:900;letter-spacing:.14em;color:#e87000;text-transform:uppercase}
+    .pub-num{font-family:ui-monospace,Menlo,monospace;font-size:20px;font-weight:800;margin:6px 0 2px}
+    .pub-dev{color:#19212b;font-size:16px;margin-bottom:18px}
+    .pub-status{display:inline-flex;align-items:center;gap:8px;background:#fff3e8;color:#d76600;border:1px solid #ffe0bf;border-radius:12px;padding:10px 16px;font-weight:800;margin-bottom:20px}
+    .pub-bar{height:10px;background:#e7ecf1;border-radius:8px;overflow:hidden;margin:8px 0 6px}
+    .pub-bar i{display:block;height:100%;background:linear-gradient(90deg,#ff932e,#ff6a00);border-radius:8px}
+    .pub-meta{display:grid;grid-template-columns:auto 1fr;gap:9px 16px;margin-top:20px;font-size:13px}
+    .pub-meta dt{color:#75808d}.pub-meta dd{margin:0;font-weight:600;text-align:right}
+    .pub-legal{margin-top:20px;padding:13px 15px;background:#f6f8fa;border:1px solid #e4e9ee;border-radius:12px;font-size:12px;color:#5c6873;line-height:1.55}
+    .pub-stats{margin-top:16px;font-size:12px;color:#75808d}
+  </style>
+</head>
+<body>
+  <main class="pub-wrap">
+    <section class="pub-card">
+      <div class="pub-logo">
+        <div class="badge">MSB</div>
+        <div><strong>MSB-CBMRS</strong><small>M.E.R.Y.O.S.A.B Electronics · Ашхабад</small></div>
+      </div>
+
+      <span class="pub-kicker">Статус ремонта</span>
+      <div class="pub-num">{{ d.number }}</div>
+      <div class="pub-dev">{{ d.device_type }} {% if d.brand %}{{ d.brand }}{% endif %} {% if d.model %}{{ d.model }}{% endif %}</div>
+
+      <div class="pub-status">● {{ d.status }}</div>
+
+      <div class="pub-bar"><i style="width:{{ (progress_idx / 6 * 100) | int }}%"></i></div>
+      <small style="color:#8a949d">Этап {{ progress_idx + 1 }} из 7</small>
+
+      <dl class="pub-meta">
+        <dt>Принято</dt><dd>{{ d.accepted_at | date }}</dd>
+        {% if d.ready_at %}<dt>Готово с</dt><dd>{{ d.ready_at | date }}</dd>{% endif %}
+        {% if d.eta_days %}<dt>Ориентир. срок</dt><dd>{{ d.eta_days }} дн.</dd>{% endif %}
+        {% if d.storage_until %}<dt>Хранение до</dt><dd>{{ d.storage_until | date }}</dd>{% endif %}
+        {% if d.branch_phone %}<dt>Телефон сервиса</dt><dd class="mono">{{ d.branch_phone }}</dd>{% endif %}
+      </dl>
+
+      {% if d.complectation %}
+      <div style="margin-top:14px">
+        <small style="color:#75808d;font-weight:800;text-transform:uppercase;letter-spacing:.06em">Комплектация</small>
+        <div style="margin-top:6px">{% for k, v in d.complectation.items() %}{% if v %}<span class="chip" style="background:#eef2f5;color:#52616d;border-radius:8px;padding:4px 9px;font-size:11px;font-weight:700;margin:2px;display:inline-block">{{ k }}</span>{% endif %}{% endfor %}</div>
+      </div>
+      {% endif %}
+
+      {% if d.storage_text %}
+      <div class="pub-legal">⚠ {{ d.storage_text }}</div>
+      {% endif %}
+
+      {% if d.city_stats and d.city_stats.n and d.city_stats.n >= 3 %}
+      <p class="pub-stats">Как обычно у нас в городе: {{ d.device_type }} — около {{ d.city_stats.median_days }} дн. (по {{ d.city_stats.n }} завершенным ремонтам).</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

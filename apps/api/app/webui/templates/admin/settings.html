@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block page_name %}Настройки{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Администрирование</p>
+    <h1>Настройки системы</h1>
+    <p>Параметры печати бланков и этикеток, SMS-шлюз, срок хранения и общие данные сервисного центра.</p>
+  </div>
+</div>
+
+{% if saved %}
+<div class="flash ok">
+  {% if saved == 'test' %}🖨 Тестовое задание отправлено в очередь печати.{% else %}✓ Настройки сохранены.{% endif %}
+</div>
+{% endif %}
+
+<div class="tabs">
+  <a href="/admin/settings?section=general" class="{% if section=='general' %}active{% endif %}">Общие</a>
+  <a href="/admin/settings?section=print" class="{% if section=='print' %}active{% endif %}">Печать</a>
+  <a href="/admin/settings?section=printer" class="{% if section=='printer' %}active{% endif %}">Принтер и этикетки</a>
+  <a href="/admin/settings?section=sms" class="{% if section=='sms' %}active{% endif %}">SMS-шлюз</a>
+  <a href="/admin/settings?section=ip" class="{% if section=='ip' %}active{% endif %}">🛡 IP-контроль</a>
+</div>
+
+{% if section == 'general' %}
+{# ===================== ОБЩИЕ ===================== #}
+<form method="post" action="/admin/settings/general">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Сервисный центр</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">Название (бренд)</span>
+          <input type="text" name="brand_name" value="{{ brand.name if brand and brand.name else 'MSB' }}"></label>
+        <label class="fld"><span class="lbl">Срок хранения техники (месяцев)</span>
+          <input type="number" name="storage_months" min="1" value="{{ storage.months if storage and storage.months else 3 }}"></label>
+        <label class="fld"><span class="lbl">Валюта — код</span>
+          <input type="text" name="currency_code" value="{{ currency.code if currency else 'TMT' }}"></label>
+        <label class="fld"><span class="lbl">Валюта — символ</span>
+          <input type="text" name="currency_symbol" value="{{ currency.symbol if currency else 'ман.' }}"></label>
+        <label class="fld"><span class="lbl">Знаков после запятой (цены)</span>
+          <input type="number" name="currency_decimals" min="0" max="3" value="{{ currency.decimals if currency and currency.decimals is not none else 0 }}"></label>
+      </div>
+    </div>
+    <div class="msb-form-card__foot">
+      <button class="btn primary" type="submit">Сохранить общие настройки</button>
+    </div>
+  </div>
+</form>
+
+{% elif section == 'print' %}
+{# ===================== ПЕЧАТЬ ===================== #}
+<form method="post" action="/admin/settings/print">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Автопечать при приёмке</h2></div>
+    <div class="msb-form-card__body">
+      <label class="fld"><span class="lbl">Что печатать автоматически после приёмки</span>
+        <select name="intake_auto_print">
+          <option value="label" {% if intake_print == 'label' %}selected{% endif %}>Этикетка 58×38 (на технику)</option>
+          <option value="blank" {% if intake_print == 'blank' %}selected{% endif %}>Бланк A4 (талон клиента)</option>
+          <option value="both" {% if intake_print == 'both' %}selected{% endif %}>Этикетку и бланк</option>
+          <option value="none" {% if intake_print == 'none' %}selected{% endif %}>Ничего (печатать вручную)</option>
+        </select>
+        <span class="hint">Этикетка клеится на технику при клиенте; бланк печатается по кнопке в карточке ремонта.</span></label>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Юридические тексты (печатаются на бланке)</h2></div>
+    <div class="msb-form-card__body">
+      <label class="fld"><span class="lbl">Условия хранения техники</span>
+        <textarea name="legal_text" rows="4">{{ settings_svc_legal or '' }}</textarea>
+        <span class="hint">Печатается в отрывной части для клиента под заголовком «Условия хранения».</span></label>
+      <label class="fld"><span class="lbl">Слова о ремонте (согласие)</span>
+        <textarea name="consent_repair_text" rows="4">{{ settings_svc_consent or '' }}</textarea>
+        <span class="hint">Печатается в отрывной части для клиента под заголовком «О ремонте».</span></label>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Отрывная часть для клиента — заголовки и подписи</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">Заголовок талона</span>
+          <input type="text" name="stub_title" value="{{ print_stub.title or '' }}"></label>
+        <label class="fld"><span class="lbl">Заголовок блока условий</span>
+          <input type="text" name="stub_terms_label" value="{{ print_stub.terms_label or '' }}"></label>
+        <label class="fld"><span class="lbl">Заголовок блока о ремонте</span>
+          <input type="text" name="stub_consent_label" value="{{ print_stub.consent_label or '' }}"></label>
+        <label class="fld"><span class="lbl">Подпись под QR-кодом</span>
+          <input type="text" name="stub_qr_caption" value="{{ print_stub.qr_caption or '' }}"></label>
+        <label class="fld"><span class="lbl">Подпись клиента (строка)</span>
+          <input type="text" name="stub_sign_client" value="{{ print_stub.sign_client or '' }}"></label>
+        <label class="fld"><span class="lbl">Подпись «Дата»</span>
+          <input type="text" name="stub_sign_date" value="{{ print_stub.sign_date or '' }}"></label>
+      </div>
+      <label class="fld"><span class="lbl">Текст линии разреза</span>
+        <input type="text" name="stub_cut_hint" value="{{ print_stub.cut_hint or '' }}"></label>
+      <p class="hint">Пустое поле = стандартная надпись. Все тексты видны на бланке A4 внизу листа.</p>
+    </div>
+    <div class="msb-form-card__foot">
+      <button class="btn primary" type="submit">Сохранить печать</button>
+    </div>
+  </div>
+</form>
+
+{% elif section == 'printer' %}
+{# ===================== ПРИНТЕР ===================== #}
+<form method="post" action="/admin/settings/printer">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>А4-принтер (бланки приёмки)</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">Режим печати</span>
+          <select name="printer_mode">
+            <option value="agent" {% if printer.mode=='agent' %}selected{% endif %}>Через print-agent (рекомендуется)</option>
+            <option value="ipp" {% if printer.mode=='ipp' %}selected{% endif %}>Напрямую по IPP/CUPS</option>
+          </select></label>
+        <label class="fld"><span class="lbl">Имя принтера / очереди</span>
+          <input type="text" name="printer_name" value="{{ printer.name or '' }}" placeholder="напр. EPSON_L3250"></label>
+        <label class="fld"><span class="lbl">IP компьютера с принтером (для IPP)</span>
+          <input type="text" name="printer_ip" value="{{ printer.ip or '' }}" placeholder="192.168.x.x"></label>
+        <label class="fld"><span class="lbl">Порт</span>
+          <input type="number" name="printer_port" value="{{ printer.port or 631 }}"></label>
+      </div>
+    </div>
+    <div class="msb-form-card__foot">
+      <button class="btn sec" type="submit" formaction="/admin/settings/printer/test" formnovalidate>🖨 Тестовая печать А4</button>
+      <button class="btn primary" type="submit">Сохранить принтер</button>
+    </div>
+  </div>
+</form>
+
+<form method="post" action="/admin/settings/label">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Принтер этикеток 58×38 мм (удалённый CUPS)</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">IP компьютера с CUPS *</span>
+          <input type="text" name="label_ip" value="{{ label.ip or '' }}" placeholder="192.168.x.x"></label>
+        <label class="fld"><span class="lbl">Порт CUPS</span>
+          <input type="number" name="label_port" value="{{ label.port or 631 }}"></label>
+        <label class="fld"><span class="lbl">Имя очереди *</span>
+          <input type="text" name="label_name" value="{{ label.name or '' }}" placeholder="напр. 3B-350B"></label>
+        <label class="fld"><span class="lbl">Media option (если драйвер требует)</span>
+          <input type="text" name="label_media" value="{{ label.media or 'Custom.58x38mm' }}"></label>
+      </div>
+      <p class="muted" style="font-size:12px;margin:0">Размер этикетки зафиксирован: 58×38 мм. Масштабирование на А4 не используется.</p>
+    </div>
+    <div class="msb-form-card__foot">
+      <button class="btn sec" type="submit" formaction="/admin/settings/label/test" formnovalidate>🏷 Тестовая этикетка</button>
+      <button class="btn primary" type="submit">Сохранить этикетки</button>
+    </div>
+  </div>
+</form>
+
+<div class="msb-form-card">
+  <div class="msb-form-card__head"><h2>Последние задания печати</h2></div>
+  <div class="table-wrap">
+    <table class="msb-table">
+      <thead><tr><th>Создано</th><th>Тип</th><th>Статус</th><th>Ошибка</th></tr></thead>
+      <tbody>
+      {% for j in recent_jobs %}
+        <tr>
+          <td>{{ j.created_at | date }}</td>
+          <td>{{ j.template_id or '—' }}</td>
+          <td><span class="tag tag--{% if j.status=='printed' or j.status=='done' %}green{% elif j.status=='queued' %}orange{% elif j.status=='error' %}red{% else %}gray{% endif %}">{{ j.status }}</span></td>
+          <td class="muted">{{ j.error or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" style="text-align:center;color:#8a949f;padding:20px">Заданий пока не было.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% elif section == 'sms' %}
+{# ===================== SMS ===================== #}
+<form method="post" action="/admin/settings/sms">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>SMS-шлюз</h2></div>
+    <div class="msb-form-card__body">
+      <label class="check"><input type="checkbox" name="sms_enabled" {% if sms.enabled %}checked{% endif %}> SMS-уведомления включены</label>
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">URL шлюза (HTTP API)</span>
+          <input type="text" name="sms_url" value="{{ sms.url or '' }}" placeholder="http://192.168.x.x/send"></label>
+        <label class="fld"><span class="lbl">Логин</span>
+          <input type="text" name="sms_username" value="{{ sms.username or '' }}"></label>
+        <label class="fld"><span class="lbl">Пароль</span>
+          <input type="password" name="password" value="{{ sms.password or '' }}" placeholder="оставьте •••••••• чтобы не менять"></label>
+        <label class="fld"><span class="lbl">Таймаут (сек)</span>
+          <input type="text" name="sms_timeout" value="{{ sms.timeout_sec or 10 }}"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="sms_verify_ssl" {% if sms.verify_ssl %}checked{% endif %}> Проверять SSL-сертификат</label>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Тексты SMS (пусто — текст по умолчанию)</h2></div>
+    <div class="msb-form-card__body">
+      <label class="fld"><span class="lbl">Мастеру — назначение ремонта. Плейсхолдеры: {master_name} {number} {device} {client_name} {client_phone} {fault} {eta_days}</span>
+        <textarea name="tpl_master" rows="3">{{ sms_tpl.master_assign or '' }}</textarea></label>
+      <label class="fld"><span class="lbl">Клиенту — техника готова. Плейсхолдеры: {client_name} {number} {device}</span>
+        <textarea name="tpl_ready" rows="3">{{ sms_tpl.ready or '' }}</textarea></label>
+      <label class="fld"><span class="lbl">Напоминание «заберите технику». Плейсхолдеры: {client_name} {number} {device} {days} {ready_date}</span>
+        <textarea name="tpl_reminder" rows="3">{{ sms_tpl.pickup_reminder or '' }}</textarea></label>
+    </div>
+    <div class="msb-form-card__foot">
+      <button class="btn primary" type="submit">Сохранить SMS-настройки</button>
+    </div>
+  </div>
+</form>
+
+{% elif section == 'ip' %}
+{% if request and request.query_params.get('cleared') %}
+<div class="flash ok">🗑 Журнал попыток подключения очищен.</div>
+{% endif %}
+{% if request and request.query_params.get('ignored') %}
+<div class="flash err">Некорректные правила пропущены: {{ request.query_params.get('ignored') }}. Формат: IP или сеть CIDR (например 192.168.8.0/24).</div>
+{% endif %}
+<div class="card" style="margin-bottom:16px">
+  <div class="card-h"><h3>🛡 Контроль доступа по IP</h3></div>
+  <div class="card-b">
+    <p style="color:var(--muted);margin:0 0 12px;font-size:13px">
+      Управляйте, с каких IP-адресов разрешён доступ к системе. Можно вписывать
+      отдельные адреса (<code>192.168.8.81</code>) и целые сети в формате CIDR
+      (<code>192.168.8.0/24</code>), по одному в строке или через запятую.
+      Локальные адреса сервера (127.0.0.1) разрешены всегда — это защищает от
+      блокировки самого себя.
+    </p>
+
+    <form method="post" action="/admin/settings/ip">
+      <span class="lbl">Режим работы</span>
+      <div class="row" style="margin:6px 0 14px;flex-wrap:wrap;gap:14px">
+        <label class="check" style="margin:0">
+          <input type="radio" name="mode" value="off" {% if ip_control.mode=='off' %}checked{% endif %}>
+          Выключен — доступ открыт всем
+        </label>
+        <label class="check" style="margin:0">
+          <input type="radio" name="mode" value="whitelist" {% if ip_control.mode=='whitelist' %}checked{% endif %}>
+          Белый список — разрешить только указанные IP
+        </label>
+        <label class="check" style="margin:0">
+          <input type="radio" name="mode" value="blacklist" {% if ip_control.mode=='blacklist' %}checked{% endif %}>
+          Чёрный список — запретить указанные IP
+        </label>
+      </div>
+
+      <label class="check" style="margin:0 0 14px">
+        <input type="checkbox" name="trust_proxy" value="1" {% if ip_control.trust_proxy %}checked{% endif %}>
+        Сервер за обратным прокси (nginx) — доверять заголовку X-Forwarded-For.
+        <span class="hint">НЕ включайте при прямом подключении к uvicorn: иначе фильтр можно обойти поддельным заголовком.</span>
+      </label>
+
+      <div class="flash" style="margin-bottom:14px;background:#eef4ff;border:1px solid #c7d9f5;color:#274690">
+        Ваш текущий IP: <b>{{ current_ip or 'не определён' }}</b>
+        <button type="button" class="btn sm" style="margin-left:8px;padding:4px 10px"
+                onclick="var w=document.getElementById('wl'); w.value=(w.value.trim()?w.value.trim()+String.fromCharCode(10):'')+'{{ current_ip }}';">
+          ＋ в белый список
+        </button>
+      </div>
+
+      <label class="fld" style="display:block;margin-bottom:14px">
+        <span class="lbl">✅ Белый список (разрешённые IP / сети)</span>
+        <textarea id="wl" name="whitelist" rows="6" style="font-family:monospace"
+          placeholder="192.168.8.0/24&#10;10.0.0.5">{{ ip_control.whitelist | join('\n') }}</textarea>
+        <span class="hint">Действует в режиме «Белый список»: доступ будет только с этих адресов.</span>
+      </label>
+
+      <label class="fld" style="display:block;margin-bottom:14px">
+        <span class="lbl">⛔ Чёрный список (запрещённые IP / сети)</span>
+        <textarea id="bl" name="blacklist" rows="6" style="font-family:monospace"
+          placeholder="203.0.113.10&#10;198.51.100.0/24">{{ ip_control.blacklist | join('\n') }}</textarea>
+        <span class="hint">Действует в режиме «Чёрный список»: с этих адресов доступ закрыт (ошибка 403).</span>
+      </label>
+
+      <div class="btn-row">
+        <button class="btn green" type="submit">✓ Сохранить IP-контроль</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-h">
+    <h3>📋 Кто пытается подключиться</h3>
+    {% if attempts %}
+    <form method="post" action="/admin/settings/ip/log/clear" style="margin:0"
+          onsubmit="return confirm('Очистить весь журнал попыток подключения?');">
+      <button class="btn sm" type="submit" style="padding:4px 12px">Очистить журнал</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="card-b">
+    <p style="color:var(--muted);margin:0 0 12px;font-size:13px">
+      Журнал попыток подключения. Записывается, когда IP-контроль включён
+      (белый/чёрный список). Нажмите «＋ белый» или «⛔ чёрный», чтобы добавить
+      IP в соответствующий список, и затем «Сохранить IP-контроль».
+    </p>
+
+    {% if not attempts %}
+    <div style="padding:32px;text-align:center;color:#75808d;border:1px dashed #cbd3db;border-radius:14px;background:#fafbfc">
+      Пока нет записей. Попытки появятся здесь, когда IP-контроль включён и к системе кто-то обращается.
+    </div>
+    {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>IP</th><th>Попыток</th><th>Заблокировано</th><th>Последняя попытка</th><th style="text-align:right">Действия</th></tr>
+        </thead>
+        <tbody>
+          {% for a in attempts %}
+          <tr>
+            <td><code>{{ a.ip }}</code></td>
+            <td>{{ a.total }}</td>
+            <td>{% if a.blocked %}<span class="chip red">{{ a.blocked }}</span>{% else %}0{% endif %}</td>
+            <td>{{ a.last_seen | dt }}</td>
+            <td style="text-align:right">
+              <button type="button" class="btn sm" style="padding:2px 8px"
+                      onclick="var w=document.getElementById('wl'); w.value=(w.value.trim()?w.value.trim()+String.fromCharCode(10):'')+'{{ a.ip }}'; w.scrollIntoView();">
+                ＋ белый
+              </button>
+              <button type="button" class="btn sm" style="padding:2px 8px"
+                      onclick="var b=document.getElementById('bl'); b.value=(b.value.trim()?b.value.trim()+String.fromCharCode(10):'')+'{{ a.ip }}'; b.scrollIntoView();">
+                ⛔ чёрный
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if recent_attempts %}
+    <h4 style="margin:18px 0 8px">Последние попытки</h4>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Время</th><th>IP</th><th>Результат</th><th>Путь</th></tr>
+        </thead>
+        <tbody>
+          {% for r in recent_attempts %}
+          <tr>
+            <td>{{ r.created_at | dt }}</td>
+            <td><code>{{ r.ip }}</code></td>
+            <td>{% if r.allowed %}<span class="chip green">разрешён</span>{% else %}<span class="chip red">заблокирован</span>{% endif %}</td>
+            <td class="wrap" style="color:var(--muted)">{{ r.path or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

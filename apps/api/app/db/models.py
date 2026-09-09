@@ -111,6 +111,12 @@ class User(Base, TimestampMixin):
         Uuid, ForeignKey("branches.id"), nullable=True
     )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Индивидуальные права на функции, выданные администратором сверх роли
+    # (см. app/core/permissions.py: каталог FEATURES). Ключи функций, напр.
+    # "cash", "analytics". Роль даёт базовый набор — этот список расширяет его.
+    extra_permissions: Mapped[list | None] = mapped_column(
+        "permissions", MutableList.as_mutable(JSON().with_variant(JSONB(), "postgresql")), nullable=True
+    )
 
     @property
     def roles(self) -> list[str]:
@@ -124,6 +130,12 @@ class User(Base, TimestampMixin):
 
     def has_role(self, *roles: str) -> bool:
         return any(r in self.roles for r in roles)
+
+    @property
+    def permissions(self) -> list[str]:
+        """Индивидуально выданные права на функции (ключи каталога FEATURES)."""
+        extra = self.extra_permissions if isinstance(self.extra_permissions, list) else []
+        return [p for p in extra if p]
 
 
 class City(Base, TimestampMixin):
@@ -238,9 +250,13 @@ class Repair(Base, TimestampMixin):
     # Второй контакт по ремонту (напр. владелец техники ≠ тот, кто доставил).
     contact2_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact2_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Кем приходится второй контакт (доставщик / второй хозяин / родственник…).
+    contact2_relation: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     # Заказ доставлен курьером / забран с адреса (не принесён лично в сервис).
     is_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Район доставки (если технику нужно привезти по адресу).
+    delivery_district: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # --- Ежедневные SMS-напоминания «заберите технику» ---
     # reminder_next_at = NULL  → напоминания не запланированы (ремонт не готов
@@ -604,6 +620,25 @@ class AuditLog(Base, TimestampMixin):
         MutableDict.as_mutable(JSONType), nullable=True
     )
     ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class IpAccessLog(Base, TimestampMixin):
+    """Журнал попыток доступа к интерфейсу (вкладка «IP-контроль» в админке).
+
+    Каждая строка — одна попытка подключения не-localhost клиента при включённом
+    IP-контроле (режим whitelist/blacklist): с какого IP зашли, разрешили или
+    заблокировали, по какому пути. Показывается администратору, чтобы он видел,
+    кто стучится, и мог быстро открыть/закрыть доступ.
+    """
+
+    __tablename__ = "ip_access_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    ip: Mapped[str] = mapped_column(String(64), index=True)
+    allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    mode: Mapped[str] = mapped_column(String(16), default="off")
+    path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class AIRun(Base, TimestampMixin):

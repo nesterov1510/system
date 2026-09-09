@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Все ремонты{% endblock %}
+{% block page_name %}Все ремонты{% endblock %}
+{% block topbar_actions %}
+  <a class="btn sm sec" href="/repairs?view=board">Доска</a>
+  <a class="btn sm" href="/repairs/new">➕ Приёмка</a>
+{% endblock %}
+{% block content %}
+
+{% if just == 'accepted' %}
+<div class="flash ok">
+  <b>✓ Сохранено — техника принята.</b>
+  {% if printed == '1' %}🏷 Этикетка отправлена на печать.{% else %}⚠ Этикетка не напечатана: проверьте принтер этикеток в настройках.{% endif %}
+</div>
+{% endif %}
+
+<section class="page-head">
+  <div>
+    <h1>Все ремонты</h1>
+    <p>Реестр ремонтов по этапам и быстрые действия.</p>
+  </div>
+  <a class="btn btn-primary" href="/repairs/new">＋ Новая приёмка</a>
+</section>
+
+<div class="tabs">
+  <a href="/repairs?stage=all" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
+  {% for key, label in stages %}
+    <a href="/repairs?stage={{ key }}" class="{% if stage==key %}active{% endif %}">
+      {{ label }} <span class="chip">{{ counts[key] }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+<form class="row" method="get" action="/repairs" style="margin-bottom:14px">
+  <input type="hidden" name="stage" value="{{ stage }}">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: номер, серийник, имя, телефон, марка…"
+         style="max-width:420px" autofocus>
+  <select name="status" style="max-width:220px">
+    <option value="">Любой статус</option>
+    {% for s in statuses %}
+      <option value="{{ s }}" {% if s==status %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn sm" type="submit">Найти</button>
+</form>
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="text-transform:none;letter-spacing:0">📅 Дата
+            <button type="button" class="colhint" data-colhint data-title="Дата"
+              data-hint="Дата приёма техники в сервис. Если сверху выбран срез «по закрытию» — дата, когда ремонт перевели в «Готово к выдаче».">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">📺 Техника
+            <button type="button" class="colhint" data-colhint data-title="Название техники"
+              data-hint="Класс техники, марка и модель. Клик открывает карточку ремонта."
+              data-details="🚚 — заказ с доставкой (курьер или забрали с адреса)">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">🧾 Принял
+            <button type="button" class="colhint" data-colhint data-title="Кто принял технику"
+              data-hint="Сотрудник, который оформил приёмку этого ремонта.">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">🔧 Причина
+            <button type="button" class="colhint" data-colhint data-title="Причина поломки"
+              data-hint="Неисправность со слов клиента. Если жалоба пустая — показывается диагноз мастера.">?</button></th>
+          <th class="num" style="text-transform:none;letter-spacing:0">💵 Сумма
+            <button type="button" class="colhint" data-colhint data-title="Общая сумма ремонта"
+              data-hint="Сколько стоит ремонт: итоговая цена, если она уже указана, иначе верхняя граница вилки из прайса.">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">🔩 Запчасти
+            <button type="button" class="colhint" data-colhint data-title="Расходы на запчасти"
+              data-hint="Сумма списанных под ремонт запчастей и сами позиции (название ×кол-во).">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">👤 Клиент
+            <button type="button" class="colhint" data-colhint data-title="Имя и номер клиента"
+              data-hint="Кто владелец ремонта. Номер кликабельный — на телефоне сразу набирается.">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">👷 Мастера
+            <button type="button" class="colhint" data-colhint data-title="Мастер(а) и помощники"
+              data-hint="Кто ведёт ремонт: сначала основные мастера, ниже строчкой помощники (kömekçi)."
+              data-details="«Не назначен» — у ремонта ещё нет исполнителя">?</button></th>
+          <th class="num" style="text-transform:none;letter-spacing:0">💰 Выплата
+            <button type="button" class="colhint" data-colhint data-title="Сколько оплачено мастерам"
+              data-hint="Сумма, выплаченная мастерам за этот ремонт. Заполняется при оформлении починки (админ/менеджер/оператор).">?</button></th>
+          <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
+            <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
+              data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».">?</button></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in repairs %}
+        <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
+          <td>{{ r.accepted_at | date }}</td>
+          <td class="wrap">
+            <span style="display:flex;align-items:center;gap:8px">
+              <span>{{ r.device_type | class_icon }}</span>
+              <span>
+                <span class="muted" style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.03em">{{ r.device_type | device_class }}</span>
+                <b>{{ r.brand or '' }} {{ r.model or '' }}{% if not (r.brand or r.model) %}Без модели{% endif %}</b>
+              </span>
+              {% if r.is_delivery %}<span title="Заказ с доставкой">🚚</span>{% endif %}
+            </span>
+          </td>
+          <td>{{ r.accepted_by_user.name if r.accepted_by_user else '—' }}</td>
+          <td class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
+          <td class="num">
+            {% set sum = r.price_final if r.price_final is not none else r.price_max %}
+            {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="wrap">
+            {% set pc = parts_cost.get(r.id) %}
+            {% if pc %}
+              <div style="color:#d7393f;font-weight:700">{{ pc | money(currency.symbol) }}</div>
+              {% set pn = parts_names.get(r.id) %}
+              {% if pn %}<div class="muted" style="font-size:11px;line-height:1.4">{{ pn | join(', ') }}</div>{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="wrap">
+            <b>{{ r.client.full_name }}</b>
+            {% if r.client.phone %}<div><a href="tel:{{ r.client.phone }}" class="muted" style="font-size:12px">{{ r.client.phone }}</a></div>{% endif %}
+          </td>
+          <td class="wrap">
+            {% set mnames = [] %}
+            {% for m in r.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
+            {% set hnames = [] %}
+            {% for m in r.masters %}{% if (m.kind or 'master') == 'helper' %}{% set _ = hnames.append(m.user.name) %}{% endif %}{% endfor %}
+            {% if mnames %}
+              <div>{{ mnames | join(', ') }}</div>
+              {% if hnames %}<div class="muted" style="font-size:11px">пом. {{ hnames | join(', ') }}</div>{% endif %}
+            {% elif r.master %}
+              {{ r.master.name }}
+            {% else %}<span class="chip gray">Не назначен</span>{% endif %}
+          </td>
+          <td class="num">
+            {% if r.master_payout is not none %}<span style="color:#b06b00;font-weight:700">{{ r.master_payout | money(currency.symbol) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="num">
+            {% set sum = r.price_final if r.price_final is not none else r.price_max %}
+            {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
+            <div style="margin-top:3px">
+              {% if r.paid %}<span class="chip green" title="Отмечено как оплаченное">✓ оплачено</span>
+              {% elif pays.get(r.id) %}<span class="chip amber" title="Оплачено частично">частично</span>
+              {% else %}<span class="chip gray" title="Ещё не оплачено">долг</span>{% endif %}
+            </div>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="muted" style="margin-top:10px">Всего: {{ total }}. Показаны последние 50. Уточните поиск для более старых записей.</p>
+{% endblock %}

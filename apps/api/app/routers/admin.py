@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
@@ -114,6 +115,7 @@ async def create_user(payload: UserCreate, db: DbSession, actor: CurrentUser):
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Email уже занят")
     extra_roles = [r for r in (payload.roles or []) if r and r != payload.role]
+    from app.core.permissions import FEATURE_KEYS
     user = User(
         name=payload.name,
         email=payload.email.lower(),
@@ -121,6 +123,7 @@ async def create_user(payload: UserCreate, db: DbSession, actor: CurrentUser):
         password_hash=hash_password(payload.password),
         role=payload.role,
         extra_roles=extra_roles or None,
+        extra_permissions=[k for k in (payload.permissions or []) if k in FEATURE_KEYS] or None,
         city_id=payload.city_id,
         branch_id=payload.branch_id,
         active=payload.active,
@@ -150,11 +153,15 @@ async def update_user(
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
     roles = data.pop("roles", None)
+    permissions = data.pop("permissions", None)
     for field, value in data.items():
         setattr(user, field, value)
     if roles is not None:
         base_role = data.get("role", user.role)
         user.extra_roles = [r for r in roles if r and r != base_role] or None
+    if permissions is not None:
+        from app.core.permissions import FEATURE_KEYS
+        user.extra_permissions = [k for k in permissions if k in FEATURE_KEYS] or None
     if password:
         user.password_hash = hash_password(password)
     await audit.record(
@@ -167,11 +174,13 @@ async def update_user(
             "fields": sorted(data.keys()),
             "password_changed": bool(password),
             "roles_changed": roles is not None,
+            "permissions_changed": permissions is not None,
             "role": user.role,
             "roles": user.roles,
         },
     )
     await db.commit()
+    await db.refresh(user)
     return user
 
 

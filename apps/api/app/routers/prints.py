@@ -41,6 +41,7 @@ from app.services.settings import (
     get_label_printer,
     get_legal_text,
     get_printer,
+    get_print_stub,
 )
 
 router = APIRouter(tags=["print"])
@@ -112,6 +113,7 @@ async def build_context(db, repair: Repair) -> dict:
     branch = await db.get(Branch, repair.branch_id) if repair.branch_id else None
     legal_text = await get_legal_text(db)
     consent_repair_text = await get_consent_repair_text(db)
+    print_stub = await get_print_stub(db)
     device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
     complectation = (
         ", ".join(repair.complectation.get("items", []))
@@ -205,6 +207,7 @@ async def build_context(db, repair: Repair) -> dict:
         "consent_repair": bool(repair.consent_repair_at),
         "storage_until": _fmt(repair.storage_until),
         "qr_url": qr_url,
+        "print_stub": print_stub,
     }
 
 

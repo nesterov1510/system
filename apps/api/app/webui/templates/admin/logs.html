@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Мониторинг логов{% endblock %}
+{% block page_name %}Мониторинг логов{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="/static/msb/logs.css">
+{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Мониторинг логов</h1>
+    <p>Журнал работы сервиса: события, успехи, предупреждения и ошибки. Все уровни видны всегда.</p>
+  </div>
+  <div class="page-head__actions" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div class="live-badge" id="live-badge"><span class="live-dot"></span><span id="live-text">LIVE · SSE</span></div>
+    <label class="fld" style="margin:0"><span class="lbl">Интервал</span>
+      <select id="poll-interval" style="max-width:120px">
+        <option value="1">1 сек</option>
+        <option value="2" selected>2 сек</option>
+        <option value="5">5 сек</option>
+        <option value="10">10 сек</option>
+      </select>
+    </label>
+    <button class="btn" id="pause-btn" type="button">⏸ Пауза</button>
+  </div>
+</section>
+
+{% if saved or cleared %}
+  <div class="access-flash access-flash--ok" style="margin-bottom:16px">
+    {% if saved %}Настройки журнала сохранены.{% elif cleared %}Журнал очищен.{% endif %}
+  </div>
+{% endif %}
+
+<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>🔍 Фильтр и поиск</h3></div>
+  <form method="get" action="/admin/logs" class="card-b row wrap" style="gap:10px;align-items:end">
+    <label class="fld"><span class="lbl">Уровень</span>
+      <select name="level">
+        {% for level in levels %}
+        <option value="{{ level }}" {% if level == selected_level %}selected{% endif %}>
+          {{ level_labels.get(level, level) }} — {{ level_titles.get(level, level) }}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="fld"><span class="lbl">Дата</span>
+      <select name="date">
+        {% for date in dates %}<option value="{{ date }}" {% if date == selected_date %}selected{% endif %}>{{ date }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="fld"><span class="lbl">Файл</span>
+      <select name="file">
+        {% for file in files %}<option value="{{ file }}" {% if file == selected_file %}selected{% endif %}>{{ file }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="fld"><span class="lbl">Строк</span>
+      <input type="number" name="limit" min="20" max="5000" value="{{ selected_limit }}" style="max-width:110px">
+    </label>
+    <label class="fld" style="flex:1;min-width:220px"><span class="lbl">Поиск по тексту (grep)</span>
+      <input type="search" name="q" value="{{ search_q }}" placeholder="например: payment, ошибка, IP…">
+    </label>
+    <div style="align-self:end"><button class="btn btn-primary" type="submit">Показать</button></div>
+  </form>
+</div>
+
+{% if is_admin_nav %}
+<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>⚙️ Управление журналом</h3></div>
+  <div class="card-b row wrap" style="gap:12px;align-items:center">
+    <a class="btn" href="/admin/logs/settings">Настройки журнала</a>
+    <form method="post" action="/admin/logs/clear" style="margin:0"
+          onsubmit="return confirm('Очистить весь журнал? Это удалит все файлы логов.')">
+      <button class="btn btn-danger" type="submit">🗑 Очистить журнал</button>
+    </form>
+    <span class="muted" style="font-size:12px">
+      Хранение: {{ debug_settings.DEBUG_LOG_RETENTION or '—' }} ·
+      файл до {{ debug_settings.DEBUG_MAX_FILE_KB }} КБ ·
+      копий {{ debug_settings.DEBUG_MAX_FILES }} ·
+      HTTP-лог: {{ 'вкл' if debug_settings.DEBUG_HTTP_LOG_MODE else 'выкл' }}
+    </span>
+  </div>
+</div>
+{% endif %}
+
+{% set _qs = 'level=' ~ (selected_level|urlencode) ~ '&date=' ~ (selected_date|urlencode) ~ '&file=' ~ (selected_file|urlencode) ~ '&limit=' ~ selected_limit ~ '&q=' ~ (search_q|urlencode) %}
+<div id="log-monitor"
+     data-sse-url="/admin/logs/stream?{{ _qs }}"
+     data-fallback-url="/admin/logs/panel?{{ _qs }}">
+  {% include "admin/_logs_panel.html" %}
+</div>
+{% endblock %}
+
+{% block page_js %}
+<script>
+  // Live-обновление журнала по SSE (Server-Sent Events) вместо HTMX-опроса.
+  // Соединение держится постоянно; сервер шлёт новый фрагмент только когда
+  // в журнале реально появились записи. Есть пауза и выбор интервала.
+  (function () {
+    var root = document.getElementById('log-monitor');
+    if (!root) return;
+    var liveBadge = document.getElementById('live-badge');
+    var liveText = document.getElementById('live-text');
+    var intervalSel = document.getElementById('poll-interval');
+    var pauseBtn = document.getElementById('pause-btn');
+    if (!pauseBtn || !intervalSel) return;
+
+    var paused = false;
+    var es = null;
+    var fallbackTimer = null;
+    var pollMs = parseInt(intervalSel.value, 10) * 1000 || 2000;
+
+    function setStatus(text, cls) {
+      if (!liveBadge) return;
+      liveBadge.className = 'live-badge' + (cls ? ' ' + cls : '');
+      if (liveText) liveText.textContent = text;
+    }
+
+    function swapHtml(html) {
+      var w = root.querySelector('.log-window');
+      var st = w ? w.scrollTop : 0;
+      root.innerHTML = html;
+      var w2 = root.querySelector('.log-window');
+      if (w2) w2.scrollTop = st;
+    }
+
+    function sseUrl() {
+      var u = root.dataset.sseUrl;
+      return u.replace(/[?&]poll=[^&]*/g, '') + '&poll=' + Math.max(1, Math.round(pollMs / 1000));
+    }
+
+    function stopPoll() {
+      if (fallbackTimer) { clearInterval(fallbackTimer); fallbackTimer = null; }
+    }
+
+    function startPollFallback() {
+      stopPoll();
+      fallbackTimer = setInterval(function () {
+        fetch(root.dataset.fallbackUrl, { credentials: 'same-origin' })
+          .then(function (r) { if (!r.ok) throw new Error('bad'); return r.text(); })
+          .then(swapHtml)
+          .catch(function () {});
+      }, pollMs);
+      setStatus('LIVE · poll', '');
+    }
+
+    function startSse() {
+      stopPoll();
+      if (es) { es.close(); es = null; }
+      if (typeof EventSource === 'undefined') { startPollFallback(); return; }
+      try {
+        es = new EventSource(sseUrl());
+      } catch (err) {
+        startPollFallback();
+        return;
+      }
+      es.addEventListener('logs', function (e) {
+        try {
+          var msg = JSON.parse(e.data);
+          if (msg && msg.html) swapHtml(msg.html);
+        } catch (err) { /* игнор битого пакета */ }
+      });
+      es.onopen = function () { setStatus('LIVE · SSE', ''); };
+      es.onerror = function () {
+        // EventSource переподключается сам; просто показываем статус.
+        setStatus('Переподключение…', 'live-badge--warn');
+      };
+    }
+
+    function pause() {
+      paused = true;
+      if (es) { es.close(); es = null; }
+      stopPoll();
+      setStatus('ПАУЗА', 'live-badge--pause');
+      pauseBtn.textContent = '▶ Продолжить';
+    }
+
+    function resume() {
+      paused = false;
+      pauseBtn.textContent = '⏸ Пауза';
+      startSse();
+    }
+
+    pauseBtn.addEventListener('click', function () {
+      if (paused) { resume(); } else { pause(); }
+    });
+
+    intervalSel.addEventListener('change', function () {
+      pollMs = parseInt(intervalSel.value, 10) * 1000 || 2000;
+      if (!paused) startSse();
+    });
+
+    startSse();
+  })();
+</script>
+{% endblock %}

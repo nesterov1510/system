@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ client.full_name }}{% endblock %}
+{% block page_name %}Клиент{% endblock %}
+{% block topbar_actions %}<a class="btn sm" href="/repairs/new">➕ Приёмка</a>{% endblock %}
+{% block content %}
+<div class="card" style="margin-bottom:16px"><div class="card-b">
+  <h1 style="margin:0">{{ client.full_name }}</h1>
+  <p class="mono" style="font-size:16px;margin:6px 0">📞 {{ client.phone }}</p>
+  <p class="muted">Ремонтов: <b>{{ repairs | length }}</b></p>
+</div></div>
+
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Дата</th><th>Номер</th><th>Техника</th><th>Статус</th><th class="num">Сумма</th></tr></thead>
+    <tbody>
+    {% for r in repairs %}
+      <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
+        <td>{{ r.accepted_at | date }}</td>
+        <td class="mono">{{ r.number }}</td>
+        <td>{{ r.device_type | class_icon }} {{ r.brand or '' }} {{ r.model or '' }}</td>
+        <td><span class="chip {{ r.status | status_chip }}">{{ r.status }}</span></td>
+        <td class="num">{{ (r.price_final or r.price_max or 0) | money(currency.symbol) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted" style="text-align:center;padding:24px">Ремонтов нет</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+<p style="margin-top:12px"><a href="/clients">← Все клиенты</a></p>
+{% endblock %}

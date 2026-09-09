@@ -20,7 +20,7 @@
 > «курс ремонта» + AI-прогноз ETA, склад (запчасти + купленная техника с
 > статусами разборки), **касса** (платежи/методы/выручка),
 > service worker (PWA-офлайн), SMS-уведомление о готовности и ежедневные
-> напоминания «заберите технику», **186 pytest-тестов**.
+> напоминания «заберите технику», **279 pytest-тестов**.
 
 ---
 
@@ -28,7 +28,7 @@
 
 | Слой | Технология |
 |---|---|
-| Frontend | Next.js (App Router) + TypeScript + Tailwind + PWA |
+| Frontend | FastAPI Jinja2 + HTMX (основной UI на `:8085`) и опционально Next.js PWA (`:3030`) |
 | Backend | FastAPI (Python 3.11) + SQLAlchemy 2.0 (async) |
 | Realtime | Нативный WebSocket (FastAPI) |
 | DB | PostgreSQL 16 (dev/тест — SQLite через aiosqlite) |
@@ -38,8 +38,8 @@
 Монорепо:
 
 ```
-apps/api           FastAPI backend (routers, services, models, ws)
-apps/web           Next.js frontend (PWA)
+apps/api           FastAPI backend (JSON-API + Jinja2/HTMX UI, логи, IP-контроль)
+apps/web           Next.js frontend (PWA, опционально)
 apps/print-agent   агент печати на точке (A4 принтер по драйверу ОС)
 docs/              kickoff-документ (ТЗ, ER, API, wireframes)
 deploy/            systemd-юниты, env.production, скрипт обновления
@@ -66,7 +66,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Поднимет: PostgreSQL, API (`:8085`, Swagger на `/docs`), web (`:3030`).
+Поднимет: PostgreSQL, API (`:8085`, Swagger на `/docs`, веб-интерфейс Jinja2 на `/login` и `/repairs`), web (`:3030`).
+
+Серверный UI (из `123.zip`): логин по httpOnly-cookie, приёмка, доска ремонтов, склад, касса, чат, админка сотрудников, **мониторинг логов** (`/admin/logs`) и **IP-контроль** (белый/чёрный список в `/admin/settings`). JSON-API на `/api` сохранён.
 
 ### 2. Без Docker (локальная разработка)
 

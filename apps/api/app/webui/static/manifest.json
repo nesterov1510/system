@@ -1,0 +1,9 @@
+{
+  "name": "MSB — Сервисный центр",
+  "short_name": "MSB",
+  "start_url": "/repairs",
+  "display": "standable",
+  "background_color": "#f4f6fb",
+  "theme_color": "#2b50ed",
+  "icons": [{"src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml"}]
+}
