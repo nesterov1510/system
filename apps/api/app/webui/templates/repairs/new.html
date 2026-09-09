@@ -3,7 +3,86 @@
 {% block page_name %}Приёмка{% endblock %}
 {% block page_css %}
 <link rel="stylesheet" href="/static/msb/priemka/priemka.css">
-<link rel="stylesheet" href="/static/msb/priemka/televisions.css">
+<link rel="stylesheet" href="/static/msb/priemka/televisions.css?v=caps2">
+<style>
+#tvIdentity,
+input[name="brand_manual"],
+input[name="model_manual"],
+input[name="serial_manual"]{
+  text-transform:uppercase !important;
+}
+</style>
+<script>
+window.msbCapsIdent = (function () {
+  function up(s) { return String(s || '').toUpperCase(); }
+  function cap(el) {
+    if (!el) return '';
+    var next = up(el.value);
+    if (el.value !== next) {
+      var a = el.selectionStart, b = el.selectionEnd;
+      el.value = next;
+      try { if (typeof a === 'number') el.setSelectionRange(a, b); } catch (e) {}
+    }
+    return String(el.value || '').trim();
+  }
+  function parse(raw) {
+    var value = up(raw).trim();
+    if (!value) return { brand: '', model: '', sn: '' };
+    var spaced = value.split(/\s+[-–—]\s+/).map(function (p) { return p.trim(); }).filter(Boolean);
+    if (spaced.length >= 3) return { brand: spaced[0], model: spaced[1], sn: spaced.slice(2).join(' - ') };
+    var c = value.split('-');
+    if (c.length >= 3) return { brand: c[0].trim(), model: c[1].trim(), sn: c.slice(2).join('-').trim() };
+    if (c.length === 2) return { brand: c[0].trim(), model: c[1].trim(), sn: '' };
+    return { brand: value, model: '', sn: '' };
+  }
+  function join(b, m, s) {
+    b = up(b).trim(); m = up(m).trim(); s = up(s).trim();
+    var parts = [b, m, s].filter(Boolean);
+    if (!parts.length) return '';
+    if ((m && /[-–—]/.test(m)) || (s && /[-–—]/.test(s))) return parts.join(' - ');
+    return parts.join('-');
+  }
+  function root() { return document.querySelector('[data-tv-intake]'); }
+  function paint(b, m, s, skip) {
+    var r = root();
+    if (!r) return;
+    b = up(b).trim(); m = up(m).trim(); s = up(s).trim();
+    [
+      ['brand', b, '[data-tv-brand]', '[data-tv-brand-input]', '[name="brand_manual"]', 'Не указана'],
+      ['model', m, '[data-tv-model]', '[data-tv-model-input]', '[name="model_manual"]', 'Не указана'],
+      ['sn', s, '[data-tv-sn]', '[data-tv-sn-input]', '[name="serial_manual"]', 'Не указан']
+    ].forEach(function (row) {
+      var val = row[1];
+      var out = r.querySelector(row[2]);
+      var hid = r.querySelector(row[3]);
+      var man = r.querySelector(row[4]);
+      if (out) out.textContent = val || row[5];
+      if (hid) hid.value = val;
+      if (man && skip !== man) man.value = val;
+      var card = r.querySelector('[data-tv-identity-part="' + row[0] + '"]');
+      if (card) card.classList.toggle('is-filled', !!val);
+    });
+    var ident = r.querySelector('[data-tv-identity]');
+    if (ident && skip !== ident) ident.value = join(b, m, s);
+  }
+  return {
+    fromLine: function (el) {
+      cap(el);
+      var p = parse(el.value);
+      paint(p.brand, p.model, p.sn, el);
+    },
+    fromPart: function (el) {
+      var r = root();
+      if (!r) return;
+      var brandEl = r.querySelector('[name="brand_manual"]');
+      var modelEl = r.querySelector('[name="model_manual"]');
+      var snEl = r.querySelector('[name="serial_manual"]');
+      cap(brandEl); cap(modelEl); cap(snEl);
+      paint((brandEl && brandEl.value) || '', (modelEl && modelEl.value) || '', (snEl && snEl.value) || '', el);
+    }
+  };
+})();
+</script>
 {% endblock %}
 {% block content %}
 
@@ -118,7 +197,7 @@
       <div class="tv-field">
         <label for="tvIdentity">Марка — Модель — SN</label>
         <div class="tv-identity-input-wrap">
-          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG-QE55Q70-SN123456" data-tv-identity>
+          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG-QE55Q70-SN123456" data-tv-identity style="text-transform:uppercase" oninput="msbCapsIdent.fromLine(this)" onblur="msbCapsIdent.fromLine(this)">
           <span class="tv-identity-input-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 21h8M12 19v2"></path></svg>
           </span>
@@ -143,12 +222,12 @@
           </div>
         </div>
 
-        <details style="margin-top:12px">
+        <details style="margin-top:12px" open>
           <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
           <div class="tv-customer-grid" style="margin-top:10px">
-            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}"></label>
-            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="QE55Q70" value="{{ form.get('model','') }}"></label>
-            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SN123456" value="{{ form.get('serial','') }}"></label>
+            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
+            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="QE55Q70" value="{{ form.get('model','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
+            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SN123456" value="{{ form.get('serial','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
           </div>
         </details>
       </div>
@@ -333,7 +412,7 @@
 {% endif %}
 {% endblock %}
 {% block page_js %}
-<script src="/static/msb/priemka/televisions.js"></script>
+<script src="/static/msb/priemka/televisions.js?v=caps3"></script>
 <script>
 // Ручные поля марки/модели/SN приоритетны над разбором строки identity.
 document.addEventListener('DOMContentLoaded', () => {

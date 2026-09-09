@@ -344,7 +344,8 @@ def test_intake_rich_form_fields(client):
                    'data-delivery-open', 'data-camera-open', 'name="contact2_relation"',
                    'name="fault_client"', 'name="delivery_district"',
                    'name="brand_manual"', 'name="model_manual"', 'name="serial_manual"',
-                   'data-tv-identity', 'autocapitalize="characters"'):
+                   'data-tv-identity', 'autocapitalize="characters"',
+                   'msbCapsIdent.fromLine', 'msbCapsIdent.fromPart'):
         assert marker in f.text, marker
 
 
