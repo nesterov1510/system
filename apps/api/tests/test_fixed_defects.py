@@ -309,6 +309,8 @@ def test_invalid_status_rejected(client, operator_headers, city_id):
     "device_type,prefix",
     [
         ("Телевизоры", "TV"),
+        ("Мониторы", "MN"),
+        ("ТВ-приставки", "BX"),
         ("Компьютеры", "PC"),
         ("Бытовая техника", "BT"),
         ("Другое", "OT"),
@@ -330,7 +332,10 @@ def test_ui_device_classes_all_have_prefix():
 
     values = [c["value"] for c in DEVICE_CLASSES]
     # Базовый набор классов должен присутствовать.
-    for required in ("Телевизоры", "Компьютеры", "Бытовая техника", "Другое"):
+    for required in (
+        "Телевизоры", "Мониторы", "ТВ-приставки",
+        "Компьютеры", "Бытовая техника", "Другое",
+    ):
         assert required in values, f"{required} пропал из DEVICE_CLASSES"
     for value in values:
         assert device_prefix(value) != FALLBACK_PREFIX, f"{value} -> {FALLBACK_PREFIX}"

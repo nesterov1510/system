@@ -232,7 +232,7 @@ async def repair_create(request: Request):
             contact2_name=(form.get("contact2_name") or "").strip() or None,
             contact2_phone=(form.get("contact2_phone") or "").strip() or None,
             contact2_relation=(form.get("contact2_relation") or "").strip() or None,
-            device_type=form.get("device_type", "Другое"),
+            device_type=normalize_class(form.get("device_type") or "Другое"),
             brand=(form.get("brand_manual") or form.get("brand") or "").strip() or None,
             model=(form.get("model_manual") or form.get("model") or "").strip() or None,
             serial=(form.get("serial_manual") or form.get("serial") or "").strip() or None,

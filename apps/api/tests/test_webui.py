@@ -346,6 +346,47 @@ def test_intake_rich_form_fields(client):
         assert marker in f.text, marker
 
 
+def test_intake_monitors_and_boxes_get_own_numbers(client, admin_headers):
+    """Карточки «Мониторы» / «ТВ-приставки» получают MN-/BX-, а не общий RE-."""
+    cookies = _login(client)
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    city_id = cities[0]["id"]
+
+    picker = client.get("/repairs/new", cookies=cookies)
+    assert picker.status_code == 200
+    assert "/repairs/new?type=Мониторы" in picker.text
+    assert "/repairs/new?type=ТВ-приставки" in picker.text
+
+    form = client.get("/repairs/new?type=Мониторы", cookies=cookies)
+    assert form.status_code == 200
+    assert 'name="device_type"' in form.text
+    assert "Мониторы" in form.text
+
+    cases = [
+        ("Мониторы", "Dell", "P2419H", "+993 61 3334455", "MN-"),
+        ("ТВ-приставки", "Xiaomi", "MiBoxS", "+993 61 3334466", "BX-"),
+    ]
+    for device_type, brand, model, phone, prefix in cases:
+        r = client.post("/repairs/new", cookies=cookies, data={
+            "city_id": city_id,
+            "full_name": f"Клиент {device_type}",
+            "phone": phone,
+            "device_type": device_type,
+            "brand": brand,
+            "model": model,
+            "fault_client": "не включается",
+            "consent_pdn": "1",
+            "consent_storage": "1",
+        }, follow_redirects=False)
+        assert r.status_code == 303, r.text
+        items = client.get(
+            f"/api/repairs?q={model}", headers=admin_headers,
+        ).json()["items"]
+        assert items, f"ремонт {device_type} не найден"
+        assert items[0]["number"].startswith(prefix), items[0]["number"]
+        assert items[0]["device_type"] == device_type
+
+
 def test_intake_create_persists_archive_fields(client, admin_headers):
     """Приёмка сохраняет комплектацию, состояние, доставку и второй контакт."""
     cookies = _login(client)
