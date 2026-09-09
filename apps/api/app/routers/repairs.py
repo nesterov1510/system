@@ -1309,9 +1309,9 @@ async def update_repair(
             repair.issued_at = utcnow()
         # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
         # готов к выдаче, и снимаются, как только технику выдали/закрыли.
-        if repair.status in REMINDER_STATUSES:
-            schedule_reminders(repair)
-        elif repair.status in STOP_STATUSES:
+        # SMS клиенту и очередь напоминаний — только по кнопке «Уведомить»,
+        # не при смене статуса. Выдача по-прежнему снимает очередь.
+        if repair.status in STOP_STATUSES:
             cancel_reminders(repair)
 
     # Правка паспорта техники видна в ленте: кто и что именно поменял.
@@ -1465,10 +1465,6 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
         repair.status = "Готово к выдаче"
         repair.ready_at = utcnow()
-        # С этого момента клиенту раз в сутки напоминает о себе сервис:
-        # первое напоминание — через сутки (сегодня он уже получил SMS
-        # «ремонт готов»), дальше каждый день, пока технику не заберут.
-        schedule_reminders(repair)
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
@@ -1516,6 +1512,7 @@ async def finish_repair_send_sms(
             502, f"Не удалось отправить SMS: {result.get('detail', 'ошибка шлюза')}"
         )
 
+    schedule_reminders(repair)
     repair.events.append(
         RepairEvent(
             repair_id=repair.id,
@@ -1539,9 +1536,10 @@ async def notify_client_ready(repair_id: uuid.UUID, db, user) -> dict:
     to = sms.get("to") or ""
     if not text or not to:
         return {**finished, "sms_sent": False, "sms_detail": "no_phone"}
+    repair = await _get_repair_or_404(db, repair_id)
+    schedule_reminders(repair)
     result = await send_sms(to, text, db=db)
     if result.get("ok"):
-        repair = await _get_repair_or_404(db, repair_id)
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
@@ -1552,6 +1550,7 @@ async def notify_client_ready(repair_id: uuid.UUID, db, user) -> dict:
         )
         await db.commit()
         return {**finished, "sms_sent": True, "sms_detail": result.get("detail")}
+    await db.commit()
     return {
         **finished,
         "sms_sent": False,

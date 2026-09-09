@@ -206,6 +206,38 @@ def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
     assert body["reminder_next_at"] is not None
 
 
+def test_finish_from_card_does_not_send_sms(client, monkeypatch):
+    """«Ремонт закончен» только меняет статус — SMS уходит по кнопке «Уведомить»."""
+    sent = []
+
+    async def _fake_send(phone, text, db=None):
+        sent.append({"phone": phone, "text": text})
+        return {"ok": True, "detail": "http_200"}
+
+    monkeypatch.setattr("app.routers.repairs.send_sms", _fake_send)
+    cookies = _login(client)
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    r = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "Без SMS",
+        "phone": "+993 61 7788991",
+        "device_type": "Телевизоры",
+        "brand": "Sony",
+        "model": "X85",
+        "fault_client": "нет звука",
+        "consent_pdn": "1", "consent_storage": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    items = client.get("/api/repairs?q=Без SMS", cookies=cookies).json()["items"]
+    rid = items[0]["id"]
+    n = client.post(f"/repairs/{rid}/finish", cookies=cookies, follow_redirects=False)
+    assert n.status_code == 303, n.text
+    assert sent == []
+    body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
+    assert body["status"] == "Готово к выдаче"
+    assert body["reminder_next_at"] is None
+
+
 def test_public_status_page_has_no_internal_data(client):
     cookies = _login(client)
     cities = client.get("/api/lookups/cities", cookies=cookies).json()

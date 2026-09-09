@@ -698,7 +698,19 @@ def _safe_next(raw: str | None, fallback: str) -> str:
 
 @router.post("/repairs/{repair_id}/finish")
 async def repair_finish(request: Request, repair_id: uuid.UUID):
-    return await _notify_client(request, repair_id)
+    """Только статус «Готово к выдаче». SMS клиенту — отдельной кнопкой."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+        try:
+            await repairs_api.finish_repair(repair_id, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+    finally:
+        await db.close()
 
 
 @router.post("/repairs/{repair_id}/notify-client")

@@ -14,10 +14,9 @@
     </form>
   {% endif %}
   {% if can.finish and repair.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
-    <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
-          onsubmit="return confirm('Перевести ремонт в «Готово к выдаче» и отправить клиенту SMS?')">
-      <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
-      <button class="btn sm green" type="submit">✓ Ремонт закончен</button>
+    <form method="post" action="/repairs/{{ repair.id }}/finish" style="margin:0"
+          onsubmit="return confirm('Перевести ремонт в «Готово к выдаче»? SMS клиенту уйдёт только по кнопке «Уведомить клиента».')">
+      <button class="btn sm" type="submit">✓ Ремонт закончен</button>
     </form>
   {% endif %}
   {% if can.delete %}
