@@ -20,7 +20,7 @@ from app.ws.manager import manager
 
 router = APIRouter(tags=["ws"])
 
-# Код закрытия, который понимает клиент (см. apps/web/lib/chatSocket.ts).
+# Код закрытия, который понимает клиент (см. webui/templates/chat.html).
 CLOSE_UNAUTHORIZED = 4401
 
 

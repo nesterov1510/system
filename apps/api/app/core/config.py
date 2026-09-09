@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     ENV: str = "dev"  # dev | prod
     API_PREFIX: str = "/api"
     # Публичный адрес сервиса: QR на бланке ведёт на /r/{token} (отдаёт сам API
-    # на :8085, Jinja2-интерфейс). Next.js на :3030 тоже может проксировать API.
-    # Для локальной сети укажите IP машины, например http://192.168.8.81:8085
+    # на :8085, Jinja2-интерфейс). Для локальной сети укажите IP машины,
+    # например http://192.168.8.81:8085
     PUBLIC_BASE_URL: str = "http://localhost:8085"
 
     # --- Database ---
@@ -33,11 +33,10 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     # Интерфейс отдаётся тем же сервисом (same-origin на :8085); CORS нужен
-    # внешним API-клиентам и опциональному Next.js на :3030.
+    # внешним API-клиентам.
     CORS_ORIGINS: list[str] = [
         "http://localhost:8085",
         "http://127.0.0.1:8085",
-        "http://localhost:3030",
     ]
 
     # --- Storage ---

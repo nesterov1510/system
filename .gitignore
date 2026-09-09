@@ -8,12 +8,6 @@ uploads/
 test_uploads/
 .pytest_cache/
 
-# Node / Next
-node_modules/
-.next/
-out/
-*.tsbuildinfo
-
 # Env / secrets
 .env
 .env.local

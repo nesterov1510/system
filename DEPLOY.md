@@ -2,26 +2,24 @@
 
 Ниже — инструкция для **первого production-развёртывания без Docker** на
 Ubuntu/Debian. Проект уже находится в каталоге
-`/home/windowrepair-ae/msb`. API и Web запускаются через `systemd`, PostgreSQL —
+`/home/windowrepair-ae/msb`. API (и UI) запускаются через `systemd`, PostgreSQL —
 как системная служба.
 
 ## Зафиксированная схема
 
 | Компонент | Адрес / порт | Доступ |
 |---|---|---|
-| Web (Next.js) | `0.0.0.0:3030` | `http://192.168.8.81:3030` |
-| API (FastAPI) | `0.0.0.0:8085` | `http://192.168.8.81:8085` |
+| UI + API (FastAPI / Jinja2) | `0.0.0.0:8085` | `http://192.168.8.81:8085` |
 | Swagger | `:8085/docs` | `http://192.168.8.81:8085/docs` |
 | PostgreSQL | `127.0.0.1:5432` | только локально на сервере |
 | Print-agent | без входящего порта | опционально, после настройки принтера |
 
-Web-клиент обращается к относительным путям `/api`, `/media` и `/ws`. Next.js
-проксирует их на `127.0.0.1:8085`, поэтому в браузере не используется
-`localhost` и не возникает проблема CORS.
+Веб-интерфейс и JSON-API живут на одном порту `:8085` (same-origin: `/login`,
+`/api`, `/media`, `/ws`). Отдельный Node/Next.js-процесс не нужен.
 
 > Все команды далее, кроме явно отмеченных, выполняются **на сервере** под
 > пользователем `windowrepair-ae`. Не запускайте одновременно эту установку и
-> `docker compose`: оба варианта занимают порты `3030`, `8085` и `5432`.
+> `docker compose`: оба варианта занимают порты `8085` и `5432`.
 
 ---
 
@@ -35,7 +33,6 @@ cd "$MSB_ROOT"
 
 # Должны существовать исходники и deployment-файлы.
 test -f apps/api/app/main.py
-test -f apps/web/package.json
 test -f deploy/msb-api.service
 
 git status --short --branch 2>/dev/null || true
@@ -58,10 +55,10 @@ ip -4 -brief address
 id windowrepair-ae
 sudo chown -R windowrepair-ae:windowrepair-ae "$MSB_ROOT"
 
-sudo ss -ltnp | grep -E ':(3030|8085|5432)\b' || true
+sudo ss -ltnp | grep -E ':(8085|5432)\b' || true
 ```
 
-При первом развёртывании `3030` и `8085` должны быть свободны. Если там уже
+При первом развёртывании `8085` должен быть свободен. Если там уже
 работает предыдущая версия MSB, используйте раздел «Обновление», а не удаляйте
 процессы вручную.
 
@@ -73,12 +70,11 @@ sudo ss -ltnp | grep -E ':(3030|8085|5432)\b' || true
 ```bash
 rsync -av \
   --exclude '.git' --exclude '.env' --exclude '.venv' \
-  --exclude 'node_modules' --exclude '.next' \
   /локальный/путь/к/msb/ \
   windowrepair-ae@192.168.8.81:/home/windowrepair-ae/msb/
 ```
 
-Не копируйте локальный `.env`, виртуальные окружения, `node_modules` и `.next`.
+Не копируйте локальный `.env` и виртуальные окружения.
 Они создаются заново на сервере.
 
 ---
@@ -108,20 +104,11 @@ else
 fi
 ```
 
-Установите поддерживаемый Node.js 22 LTS (Node.js 20 уже достиг EOL):
-
-```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-```
-
 Проверка версий и служб:
 
 ```bash
 python3 --version       # Python 3.10+; 3.11/3.12 подходят
 python3 -c 'import sys; assert sys.version_info >= (3, 10), "Нужен Python >= 3.10"'
-node --version          # v22.x
-npm --version
 psql --version
 pg_isready --host=127.0.0.1 --port=5432
 ```
@@ -151,14 +138,10 @@ DATABASE_URL=postgresql+asyncpg://msb:${DB_PASSWORD}@127.0.0.1:5432/msb
 # FastAPI
 ENV=prod
 SECRET_KEY=${SECRET_KEY}
-PUBLIC_BASE_URL=http://192.168.8.81:3030
-CORS_ORIGINS='["http://192.168.8.81:3030","http://192.168.8.81:8085"]'
+PUBLIC_BASE_URL=http://192.168.8.81:8085
+CORS_ORIGINS='["http://192.168.8.81:8085"]'
 STORAGE_MODE=local
 UPLOAD_DIR=/home/windowrepair-ae/msb/apps/api/uploads
-
-# Next.js: пустые значения обязательны для same-origin proxy.
-NEXT_PUBLIC_API_URL=
-NEXT_PUBLIC_WS_URL=
 
 # Администратор, создаваемый только при первом запуске пустой БД.
 SEED_ADMIN_EMAIL=admin@msb.local
@@ -302,54 +285,30 @@ sudo systemctl --no-pager --full status msb-api
 sudo journalctl -u msb-api -n 100 --no-pager
 ```
 
-Сначала исправьте ошибку API и только затем запускайте Web.
+Если API не поднялся, исправьте ошибку до открытия UI.
+
+Проверьте страницу входа:
+
+```bash
+curl --retry 15 --retry-delay 2 --retry-connrefused \
+  --fail --show-error --output /dev/null \
+  http://127.0.0.1:8085/login
+echo 'UI: OK'
+```
 
 ---
 
-## 6. Сборка и запуск Web (`3030`)
+## 6. Веб-интерфейс
 
-Переменные `NEXT_PUBLIC_API_URL` и `NEXT_PUBLIC_WS_URL` намеренно пустые. Это
-заставляет браузер использовать адрес Web, а Next.js — локально проксировать
-запросы на API.
+Отдельной службы `msb-web` нет: Jinja2/HTMX UI отдаёт `msb-api` на порту `8085`.
+После health-check откройте `http://192.168.8.81:8085/login`.
 
-```bash
-export MSB_ROOT=/home/windowrepair-ae/msb
-cd "$MSB_ROOT/apps/web"
-
-npm ci --no-audit --no-fund
-rm -rf .next
-NEXT_PUBLIC_API_URL= NEXT_PUBLIC_WS_URL= npm run build
-
-# Standalone-сборка Next.js не копирует эти каталоги автоматически.
-rm -rf .next/standalone/.next/static .next/standalone/public
-mkdir -p .next/standalone/.next
-cp -a .next/static .next/standalone/.next/static
-cp -a public .next/standalone/public
-
-chown -R windowrepair-ae:windowrepair-ae .next
-```
-
-Установите unit-файл и запустите Web:
+Если на сервере ещё стоит старый unit `msb-web` (Next.js), остановите его:
 
 ```bash
-cd "$MSB_ROOT"
-sudo install -o root -g root -m 0644 \
-  deploy/msb-web.service /etc/systemd/system/msb-web.service
+sudo systemctl disable --now msb-web 2>/dev/null || true
+sudo rm -f /etc/systemd/system/msb-web.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now msb-web
-
-curl --retry 15 --retry-delay 2 --retry-connrefused \
-  --fail --show-error --output /dev/null \
-  http://127.0.0.1:3030/login
-
-echo 'Web: OK'
-sudo systemctl --no-pager --full status msb-web
-```
-
-Если Web не поднялся:
-
-```bash
-sudo journalctl -u msb-web -n 100 --no-pager
 ```
 
 ---
@@ -363,18 +322,17 @@ ip route
 sudo ufw status verbose
 ```
 
-Если UFW уже активен и сеть — `192.168.8.0/24`, разрешите два заданных порта
+Если UFW уже активен и сеть — `192.168.8.0/24`, разрешите порт `8085`
 только из LAN:
 
 ```bash
-sudo ufw allow from 192.168.8.0/24 to any port 3030 proto tcp comment 'MSB Web'
-sudo ufw allow from 192.168.8.0/24 to any port 8085 proto tcp comment 'MSB API'
+sudo ufw allow from 192.168.8.0/24 to any port 8085 proto tcp comment 'MSB UI/API'
 sudo ufw status numbered
 ```
 
 Если UFW не используется, не включайте его удалённо, пока отдельно не разрешён
-SSH — иначе можно потерять доступ к серверу. Внешний интернет-доступ к `3030` и
-`8085` на роутере пробрасывать не нужно.
+SSH — иначе можно потерять доступ к серверу. Внешний интернет-доступ к `8085`
+на роутере пробрасывать не нужно.
 
 ---
 
@@ -383,26 +341,25 @@ SSH — иначе можно потерять доступ к серверу. �
 ### На сервере
 
 ```bash
-sudo systemctl is-active postgresql msb-api msb-web
-sudo systemctl is-enabled postgresql msb-api msb-web
+sudo systemctl is-active postgresql msb-api
+sudo systemctl is-enabled postgresql msb-api
 
-sudo ss -ltnp | grep -E ':(3030|8085|5432)\b'
+sudo ss -ltnp | grep -E ':(8085|5432)\b'
 
 curl -fsS http://127.0.0.1:8085/health && echo
-curl -fsS -o /dev/null -w 'Web HTTP %{http_code}\n' \
-  http://127.0.0.1:3030/login
-curl -sS -o /dev/null -w 'Web proxy API HTTP %{http_code}\n' \
-  http://127.0.0.1:3030/api/auth/me
+curl -fsS -o /dev/null -w 'UI HTTP %{http_code}\n' \
+  http://127.0.0.1:8085/login
+curl -sS -o /dev/null -w 'API auth HTTP %{http_code}\n' \
+  http://127.0.0.1:8085/api/auth/me
 ```
 
-Для последней команды `401` — нормальный результат: он подтверждает, что Web
-дошёл до API без токена.
+Для последней команды `401` — нормальный результат: без cookie API не пускает.
 
 ### С другого компьютера или телефона в той же сети
 
 Откройте:
 
-1. `http://192.168.8.81:3030` — страница входа MSB;
+1. `http://192.168.8.81:8085/login` — страница входа MSB;
 2. `http://192.168.8.81:8085/health` — JSON со статусом `ok`;
 3. `http://192.168.8.81:8085/docs` — Swagger.
 
@@ -420,11 +377,7 @@ grep '^SEED_ADMIN_PASSWORD=' .env
 2. создайте отдельных сотрудников и не используйте admin для ежедневной работы;
 3. проверьте создание тестового ремонта, открытие карточки и чата;
 4. проверьте QR-ссылку: она должна начинаться с
-   `http://192.168.8.81:3030/r/`.
-
-> Обычный HTTP по LAN подходит для работы сайта, но браузеры обычно разрешают
-> установку PWA только по HTTPS (исключение — `localhost`). Для установки PWA на
-> телефоны позже потребуется HTTPS с доверенным сертификатом или локальным CA.
+   `http://192.168.8.81:8085/r/`.
 
 ---
 
@@ -532,25 +485,23 @@ git pull --ff-only
 # Если unit-файлы изменились, переустановить их безопасно всегда:
 sudo install -o root -g root -m 0644 \
   deploy/msb-api.service /etc/systemd/system/msb-api.service
-sudo install -o root -g root -m 0644 \
-  deploy/msb-web.service /etc/systemd/system/msb-web.service
 if systemctl cat msb-print-agent.service >/dev/null 2>&1; then
   sudo install -o root -g root -m 0644 \
     deploy/msb-print-agent.service /etc/systemd/system/msb-print-agent.service
 fi
 sudo systemctl daemon-reload
 
-# Установит зависимости, проверит Python, пересоберёт Web,
-# перезапустит API/Web, активный print-agent и выполнит health-check.
+# Установит зависимости, проверит Python, перезапустит API
+# (и активный print-agent) и выполнит health-check.
 sudo bash deploy/update.sh
 ```
 
 После обновления:
 
 ```bash
-sudo systemctl --no-pager --full status msb-api msb-web
+sudo systemctl --no-pager --full status msb-api
 curl -fsS http://127.0.0.1:8085/health && echo
-curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3030/login
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8085/login
 ```
 
 `.env` при обновлении не заменяйте файлом `deploy/env.production`: это шаблон,
@@ -594,7 +545,7 @@ PGPASSWORD="$DB_PASSWORD" pg_restore \
   --host=127.0.0.1 --username=msb --dbname=msb \
   --clean --if-exists /путь/к/msb.dump
 unset DB_PASSWORD
-sudo systemctl restart msb-api msb-web
+sudo systemctl restart msb-api
 ```
 
 `pg_restore --clean` изменяет текущую БД — используйте его только при
@@ -608,22 +559,21 @@ sudo systemctl restart msb-api msb-web
 
 ```bash
 sudo systemctl --no-pager --full status \
-  postgresql msb-api msb-web msb-print-agent 2>/dev/null || true
+  postgresql msb-api msb-print-agent 2>/dev/null || true
 
 sudo journalctl -u msb-api -n 100 --no-pager
-sudo journalctl -u msb-web -n 100 --no-pager
 sudo journalctl -u msb-print-agent -n 100 --no-pager
 ```
 
 ### Порт занят
 
 ```bash
-sudo ss -ltnp | grep -E ':(3030|8085|5432)\b'
+sudo ss -ltnp | grep -E ':(8085|5432)\b'
 sudo docker ps --format 'table {{.Names}}\t{{.Ports}}' 2>/dev/null || true
 ```
 
 Остановите конфликтующую старую службу или Docker Compose. Не меняйте порты в
-одном месте: они зафиксированы также в unit-файлах и proxy-конфигурации.
+одном месте: они зафиксированы также в unit-файлах.
 
 ### API не подключается к PostgreSQL
 
@@ -636,46 +586,43 @@ unset DB_PASSWORD
 sudo journalctl -u msb-api -n 100 --no-pager
 ```
 
-### Web открыт, но вход/API не работают
+### UI открыт, но вход/API не работают
 
 ```bash
 curl -i http://127.0.0.1:8085/health
-curl -i http://127.0.0.1:3030/api/auth/me
+curl -i http://127.0.0.1:8085/login
+curl -i http://127.0.0.1:8085/api/auth/me
 ```
 
-Если API отвечает напрямую, но не через `3030`, выполните чистую пересборку:
+Если health отвечает, а `/login` нет — проверьте шаблоны `apps/api/app/webui`
+и логи `msb-api`. Затем:
 
 ```bash
 cd /home/windowrepair-ae/msb
-sudo bash deploy/update.sh --web-only
+sudo bash deploy/update.sh
 ```
 
-Убедитесь, что при сборке `NEXT_PUBLIC_API_URL` не был задан как
-`http://localhost:8085` для браузерного кода. В штатной конфигурации обе
-`NEXT_PUBLIC_*` переменные пустые.
-
-### Ошибка прав на `.next`, uploads или printed
+### Ошибка прав на uploads или printed
 
 ```bash
 sudo chown -R windowrepair-ae:windowrepair-ae \
-  /home/windowrepair-ae/msb/apps/web/.next \
   /home/windowrepair-ae/msb/apps/api/uploads \
   /home/windowrepair-ae/msb/apps/print-agent/printed 2>/dev/null || true
-sudo systemctl restart msb-api msb-web
+sudo systemctl restart msb-api
 ```
 
 ### Полный короткий health-check
 
 ```bash
 cd /home/windowrepair-ae/msb
-sudo systemctl is-active postgresql msb-api msb-web
+sudo systemctl is-active postgresql msb-api
 curl -fsS http://127.0.0.1:8085/health && echo
-curl -fsS -o /dev/null -w 'web=%{http_code}\n' http://127.0.0.1:3030/login
-curl -fsS -o /dev/null -w 'proxy=%{http_code}\n' http://127.0.0.1:3030/api/auth/me
+curl -fsS -o /dev/null -w 'ui=%{http_code}\n' http://127.0.0.1:8085/login
+curl -sS -o /dev/null -w 'api=%{http_code}\n' http://127.0.0.1:8085/api/auth/me
 ```
 
 Итоговые рабочие адреса остаются:
 
-- **MSB:** `http://192.168.8.81:3030`
+- **MSB:** `http://192.168.8.81:8085/login`
 - **API:** `http://192.168.8.81:8085`
 - **Swagger:** `http://192.168.8.81:8085/docs`

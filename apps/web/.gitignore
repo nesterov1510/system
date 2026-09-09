@@ -1,6 +1,0 @@
-node_modules
-.next
-out
-*.tsbuildinfo
-.env*.local
-apps/web/public/turkmen_form.pdf

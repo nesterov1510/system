@@ -17,7 +17,7 @@ class ClientCreate(BaseModel):
 
         Без этого строка вроде "-----" нормализуется в пустой phone_norm, и все
         такие клиенты сливаются в одну запись (phone_norm — UNIQUE). Фронтенд
-        проверяет номер строго (webui + apps/web/lib/phone.ts), но API доступен и
+        проверяет номер строго (webui), но API доступен и
         напрямую, поэтому проверка дублируется на сервере.
         """
         if not any(ch.isdigit() for ch in (v or "")):
