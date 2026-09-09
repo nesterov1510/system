@@ -133,12 +133,35 @@ def test_price_search_and_hint(client, admin_headers):
 def test_stats_overview_and_tiles(client, admin_headers):
     r = client.get("/api/stats/overview", headers=admin_headers)
     assert r.status_code == 200
-    assert "total" in r.json()
+    body = r.json()
+    assert "total" in body
+    for key in (
+        "ready", "waiting_parts", "accepted_today", "in_repair",
+        "not_picked_up", "disposable", "warranty",
+    ):
+        assert key in body
+        assert body[key] >= 0
 
     r2 = client.get("/api/stats/tiles", headers=admin_headers)
     assert r2.status_code == 200
     # At least the "Всего" tile exists.
     assert any(t["group"] == "Всего" for t in r2.json())
+
+
+def test_stats_finance_chart(client, admin_headers, created_repair):
+    pay = client.post(
+        f"/api/repairs/{created_repair['id']}/payments",
+        headers=admin_headers,
+        json={"amount": 250, "method": "cash"},
+    )
+    assert pay.status_code == 201, pay.text
+
+    r = client.get("/api/stats/finance", headers=admin_headers, params={"period": "14d"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert len(body["turnover"]) == len(body["labels"])
+    assert sum(body["turnover"]) >= 250
 
 
 def test_ai_predict_eta_honest(client, admin_headers):

@@ -94,7 +94,8 @@ async def _cities(db):
 @router.get("/repairs", response_class=HTMLResponse)
 async def repairs_list(request: Request, stage: str | None = None, q: str | None = None,
                        status: str | None = None, view: str = "table", page: int = 1,
-                       just: str | None = None, printed: str | None = None):
+                       just: str | None = None, printed: str | None = None,
+                       filter: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
@@ -107,6 +108,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         )
         repairs, total = await fetch_repairs(
             db, user, stage=stage, status=status, q=q, page=page, page_size=50,
+            dash_filter=filter,
         )
         ids = [r.id for r in repairs]
         parts_cost = await repair_parts_cost(db, ids)
@@ -118,6 +120,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         # Счётчики этапов для бейджей (агрегат COUNT, без загрузки строк).
         from sqlalchemy import func as _func
 
+        from app.services.stats import DASHBOARD_FILTER_LABELS
         from app.webui.data import STAGE_STATUSES, master_scope
         counts = {"all": 0}
 
@@ -147,6 +150,8 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             sms=request.query_params.get("sms"),
             sms_detail=request.query_params.get("sms_detail"),
             can_finish=can_finish_repair(user),
+            dash_filter=filter or "",
+            dash_filter_label=DASHBOARD_FILTER_LABELS.get(filter or ""),
         )
         html = await render_async(
             "repairs/list.html" if view == "table" else "repairs/board.html"

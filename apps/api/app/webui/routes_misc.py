@@ -2,7 +2,7 @@
 import uuid
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -23,7 +23,6 @@ from app.db.models import (
 from app.db.session import async_session_factory
 from app.routers import parts as parts_api
 from app.routers import equipment as equipment_api
-from app.routers import stats as stats_api
 from app.routers import callcenter as callcenter_api
 from app.schemas.parts import PartCreate, PartUpdate
 from app.schemas.equipment import EquipmentCreate, EquipmentUpdate
@@ -395,17 +394,43 @@ async def dashboard_page(request: Request):
     try:
         if not can_view_analytics(user):
             return HTMLResponse("Раздел доступен администратору и менеджеру", status_code=403)
-        overview = await stats_api.overview(db)
+        from app.services import stats as stats_service
+
+        overview = await stats_service.overview(db)
         try:
-            tiles = await stats_api.tiles(db, device_type=None, brand=None, city_id=None)
+            tiles = await stats_service.tiles(db)
         except Exception:
-            tiles = {}
+            tiles = []
+        finance_chart = await stats_service.finance_chart(db, period="14d")
         ctx = await base_context(
             request, await get_web_user(request), active="/dashboard",
-            overview=overview, tiles=tiles,
+            overview=overview, tiles=tiles, finance_chart=finance_chart,
         )
         html = await render_async("dashboard.html", **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.get("/dashboard/finance")
+async def dashboard_finance(
+    request: Request,
+    period: str = "14d",
+    date_from: str | None = None,
+    date_to: str | None = None,
+):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not can_view_analytics(user):
+            return JSONResponse({"ok": False, "error": "Нет доступа"}, status_code=403)
+        from app.services import stats as stats_service
+
+        payload = await stats_service.finance_chart(
+            db, period=period, date_from=date_from, date_to=date_to,
+        )
+        return JSONResponse(payload)
     finally:
         await db.close()
 

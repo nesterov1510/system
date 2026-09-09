@@ -69,6 +69,58 @@ def test_all_main_pages_render_for_admin(client, path):
     assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:300]}"
 
 
+def test_dashboard_has_metric_cards_and_finance_chart(client):
+    cookies = _login(client)
+    r = client.get("/dashboard", cookies=cookies)
+    assert r.status_code == 200, r.text[:400]
+    html = r.text
+    for label in (
+        "Все ремонты", "Готово к выдаче", "Ожидаем запчасть", "Сегодня принята",
+        "В процессе ремонта", "Не забирает", "Можно выбрасывать", "На гарантии",
+    ):
+        assert label in html, label
+    assert 'href="/repairs?filter=ready"' in html
+    assert 'href="/repairs?filter=waiting-parts"' in html
+    assert "data-finance-chart" in html
+    assert 'data-finance-endpoint="/dashboard/finance"' in html
+    assert "/static/msb/dashboard/dashboard.js" in html
+    assert "dashboardFinanceData" in html
+
+    fin = client.get("/dashboard/finance?period=14d", cookies=cookies)
+    assert fin.status_code == 200, fin.text
+    body = fin.json()
+    assert body["ok"] is True
+    assert body["period"] == "14d"
+    assert len(body["labels"]) == len(body["profit"]) == len(body["expenses"])
+    assert len(body["labels"]) >= 1
+
+    custom = client.get(
+        "/dashboard/finance",
+        cookies=cookies,
+        params={"period": "custom", "date_from": "2026-01-01", "date_to": "2026-01-07"},
+    )
+    assert custom.status_code == 200
+    assert custom.json()["period"] == "custom"
+
+
+def test_dashboard_forbidden_for_operator(client):
+    cookies = _login(client, "operator@msb.local", "operator123")
+    page = client.get("/dashboard", cookies=cookies)
+    assert page.status_code == 403
+    fin = client.get("/dashboard/finance", cookies=cookies)
+    assert fin.status_code == 403
+
+
+def test_repairs_list_honors_dashboard_filter(client):
+    cookies = _login(client)
+    r = client.get("/repairs?filter=today", cookies=cookies)
+    assert r.status_code == 200
+    assert "Сегодня принята" in r.text
+    r2 = client.get("/repairs?filter=ready", cookies=cookies)
+    assert r2.status_code == 200
+    assert "Готово к выдаче" in r2.text
+
+
 def test_intake_flow_creates_repair_and_redirects_to_list(client):
     """Приёмка: после сохранения — редирект в список ремонтов с окном подтверждения."""
     cookies = _login(client)

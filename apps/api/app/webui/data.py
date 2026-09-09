@@ -40,10 +40,15 @@ async def fetch_repairs(
     q: str | None = None,
     master_id: uuid.UUID | None = None,
     unassigned: bool = False,
+    dash_filter: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
     filters = []
+    if dash_filter:
+        from app.services.stats import dashboard_filter_clauses
+
+        filters.extend(dashboard_filter_clauses(dash_filter))
     if stage and stage != "all" and stage in STAGE_STATUSES:
         filters.append(Repair.status.in_(STAGE_STATUSES[stage]))
     if status:

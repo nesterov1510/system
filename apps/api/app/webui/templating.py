@@ -3,11 +3,13 @@
 Все шаблоны лежат в app/webui/templates. Денежный формат берёт символ валюты
 из настроек (туркменский манат «ман.»), а не хардкодит ₽.
 """
+import json
 from datetime import datetime
 from pathlib import Path
 
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -89,6 +91,10 @@ def _active(ep: str | None, href: str) -> str:
     return ""
 
 
+def _tojson(value) -> Markup:
+    return Markup(json.dumps(value, ensure_ascii=False, default=str))
+
+env.filters["tojson"] = _tojson
 env.filters["money"] = _money
 env.filters["dt"] = _dt
 env.filters["date"] = _date

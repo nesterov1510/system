@@ -31,3 +31,14 @@
 
 @media(max-width:900px){.finance-panel__actions{width:100%;justify-content:space-between;align-items:flex-end}.finance-panel__head{align-items:flex-start}.finance-period__menu{left:0;right:auto}}
 @media(max-width:600px){.finance-panel__actions{align-items:stretch;flex-direction:column;gap:12px}.finance-period{align-self:flex-start}.finance-summary{width:100%}.finance-period__menu{position:fixed;left:12px;right:12px;top:auto;bottom:12px;width:auto;max-height:min(70vh,520px);overflow:auto;border-radius:14px}.finance-custom-period{position:relative;inset:auto;margin-top:4px;border:1px solid #edf0f2}}
+
+.analytics-panel{margin-top:16px}
+.analytics-table-wrap{overflow-x:auto}
+.analytics-table{width:100%;border-collapse:collapse;font-size:13px}
+.analytics-table th{padding:12px 10px;font-weight:700;text-align:left;color:#7b858e}
+.analytics-table th:first-child,.analytics-table td:first-child{padding-left:18px}
+.analytics-table th:last-child,.analytics-table td:last-child{padding-right:18px}
+.analytics-table th.num,.analytics-table td.num{text-align:right}
+.analytics-table tbody tr{border-top:1px solid #edf0f2}
+.analytics-table td{padding:12px 10px;color:#26313a}
+.analytics-empty{padding:22px 18px!important;text-align:left}

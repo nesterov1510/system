@@ -25,6 +25,9 @@
   <div>
     <h1>Все ремонты</h1>
     <p>Реестр ремонтов по этапам и быстрые действия.</p>
+    {% if dash_filter_label %}
+    <p class="muted" style="margin-top:6px">Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a></p>
+    {% endif %}
   </div>
   <a class="btn btn-primary" href="/repairs/new">＋ Новая приёмка</a>
 </section>
@@ -40,6 +43,7 @@
 
 <form class="row" method="get" action="/repairs" style="margin-bottom:14px">
   <input type="hidden" name="stage" value="{{ stage }}">
+  {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
   <input type="text" name="q" value="{{ q }}" placeholder="Поиск: номер, серийник, имя, телефон, марка…"
          style="max-width:420px" autofocus>
   <select name="status" style="max-width:220px">
