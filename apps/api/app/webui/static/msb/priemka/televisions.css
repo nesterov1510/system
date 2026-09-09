@@ -160,3 +160,10 @@
   .tv-camera-btn,.tv-gallery-btn{width:100%;padding:0 8px}
   .tv-photo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+#tvIdentity,
+input[name="brand_manual"],
+input[name="model_manual"],
+input[name="serial_manual"]{
+  text-transform:uppercase;
+}

@@ -12,9 +12,38 @@
     const brandInput = root.querySelector('[data-tv-brand-input]');
     const modelInput = root.querySelector('[data-tv-model-input]');
     const snInput = root.querySelector('[data-tv-sn-input]');
+    const brandManual = root.querySelector('[name="brand_manual"]');
+    const modelManual = root.querySelector('[name="model_manual"]');
+    const snManual = root.querySelector('[name="serial_manual"]');
+    let identitySyncing = false;
+
+    const toUpper = (value) => String(value || '').toLocaleUpperCase('en-US');
+
+    const upperInPlace = (el) => {
+      if (!el) return;
+      const next = toUpper(el.value);
+      if (el.value === next) return;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      el.value = next;
+      try {
+        if (typeof start === 'number' && typeof end === 'number') {
+          el.setSelectionRange(start, end);
+        }
+      } catch (_) { /* some input types do not support a caret */ }
+    };
+
+    const joinIdentity = (brand, model, sn) => {
+      const parts = [brand, model, sn].map((part) => toUpper(part).trim()).filter(Boolean);
+      if (!parts.length) return '';
+      if ((model && /[-–—]/.test(model)) || (sn && /[-–—]/.test(sn))) {
+        return parts.join(' - ');
+      }
+      return parts.join('-');
+    };
 
     const parseIdentity = (raw) => {
-      const value = String(raw || '').trim();
+      const value = toUpper(raw).trim();
       if (!value) return { brand: '', model: '', sn: '' };
 
       // Preferred delimiter: spaces around a dash. This preserves internal
@@ -46,27 +75,70 @@
       return { brand: value, model: '', sn: '' };
     };
 
-    const renderIdentity = () => {
-      const parsed = parseIdentity(identityInput?.value);
+    const paintIdentity = (parsed, { fromManual } = {}) => {
+      const brand = toUpper(parsed.brand).trim();
+      const model = toUpper(parsed.model).trim();
+      const sn = toUpper(parsed.sn).trim();
       const values = [
-        ['brand', parsed.brand, brandText, brandInput, 'Не указана'],
-        ['model', parsed.model, modelText, modelInput, 'Не указана'],
-        ['sn', parsed.sn, snText, snInput, 'Не указан'],
+        ['brand', brand, brandText, brandInput, brandManual, 'Не указана'],
+        ['model', model, modelText, modelInput, modelManual, 'Не указана'],
+        ['sn', sn, snText, snInput, snManual, 'Не указан'],
       ];
 
-      values.forEach(([key, value, output, hidden, emptyText]) => {
+      values.forEach(([key, value, output, hidden, manual, emptyText]) => {
         if (output) output.textContent = value || emptyText;
         if (hidden) hidden.value = value;
+        if (manual && document.activeElement !== manual) manual.value = value;
         const card = root.querySelector(`[data-tv-identity-part="${key}"]`);
         if (card) card.classList.toggle('is-filled', Boolean(value));
       });
+
+      if (fromManual && identityInput && document.activeElement !== identityInput) {
+        identityInput.value = joinIdentity(brand, model, sn);
+      }
+    };
+
+    const renderIdentity = () => {
+      if (identitySyncing) return;
+      identitySyncing = true;
+      upperInPlace(identityInput);
+      paintIdentity(parseIdentity(identityInput?.value));
+      identitySyncing = false;
+    };
+
+    const renderFromManuals = () => {
+      if (identitySyncing) return;
+      identitySyncing = true;
+      [brandManual, modelManual, snManual].forEach(upperInPlace);
+      paintIdentity({
+        brand: brandManual?.value || '',
+        model: modelManual?.value || '',
+        sn: snManual?.value || '',
+      }, { fromManual: true });
+      identitySyncing = false;
     };
 
     if (identityInput) {
       identityInput.addEventListener('input', renderIdentity);
       identityInput.addEventListener('change', renderIdentity);
-      renderIdentity();
+      const seeded = joinIdentity(
+        brandManual?.value || brandInput?.value || '',
+        modelManual?.value || modelInput?.value || '',
+        snManual?.value || snInput?.value || '',
+      );
+      if (!String(identityInput.value || '').trim() && seeded) {
+        identityInput.value = seeded;
+      }
+      if (String(identityInput.value || '').trim()) {
+        renderIdentity();
+      } else {
+        renderFromManuals();
+      }
     }
+    [brandManual, modelManual, snManual].forEach((el) => {
+      el?.addEventListener('input', renderFromManuals);
+      el?.addEventListener('change', renderFromManuals);
+    });
 
     // Delivery: compact toolbar control + modal. Values are written into
     // hidden form fields so the future persistence endpoint can save them.

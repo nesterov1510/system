@@ -222,6 +222,11 @@ async def repair_create(request: Request):
         condition_notes = "; ".join(cond_parts) or None
 
         is_delivery = bool(form.get("is_delivery"))
+        brand = _caps_ident(form.get("brand_manual") or form.get("brand"))
+        model = _caps_ident(form.get("model_manual") or form.get("model"))
+        serial = _caps_ident(form.get("serial_manual") or form.get("serial"))
+        if not brand and not model and not serial:
+            brand, model, serial = _parse_identity(form.get("identity_raw"))
         payload = RepairCreate(
             city_id=uuid.UUID(form["city_id"]),
             client=ClientCreate(
@@ -234,9 +239,9 @@ async def repair_create(request: Request):
             contact2_phone=(form.get("contact2_phone") or "").strip() or None,
             contact2_relation=(form.get("contact2_relation") or "").strip() or None,
             device_type=normalize_class(form.get("device_type") or "Другое"),
-            brand=(form.get("brand_manual") or form.get("brand") or "").strip() or None,
-            model=(form.get("model_manual") or form.get("model") or "").strip() or None,
-            serial=(form.get("serial_manual") or form.get("serial") or "").strip() or None,
+            brand=brand,
+            model=model,
+            serial=serial,
             complectation=comp or None,
             fault_client=(form.get("fault_client") or "").strip() or None,
             condition_notes=condition_notes,
@@ -309,6 +314,34 @@ async def repair_create(request: Request):
         return HTMLResponse(html, status_code=400)
     finally:
         await db.close()
+
+
+def _caps_ident(value: str | None) -> str | None:
+    """Марка / модель / SN в приёмке всегда заглавными."""
+    text = (value or "").strip()
+    return text.upper() or None
+
+
+def _parse_identity(raw: str | None) -> tuple[str | None, str | None, str | None]:
+    """Разбор строки «МАРКА-МОДЕЛЬ-SN», как в televisions.js."""
+    import re
+
+    value = (raw or "").strip().upper()
+    if not value:
+        return None, None, None
+    spaced = [part.strip() for part in re.split(r"\s+[-–—]\s+", value) if part.strip()]
+    if len(spaced) >= 3:
+        return spaced[0], spaced[1], " - ".join(spaced[2:]) or None
+    compact = value.split("-")
+    if len(compact) >= 3:
+        return (
+            compact[0].strip() or None,
+            compact[1].strip() or None,
+            "-".join(compact[2:]).strip() or None,
+        )
+    if len(compact) == 2:
+        return compact[0].strip() or None, compact[1].strip() or None, None
+    return value, None, None
 
 
 async def _iter_comp(form):

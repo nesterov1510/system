@@ -89,7 +89,7 @@ def test_intake_flow_creates_repair_and_redirects_to_list(client):
     assert location.startswith("/repairs?just=accepted"), location
     page = client.get(location, cookies=cookies)
     assert page.status_code == 200
-    assert "Samsung" in page.text and "QE55" in page.text
+    assert "SAMSUNG" in page.text and "QE55" in page.text
     assert "Сохранено" in page.text  # окно подтверждения на списке ремонтов
 
 
@@ -342,8 +342,51 @@ def test_intake_rich_form_fields(client):
     assert f.status_code == 200
     for marker in ('data-tv-intake', 'name="equipment"', 'name="condition"',
                    'data-delivery-open', 'data-camera-open', 'name="contact2_relation"',
-                   'name="fault_client"', 'name="delivery_district"'):
+                   'name="fault_client"', 'name="delivery_district"',
+                   'name="brand_manual"', 'name="model_manual"', 'name="serial_manual"',
+                   'data-tv-identity', 'autocapitalize="characters"'):
         assert marker in f.text, marker
+
+
+def test_intake_brand_model_sn_saved_uppercase(client, admin_headers):
+    """Марка, модель и SN в приёмке сохраняются заглавными; identity_raw разбирается."""
+    cookies = _login(client)
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    r = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "Капс Клиент",
+        "phone": "+993 61 4455667",
+        "device_type": "Телевизоры",
+        "brand_manual": "samsung",
+        "model_manual": "qe55q70",
+        "serial_manual": "sn12-345",
+        "fault_client": "нет звука",
+        "consent_pdn": "1",
+        "consent_storage": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    items = client.get("/api/repairs?q=SN12-345", headers=admin_headers).json()["items"]
+    assert items, "ремонт по SN не найден"
+    assert items[0]["brand"] == "SAMSUNG"
+    assert items[0]["model"] == "QE55Q70"
+    assert items[0]["serial"] == "SN12-345"
+
+    r2 = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "Строка Клиент",
+        "phone": "+993 61 4455668",
+        "device_type": "Мониторы",
+        "identity_raw": "dell - p2419h - sn-aa-11",
+        "fault_client": "полосы",
+        "consent_pdn": "1",
+        "consent_storage": "1",
+    }, follow_redirects=False)
+    assert r2.status_code == 303, r2.text
+    items = client.get("/api/repairs?q=SN-AA-11", headers=admin_headers).json()["items"]
+    assert items, "ремонт из identity_raw не найден"
+    assert items[0]["brand"] == "DELL"
+    assert items[0]["model"] == "P2419H"
+    assert items[0]["serial"] == "SN-AA-11"
 
 
 def test_intake_monitors_and_boxes_get_own_numbers(client, admin_headers):

@@ -118,7 +118,7 @@
       <div class="tv-field">
         <label for="tvIdentity">Марка — Модель — SN</label>
         <div class="tv-identity-input-wrap">
-          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" placeholder="Samsung-QE55Q70-SN123456" data-tv-identity>
+          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG-QE55Q70-SN123456" data-tv-identity>
           <span class="tv-identity-input-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 21h8M12 19v2"></path></svg>
           </span>
@@ -146,9 +146,9 @@
         <details style="margin-top:12px">
           <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
           <div class="tv-customer-grid" style="margin-top:10px">
-            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" placeholder="Samsung" value="{{ form.get('brand','') }}"></label>
-            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" placeholder="QE55Q70" value="{{ form.get('model','') }}"></label>
-            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" placeholder="SN123456" value="{{ form.get('serial','') }}"></label>
+            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}"></label>
+            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="QE55Q70" value="{{ form.get('model','') }}"></label>
+            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SN123456" value="{{ form.get('serial','') }}"></label>
           </div>
         </details>
       </div>
