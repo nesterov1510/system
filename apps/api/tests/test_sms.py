@@ -172,6 +172,9 @@ def test_auto_sms_to_master_on_assignment(
     )
     assert r.status_code == 200, r.text
     assert (master["id"], repair["id"]) in calls
+    detail = client.get(f"/api/repairs/{repair['id']}", headers=operator_headers).json()
+    kinds = [(e.get("data") or {}).get("kind") for e in detail["events"] if e["type"] == "notify"]
+    assert "master_assign_sms" in kinds
 
 
 def test_auto_sms_to_master_on_intake_with_master(

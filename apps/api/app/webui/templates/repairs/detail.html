@@ -6,9 +6,17 @@
     <form method="post" action="/repairs/{{ repair.id }}/print" style="margin:0"><button class="btn sm sec" type="submit">🖨 Бланк</button></form>
     <form method="post" action="/repairs/{{ repair.id }}/print-label" style="margin:0"><button class="btn sm sec" type="submit">🏷 Этикетка</button></form>
   {% endif %}
+  {% if can.finish and repair.status not in ['Выдано','Архив','Отказ'] %}
+    <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
+          onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? Три дня будут приходить напоминания забрать технику.')">
+      <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+      <button class="btn sm green" type="submit">✉ Уведомить клиента</button>
+    </form>
+  {% endif %}
   {% if can.finish and repair.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
-    <form method="post" action="/repairs/{{ repair.id }}/finish" style="margin:0"
-          onsubmit="return confirm('Перевести ремонт в «Готово к выдаче»?')">
+    <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
+          onsubmit="return confirm('Перевести ремонт в «Готово к выдаче» и отправить клиенту SMS?')">
+      <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
       <button class="btn sm green" type="submit">✓ Ремонт закончен</button>
     </form>
   {% endif %}

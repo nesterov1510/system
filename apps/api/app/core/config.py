@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     REMINDER_SEND_FROM_HOUR: int = 9
     REMINDER_SEND_TO_HOUR: int = 20
     REMINDER_TIMEZONE: str = "Asia/Ashgabat"
-    # 0 = напоминать, пока технику не заберут. Иначе — не больше N напоминаний.
-    REMINDER_MAX_COUNT: int = 0
+    # Сколько дней подряд напоминать после SMS «ремонт закончен».
+    # 0 = пока технику не заберут. По старой логике — 3 дня.
+    REMINDER_MAX_COUNT: int = 3
 
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"

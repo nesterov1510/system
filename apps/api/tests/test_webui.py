@@ -152,14 +152,58 @@ def test_repairs_table_compact_columns_and_hints(client):
     page = client.get("/repairs", cookies=cookies)
     html = page.text
     for header in ("📅 Дата", "📺 Техника", "🧾 Принял", "🔧 Причина", "💵 Сумма",
-                   "🔩 Запчасти", "👤 Клиент", "👷 Мастера", "💰 Выплата", "🏁 Итог"):
+                   "🔩 Запчасти", "👤 Клиент", "👷 Мастера", "💰 Выплата", "🏁 Итог",
+                   "✉ Клиенту"):
         assert header in html, header
     # Кнопка-пояснение «?» у каждой колонки (data-colhint).
-    assert html.count("data-colhint") >= 10
+    assert html.count("data-colhint") >= 11
+    assert "Уведомить" in html
     # Данные созданного ремонта и бейдж оплаты «долг» (не оплачен).
     assert "LG" in html
     assert "Колонка Клиент" in html
     assert "долг" in html
+    assert "/notify-client" in html
+
+
+def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
+    """Кнопка «Уведомить клиента» закрывает ремонт и шлёт SMS о готовности."""
+    sent = {}
+
+    async def _fake_send(phone, text, db=None):
+        sent["phone"] = phone
+        sent["text"] = text
+        return {"ok": True, "detail": "http_200"}
+
+    monkeypatch.setattr("app.routers.repairs.send_sms", _fake_send)
+    cookies = _login(client)
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    r = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "SMS Клиент",
+        "phone": "+993 61 7788990",
+        "device_type": "Телевизоры",
+        "brand": "Sony",
+        "model": "X80",
+        "fault_client": "нет изображения",
+        "consent_pdn": "1", "consent_storage": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    items = client.get("/api/repairs?q=SMS Клиент", cookies=cookies).json()["items"]
+    rid = items[0]["id"]
+    n = client.post(
+        f"/repairs/{rid}/notify-client",
+        cookies=cookies,
+        data={"next": "/repairs"},
+        follow_redirects=False,
+    )
+    assert n.status_code == 303, n.text
+    assert "just=notified" in n.headers["location"]
+    assert "sms=1" in n.headers["location"]
+    assert sent["phone"] == "+993 61 7788990"
+    assert "закончен" in sent["text"].lower() or "готов" in sent["text"].lower()
+    body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
+    assert body["status"] == "Готово к выдаче"
+    assert body["reminder_next_at"] is not None
 
 
 def test_public_status_page_has_no_internal_data(client):

@@ -4,6 +4,7 @@
 вызывают те же функции, что и JSON-API, — бизнес-логика не дублируется.
 """
 import uuid
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -143,6 +144,9 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             statuses=statuses, masters=masters,
             counts=counts, stages=stage_labels,
             just=just, printed=printed,
+            sms=request.query_params.get("sms"),
+            sms_detail=request.query_params.get("sms_detail"),
+            can_finish=can_finish_repair(user),
         )
         html = await render_async(
             "repairs/list.html" if view == "table" else "repairs/board.html"
@@ -369,7 +373,8 @@ async def _load_repair(db, repair_id: uuid.UUID):
 
 @router.get("/repairs/{repair_id}", response_class=HTMLResponse)
 async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info",
-                        just: str | None = None):
+                        just: str | None = None, sms: str | None = None,
+                        sms_detail: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
@@ -406,7 +411,8 @@ async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info
             request, await get_web_user(request), active="/repairs",
             repair=repair, parts=parts, payments=payments, photos=photos,
             catalog=catalog, currency=currency, statuses=statuses, masters=masters,
-            tab=tab, just=just, parts_cost=parts_cost, paid_total=paid_total,
+            tab=tab, just=just, sms=sms, sms_detail=sms_detail,
+            parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
             device_classes=DEVICE_CLASSES,
             can={
@@ -683,14 +689,43 @@ async def repair_delete_payment(request: Request, repair_id: uuid.UUID, payment_
         await db.close()
 
 
+def _safe_next(raw: str | None, fallback: str) -> str:
+    value = (raw or "").strip() or fallback
+    if not value.startswith("/repairs"):
+        return fallback
+    return value
+
+
 @router.post("/repairs/{repair_id}/finish")
 async def repair_finish(request: Request, repair_id: uuid.UUID):
+    return await _notify_client(request, repair_id)
+
+
+@router.post("/repairs/{repair_id}/notify-client")
+async def repair_notify_client(request: Request, repair_id: uuid.UUID):
+    return await _notify_client(request, repair_id)
+
+
+async def _notify_client(request: Request, repair_id: uuid.UUID):
     db, user, redir = await _require(request)
     if redir:
         return redir
     try:
-        await repairs_api.finish_repair(repair_id, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        from fastapi import HTTPException
+
+        try:
+            result = await repairs_api.notify_client_ready(repair_id, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        sms_ok = "1" if result.get("sms_sent") else "0"
+        detail = quote(str(result.get("sms_detail") or ""), safe="")
+        sep = "&" if "?" in nxt else "?"
+        return RedirectResponse(
+            f"{nxt}{sep}just=notified&sms={sms_ok}&sms_detail={detail}",
+            status_code=303,
+        )
     finally:
         await db.close()
 

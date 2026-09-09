@@ -146,6 +146,12 @@ def test_default_reminder_text_has_service_and_address():
     assert "MERYOSAB" in DEFAULT_PICKUP_REMINDER_TEXT
     assert "Парахат 3/2" in DEFAULT_PICKUP_REMINDER_TEXT
     assert "забрать" in DEFAULT_PICKUP_REMINDER_TEXT.lower()
+    assert "закончен" in DEFAULT_PICKUP_REMINDER_TEXT.lower()
+
+
+def test_reminders_default_to_three_days():
+    """После уведомления клиенту три дня приходят SMS «заберите технику»."""
+    assert settings.REMINDER_MAX_COUNT == 3
 
 
 def test_build_reminder_text_uses_default_template():

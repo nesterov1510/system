@@ -13,6 +13,13 @@
   {% if printed == '1' %}🏷 Этикетка отправлена на печать.{% else %}⚠ Этикетка не напечатана: проверьте принтер этикеток в настройках.{% endif %}
 </div>
 {% endif %}
+{% if just == 'notified' %}
+  {% if sms == '1' %}
+  <div class="flash ok"><b>✓ Клиенту отправлено SMS:</b> ремонт закончен. Три дня будут приходить напоминания забрать технику.</div>
+  {% else %}
+  <div class="flash err"><b>Ремонт отмечен как готовый,</b> но SMS клиенту не ушло{% if sms_detail %}: {{ sms_detail }}{% endif %}. Проверьте «Админ → SMS».</div>
+  {% endif %}
+{% endif %}
 
 <section class="page-head">
   <div>
@@ -81,6 +88,9 @@
           <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
             <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
               data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">✉ Клиенту
+            <button type="button" class="colhint" data-colhint data-title="Уведомить клиента"
+              data-hint="Отправить SMS, что ремонт закончен. После этого три дня клиенту приходят напоминания забрать технику.">?</button></th>
         </tr>
       </thead>
       <tbody>
@@ -139,9 +149,20 @@
               {% else %}<span class="chip gray" title="Ещё не оплачено">долг</span>{% endif %}
             </div>
           </td>
+          <td onclick="event.stopPropagation()">
+            {% if can_finish and r.status not in ['Выдано', 'Архив', 'Отказ'] %}
+            <form method="post" action="/repairs/{{ r.id }}/notify-client" style="margin:0"
+                  onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? После этого три дня будут приходить напоминания забрать технику.')">
+              <input type="hidden" name="next" value="/repairs">
+              <button class="btn sm green" type="submit" title="Уведомить клиента, что ремонт закончен">✉ Уведомить</button>
+            </form>
+            {% else %}
+            <span class="muted">—</span>
+            {% endif %}
+          </td>
         </tr>
       {% else %}
-        <tr><td colspan="10" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
+        <tr><td colspan="11" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
       {% endfor %}
       </tbody>
     </table>

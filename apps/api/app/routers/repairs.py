@@ -549,6 +549,36 @@ async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     return {"ok": True}
 
 
+async def _record_master_sms(db, user, repair, master) -> dict:
+    """Отправить SMS мастеру о назначении и записать итог в ленту ремонта."""
+    result = await send_master_assignment_sms(master, repair, db=db)
+    detail = result.get("detail") or ""
+    if result.get("ok"):
+        message = f"Мастеру {master.name} отправлено SMS о назначении"
+    elif detail == "no_master_phone":
+        message = f"SMS мастеру {master.name} не отправлено: в профиле нет телефона"
+    elif detail == "sms_disabled":
+        message = f"SMS мастеру {master.name} не отправлено: SMS-шлюз выключен"
+    else:
+        message = f"SMS мастеру {master.name} не отправлено: {detail}"
+    repair.events.append(
+        RepairEvent(
+            repair_id=repair.id,
+            type="notify",
+            actor_id=getattr(user, "id", None),
+            data={
+                "message": message,
+                "kind": "master_assign_sms",
+                "ok": bool(result.get("ok")),
+                "detail": detail,
+                "phone": getattr(master, "phone", None),
+            },
+        )
+    )
+    await db.commit()
+    return result
+
+
 @router.post("", response_model=RepairOut, status_code=201)
 async def create_repair(
     payload: RepairCreate,
@@ -633,7 +663,7 @@ async def create_repair(
     if repair.master is not None:
         if _is_assigner(user) and repair.master.id != user.id:
             await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
-        await send_master_assignment_sms(repair.master, repair, db=db)
+        await _record_master_sms(db, user, repair, repair.master)
 
     await manager.broadcast(
         {
@@ -1162,8 +1192,12 @@ async def update_repair(
         # Обновляем список «по-разному»: существующие связи переиспользуем,
         # иначе DELETE+INSERT той же пары в одном flush ломает уникальный индекс.
         existing = {m.user_id: m for m in repair.masters}
-        already = set(existing) | ({repair.master_id} if repair.master_id else set())
-        newly_assigned_ids = [mid for mid in ordered_ids if mid not in already]
+        already_masters = {
+            m.user_id for m in repair.masters if (m.kind or "master") != "helper"
+        }
+        if old_master_id:
+            already_masters.add(old_master_id)
+        newly_assigned_ids = [mid for mid in ordered_ids if mid not in already_masters]
         for link in list(repair.masters):
             if link.user_id not in ordered_ids:
                 repair.masters.remove(link)
@@ -1387,7 +1421,7 @@ async def update_repair(
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
-            await send_master_assignment_sms(master, repair, db=db)
+            await _record_master_sms(db, user, repair, master)
 
     if repair.status != old_status:
         await manager.broadcast(
@@ -1492,6 +1526,37 @@ async def finish_repair_send_sms(
     )
     await db.commit()
     return {"ok": True, "to": repair.client.phone}
+
+
+async def notify_client_ready(repair_id: uuid.UUID, db, user) -> dict:
+    """Закрыть ремонт и отправить клиенту SMS. Ошибка шлюза не откатывает статус.
+
+    После этого три дня идут напоминания «заберите технику» (см. reminders).
+    """
+    finished = await finish_repair(repair_id, db, user)
+    sms = finished.get("sms") or {}
+    text = (sms.get("text") or "").strip()
+    to = sms.get("to") or ""
+    if not text or not to:
+        return {**finished, "sms_sent": False, "sms_detail": "no_phone"}
+    result = await send_sms(to, text, db=db)
+    if result.get("ok"):
+        repair = await _get_repair_or_404(db, repair_id)
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="notify",
+                actor_id=user.id,
+                data={"message": "Клиенту отправлено SMS о готовности ремонта"},
+            )
+        )
+        await db.commit()
+        return {**finished, "sms_sent": True, "sms_detail": result.get("detail")}
+    return {
+        **finished,
+        "sms_sent": False,
+        "sms_detail": result.get("detail") or "ошибка шлюза",
+    }
 
 
 @router.post("/{repair_id}/events", response_model=RepairOut)
