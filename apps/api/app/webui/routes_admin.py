@@ -863,13 +863,13 @@ async def admin_settings_label_test(request: Request):
     if redir:
         return redir
     try:
-        from app.core.config import settings as cfg
         from app.services.print import render_repair_label_pdf
+        from app.services.public_url import public_base_url
 
         printer = await settings_svc.get_label_printer(db)
         if not printer.get("name") or not printer.get("ip"):
             return HTMLResponse("Сначала настройте CUPS-принтер этикеток (IP и имя очереди)", status_code=400)
-        repair_url = f"{cfg.PUBLIC_BASE_URL.rstrip('/')}/repairs"
+        repair_url = f"{public_base_url(request)}/repairs"
         pdf = render_repair_label_pdf(
             repair_number="ТЕСТ-58x38", client_name="Тестовый клиент",
             client_phone="+993 61 000000", repair_url=repair_url,

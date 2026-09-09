@@ -1,7 +1,7 @@
 import base64
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -389,7 +389,9 @@ async def test_label_print(db: DbSession):
     if not printer.get("name") or not printer.get("ip"):
         raise HTTPException(400, "Не настроен удалённый CUPS-принтер этикеток")
 
-    repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs"
+    from app.services.public_url import public_base_url
+
+    repair_url = f"{public_base_url()}/repairs"
     try:
         pdf = render_repair_label_pdf(
             repair_number="ТЕСТ-58x38",
@@ -708,7 +710,7 @@ async def _unset_defaults(db):
 
 
 @router.post("/print-templates/preview")
-async def preview_print_template(db: DbSession, body: dict):
+async def preview_print_template(db: DbSession, body: dict, request: Request):
     """Render a preview PDF from a template (and optional real repair)."""
     from fastapi.responses import Response as PDFResponse
 
@@ -730,10 +732,12 @@ async def preview_print_template(db: DbSession, body: dict):
         )
         repair = row.scalar_one_or_none()
 
+    from app.services.public_url import public_status_url
+
     if repair:
         from app.routers.prints import build_context
 
-        ctx = await build_context(db, repair)
+        ctx = await build_context(db, repair, request)
     else:
         # Пример для превью — из региона развёртывания (Ашхабад, +993, ман.),
         # а не из старой «московской» версии системы.
@@ -753,7 +757,7 @@ async def preview_print_template(db: DbSession, body: dict):
             "eta_days": "6",
             "legal_text": "Техника хранится в сервисном центре бесплатно в течение 3 (трёх) месяцев с момента уведомления о готовности.",
             "storage_until": "26.11.2026 14:02",
-            "qr_url": f"{settings.PUBLIC_BASE_URL}/r/example-token",
+            "qr_url": public_status_url("example-token"),
         }
 
     try:

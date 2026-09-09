@@ -299,10 +299,14 @@ async def repair_create(request: Request):
             if can_print(user, repair):
                 auto = await settings_svc.get_intake_auto_print(db)
                 if auto in ("label", "both"):
-                    await prints_api.create_label_print_job(repair_id=rid, db=db, user=user)
+                    await prints_api.create_label_print_job(
+                        repair_id=rid, db=db, user=user, request=request
+                    )
                     label_printed = True
                 if auto in ("blank", "both"):
-                    await prints_api.create_print_job(repair_id=rid, db=db, user=user)
+                    await prints_api.create_print_job(
+                        repair_id=rid, db=db, user=user, request=request
+                    )
         except Exception:
             pass  # проблемы печати не должны ломать приёмку
         # После сохранения — сразу в список ремонтов с подтверждением.
@@ -753,7 +757,9 @@ async def repair_print(request: Request, repair_id: uuid.UUID):
     if redir:
         return redir
     try:
-        await prints_api.create_print_job(repair_id=repair_id, db=db, user=user)
+        await prints_api.create_print_job(
+            repair_id=repair_id, db=db, user=user, request=request
+        )
         return RedirectResponse(f"/repairs/{repair_id}?printed=blank", status_code=303)
     finally:
         await db.close()
@@ -765,7 +771,9 @@ async def repair_print_label(request: Request, repair_id: uuid.UUID):
     if redir:
         return redir
     try:
-        await prints_api.create_label_print_job(repair_id=repair_id, db=db, user=user)
+        await prints_api.create_label_print_job(
+            repair_id=repair_id, db=db, user=user, request=request
+        )
         return RedirectResponse(f"/repairs/{repair_id}?printed=label", status_code=303)
     finally:
         await db.close()

@@ -153,6 +153,28 @@ def test_blank_without_data_is_still_printable(client, operator_headers, city_id
     assert repair["number"] in text
 
 
+def test_blank_qr_url_uses_app_port_not_legacy_frontend(
+    client, operator_headers, city_id, monkeypatch
+):
+    """Старый Next.js жил на :3030; QR должен открывать текущий UI на :8085."""
+    from app.core import config
+
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URL", "http://192.168.8.81:3030")
+    repair = _new_repair(client, operator_headers, city_id, "blank-qr-port")
+    r = client.post(f"/api/repairs/{repair['id']}/print", headers=operator_headers)
+    assert r.status_code == 200, r.text
+    qr = r.json()["qr_url"]
+    token = repair.get("public_token") or client.get(
+        f"/api/repairs/{repair['id']}", headers=operator_headers
+    ).json().get("public_token")
+    assert "/r/" in qr
+    if token:
+        assert qr.endswith(f"/r/{token}")
+    assert ":3030" not in qr
+    assert ":3000" not in qr
+    assert qr.startswith("http://192.168.8.81:8085/r/")
+
+
 def test_blank_has_client_stub_with_terms_and_qr(client, operator_headers, city_id):
     """Внизу бланка A4 — отрывная часть для клиента: условия хранения, слова о
     ремонте и QR-код для отслеживания статуса."""

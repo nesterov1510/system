@@ -4,8 +4,35 @@ All values come from environment variables (see `.env.example`).
 Secrets live only in env — never hardcoded.
 """
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# UI раньше жил отдельным Next.js на :3000/:3030. Сейчас всё на FastAPI :8085.
+# QR на бланке не должен вести на мёртвый фронтенд.
+APP_HTTP_PORT = 8085
+LEGACY_FRONTEND_PORTS = {3000, 3030}
+
+
+def normalize_public_base_url(url: str | None) -> str:
+    """Публичный origin без хвоста: схема://хост[:порт], порт 3030/3000 → 8085."""
+    raw = (url or "").strip() or f"http://localhost:{APP_HTTP_PORT}"
+    if "://" not in raw:
+        raw = "http://" + raw
+    parts = urlsplit(raw)
+    host = parts.hostname or "localhost"
+    scheme = parts.scheme or "http"
+    port = parts.port
+    if port in LEGACY_FRONTEND_PORTS:
+        port = APP_HTTP_PORT
+    if port is None and parts.netloc.rsplit("]", 1)[-1].endswith(tuple(f":{p}" for p in LEGACY_FRONTEND_PORTS)):
+        port = APP_HTTP_PORT
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        netloc = host
+    else:
+        netloc = f"{host}:{port}"
+    return urlunsplit((scheme, netloc, "", "", "")).rstrip("/")
 
 
 class Settings(BaseSettings):
@@ -19,6 +46,11 @@ class Settings(BaseSettings):
     # на :8085, Jinja2-интерфейс). Для локальной сети укажите IP машины,
     # например http://192.168.8.81:8085
     PUBLIC_BASE_URL: str = "http://localhost:8085"
+
+    @field_validator("PUBLIC_BASE_URL", mode="before")
+    @classmethod
+    def _rewrite_legacy_frontend_port(cls, value: str | None) -> str:
+        return normalize_public_base_url(value)
 
     # --- Database ---
     # prod: postgresql+asyncpg://user:pass@postgres:5432/msb
