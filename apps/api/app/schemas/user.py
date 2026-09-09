@@ -40,6 +40,7 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     name: str | None = None
+    email: str | None = None
     phone: str | None = None
     telegram: str | None = None
     role: str | None = None

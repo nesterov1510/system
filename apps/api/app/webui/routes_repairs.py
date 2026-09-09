@@ -14,6 +14,7 @@ from app.core.permissions import (
     can_access_repair,
     can_add_repair_part,
     can_assign_masters,
+    can_delete_repair,
     can_edit_device_info,
     can_edit_finances,
     can_finish_repair,
@@ -374,6 +375,7 @@ async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info
             catalog=catalog, currency=currency, statuses=statuses, masters=masters,
             tab=tab, just=just, parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
+            device_classes=DEVICE_CLASSES,
             can={
                 "finance": can_edit_finances(user),
                 "assign": can_assign_masters(user),
@@ -385,6 +387,8 @@ async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info
                 "addpart": can_add_repair_part(user),
                 "setpartprice": can_set_repair_part_price(user),
                 "master_only": is_master_only(user),
+                "admin": can_delete_repair(user),
+                "delete": can_delete_repair(user),
             },
         )
         html = await render_async("repairs/detail.html", **ctx)
@@ -462,6 +466,88 @@ async def repair_assign(request: Request, repair_id: uuid.UUID):
         payload = RepairUpdate(master_ids=ids or None)
         await repairs_api.update_repair(repair_id, payload, db, user)
         return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/admin")
+async def repair_admin_edit(request: Request, repair_id: uuid.UUID):
+    """Админ правит все поля карточки: клиент, техника, жалоба, доставка, ETA."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_delete_repair(user):
+            return HTMLResponse("Только администратор", status_code=403)
+        form = await request.form()
+
+        def _blank(key):
+            v = (form.get(key) or "").strip()
+            return v or None
+
+        eta_raw = (form.get("eta_days") or "").strip()
+        try:
+            eta_days = int(eta_raw) if eta_raw else None
+        except ValueError:
+            eta_days = None
+
+        complectation = None
+        if "complectation" in form:
+            comp_raw = (form.get("complectation") or "").strip()
+            complectation = {
+                item.strip(): True for item in comp_raw.split(",") if item.strip()
+            } or None
+
+        payload = RepairUpdate(
+            device_type=normalize_class(_blank("device_type")) if _blank("device_type") else None,
+            brand=_blank("brand"),
+            model=_blank("model"),
+            serial=_blank("serial"),
+            fault_client=_blank("fault_client"),
+            fault_master=_blank("fault_master"),
+            condition_notes=_blank("condition_notes"),
+            contact2_name=_blank("contact2_name"),
+            contact2_phone=_blank("contact2_phone"),
+            contact2_relation=_blank("contact2_relation"),
+            is_delivery=bool(form.get("is_delivery")),
+            delivery_district=_blank("delivery_district"),
+            eta_days=eta_days,
+            complectation=complectation,
+        )
+        try:
+            await repairs_api.update_repair(repair_id, payload, db, user)
+            client_name = _blank("client_name")
+            client_phone = _blank("client_phone")
+            if client_name or client_phone:
+                repair = await repairs_api._get_repair_or_404(db, repair_id)
+                await repairs_api.update_client(
+                    repair.client_id,
+                    repairs_api.ClientUpdate(full_name=client_name, phone=client_phone),
+                    db,
+                    user,
+                )
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/delete")
+async def repair_admin_delete(request: Request, repair_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        try:
+            await repairs_api.delete_repair(repair_id, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/repairs", status_code=303)
     finally:
         await db.close()
 

@@ -6,7 +6,12 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.core.permissions import can_edit_stock_catalog, can_view_analytics
+from app.core.permissions import (
+    can_delete_client,
+    can_edit_stock_catalog,
+    can_view_analytics,
+    has_any_role,
+)
 from app.db.models import (
     Client,
     Equipment,
@@ -20,8 +25,8 @@ from app.routers import parts as parts_api
 from app.routers import equipment as equipment_api
 from app.routers import stats as stats_api
 from app.routers import callcenter as callcenter_api
-from app.schemas.parts import PartCreate
-from app.schemas.equipment import EquipmentCreate
+from app.schemas.parts import PartCreate, PartUpdate
+from app.schemas.equipment import EquipmentCreate, EquipmentUpdate
 from app.webui.catalog import DEVICE_CLASSES
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
@@ -104,9 +109,54 @@ async def client_detail(request: Request, client_id: uuid.UUID):
         ctx = await base_context(
             request, await get_web_user(request), active="/clients",
             client=client, repairs=repairs, currency=currency,
+            can_edit_client=has_any_role(user, "admin", "manager", "operator"),
+            can_delete_client=can_delete_client(user),
         )
         html = await render_async("client_detail.html", **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.post("/clients/{client_id}/update")
+async def client_update(request: Request, client_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        from app.routers import repairs as repairs_api
+
+        f = await request.form()
+        payload = repairs_api.ClientUpdate(
+            full_name=(f.get("full_name") or "").strip() or None,
+            phone=(f.get("phone") or "").strip() or None,
+        )
+        try:
+            await repairs_api.update_client(client_id, payload, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(f"/clients/{client_id}", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/clients/{client_id}/delete")
+async def client_delete(request: Request, client_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        from app.routers import repairs as repairs_api
+
+        try:
+            await repairs_api.delete_client(client_id, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/clients", status_code=303)
     finally:
         await db.close()
 
@@ -187,6 +237,62 @@ async def parts_create(request: Request):
         await db.close()
 
 
+@router.post("/parts/{part_id}/update")
+async def parts_update(request: Request, part_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        f = await request.form()
+
+        def num(k):
+            v = (f.get(k) or "").strip().replace(",", ".")
+            return float(v) if v else None
+
+        payload = PartUpdate(
+            name=(f.get("name") or "").strip() or None,
+            sku=(f.get("sku") or "").strip() or None,
+            category=(f.get("category") or "").strip() or None,
+            stock_qty=int(f.get("stock_qty") or 0) if (f.get("stock_qty") or "").strip() != "" else None,
+            min_stock=int(f.get("min_stock") or 0) if (f.get("min_stock") or "").strip() != "" else None,
+            cost_price=num("cost_price"),
+            sell_price=num("sell_price"),
+            supplier=(f.get("supplier") or "").strip() or None,
+        )
+        try:
+            await parts_api.update_part(part_id, payload, db, user, _=True)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/parts", status_code=303)
+    except Exception as e:
+        return HTMLResponse(f"Не удалось сохранить позицию: {getattr(e, 'detail', e)}", status_code=400)
+    finally:
+        await db.close()
+
+
+@router.post("/parts/{part_id}/delete")
+async def parts_delete(request: Request, part_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        try:
+            await parts_api.delete_part(part_id, db, user, _=True)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/parts", status_code=303)
+    finally:
+        await db.close()
+
+
 @router.post("/equipment/create")
 async def equipment_create(request: Request):
     db, user, redir = await _require(request)
@@ -216,6 +322,64 @@ async def equipment_create(request: Request):
         return RedirectResponse("/parts", status_code=303)
     except Exception as e:
         return HTMLResponse(f"Не удалось добавить технику: {getattr(e, 'detail', e)}", status_code=400)
+    finally:
+        await db.close()
+
+
+@router.post("/equipment/{equipment_id}/update")
+async def equipment_update(request: Request, equipment_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        f = await request.form()
+
+        def num(k):
+            v = (f.get(k) or "").strip().replace(",", ".")
+            return float(v) if v else None
+
+        components_raw = (f.get("components") or "").strip()
+        components = [c.strip() for c in components_raw.split(",") if c.strip()] or None
+        payload = EquipmentUpdate(
+            name=(f.get("name") or "").strip() or None,
+            brand=(f.get("brand") or "").strip() or None,
+            model=(f.get("model") or "").strip() or None,
+            purchase_price=num("purchase_price"),
+            status=(f.get("status") or "").strip() or None,
+            storage_place=(f.get("storage_place") or "").strip() or None,
+            notes=(f.get("notes") or "").strip() or None,
+            components=components,
+        )
+        try:
+            await equipment_api.update_equipment(equipment_id, payload, db, user, _=True)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/parts", status_code=303)
+    except Exception as e:
+        return HTMLResponse(f"Не удалось сохранить технику: {getattr(e, 'detail', e)}", status_code=400)
+    finally:
+        await db.close()
+
+
+@router.post("/equipment/{equipment_id}/delete")
+async def equipment_delete(request: Request, equipment_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        try:
+            await equipment_api.delete_equipment(equipment_id, db, user, _=True)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/parts", status_code=303)
     finally:
         await db.close()
 
@@ -313,6 +477,38 @@ async def price_create(request: Request):
             active=True,
         )
         db.add(item)
+        await db.commit()
+        return RedirectResponse("/prices", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/prices/{price_id}/update")
+async def price_update(request: Request, price_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not _can_edit_prices(user):
+            return HTMLResponse("Недостаточно прав", status_code=403)
+        f = await request.form()
+
+        def num(k):
+            v = (f.get(k) or "").strip().replace(",", ".")
+            return float(v) if v else None
+
+        item = await db.get(PriceItem, price_id)
+        if item is None or not item.active:
+            return HTMLResponse("Позиция прайса не найдена", status_code=404)
+        item.device_type = (f.get("device_type") or "").strip() or None
+        item.brand = (f.get("brand") or "").strip() or None
+        item.model_or_line = (f.get("model_or_line") or "").strip() or None
+        item.fault = (f.get("fault") or "").strip() or None
+        item.price_min = num("price_min")
+        item.price_max = num("price_max")
+        item.price_avg = num("price_avg")
+        days = (f.get("typical_days") or "").strip()
+        item.typical_days = int(days) if days.isdigit() else None
         await db.commit()
         return RedirectResponse("/prices", status_code=303)
     finally:

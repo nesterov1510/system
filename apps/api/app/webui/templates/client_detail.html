@@ -7,6 +7,19 @@
   <h1 style="margin:0">{{ client.full_name }}</h1>
   <p class="mono" style="font-size:16px;margin:6px 0">📞 {{ client.phone }}</p>
   <p class="muted">Ремонтов: <b>{{ repairs | length }}</b></p>
+  {% if can_edit_client %}
+  <form method="post" action="/clients/{{ client.id }}/update" class="form-grid" style="margin-top:14px">
+    <label class="fld"><span class="lbl">Имя</span><input type="text" name="full_name" value="{{ client.full_name }}" required></label>
+    <label class="fld"><span class="lbl">Телефон</span><input type="tel" name="phone" value="{{ client.phone }}" required></label>
+    <div style="align-self:end"><button class="btn sm" type="submit">Сохранить</button></div>
+  </form>
+  {% endif %}
+  {% if can_delete_client %}
+  <form method="post" action="/clients/{{ client.id }}/delete" style="margin-top:10px"
+        onsubmit="return confirm('Удалить карточку клиента {{ client.full_name }}?')">
+    <button class="btn sm red" type="submit">Удалить клиента</button>
+  </form>
+  {% endif %}
 </div></div>
 
 <div class="card"><div class="table-wrap">

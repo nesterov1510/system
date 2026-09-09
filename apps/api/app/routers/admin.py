@@ -154,6 +154,16 @@ async def update_user(
     password = data.pop("password", None)
     roles = data.pop("roles", None)
     permissions = data.pop("permissions", None)
+    if "email" in data:
+        new_email = (data["email"] or "").strip().lower()
+        if not new_email:
+            raise HTTPException(400, "Email не может быть пустым")
+        clash = await db.execute(
+            select(User).where(User.email == new_email, User.id != user_id)
+        )
+        if clash.scalar_one_or_none():
+            raise HTTPException(409, "Email уже занят")
+        data["email"] = new_email
     for field, value in data.items():
         setattr(user, field, value)
     if roles is not None:

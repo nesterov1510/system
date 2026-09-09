@@ -12,6 +12,12 @@
       <button class="btn sm green" type="submit">✓ Ремонт закончен</button>
     </form>
   {% endif %}
+  {% if can.delete %}
+    <form method="post" action="/repairs/{{ repair.id }}/delete" style="margin:0"
+          onsubmit="return confirm('Удалить ремонт {{ repair.number }} безвозвратно?')">
+      <button class="btn sm red" type="submit">🗑 Удалить</button>
+    </form>
+  {% endif %}
 {% endblock %}
 {% block content %}
 
@@ -81,6 +87,46 @@
         <label class="fld"><span class="lbl">Модель</span><input type="text" name="model" value="{{ repair.model or '' }}"></label>
         <label class="fld"><span class="lbl">Серийный №</span><input type="text" name="serial" value="{{ repair.serial or '' }}"></label>
         <div><button class="btn sm" type="submit">Сохранить</button></div>
+      </form>
+    </details>
+    {% endif %}
+    {% if can.admin %}
+    <details style="margin-top:14px" open>
+      <summary class="btn sm" style="display:inline-block">🛠 Админ: все поля карточки</summary>
+      <form method="post" action="/repairs/{{ repair.id }}/admin" class="form-grid" style="margin-top:12px">
+        <label class="fld"><span class="lbl">Клиент</span>
+          <input type="text" name="client_name" value="{{ repair.client.full_name }}"></label>
+        <label class="fld"><span class="lbl">Телефон клиента</span>
+          <input type="tel" name="client_phone" value="{{ repair.client.phone }}"></label>
+        <label class="fld"><span class="lbl">Тип техники</span>
+          <select name="device_type">
+            {% for c in device_classes %}
+            <option value="{{ c.value }}" {% if repair.device_type==c.value %}selected{% endif %}>{{ c.value }}</option>
+            {% endfor %}
+          </select></label>
+        <label class="fld"><span class="lbl">Марка</span><input type="text" name="brand" value="{{ repair.brand or '' }}"></label>
+        <label class="fld"><span class="lbl">Модель</span><input type="text" name="model" value="{{ repair.model or '' }}"></label>
+        <label class="fld"><span class="lbl">Серийный №</span><input type="text" name="serial" value="{{ repair.serial or '' }}"></label>
+        <label class="fld" style="grid-column:1/-1"><span class="lbl">Неисправность клиента</span>
+          <textarea name="fault_client">{{ repair.fault_client or '' }}</textarea></label>
+        <label class="fld" style="grid-column:1/-1"><span class="lbl">Диагноз мастера</span>
+          <textarea name="fault_master">{{ repair.fault_master or '' }}</textarea></label>
+        <label class="fld" style="grid-column:1/-1"><span class="lbl">Внешний вид / состояние</span>
+          <textarea name="condition_notes">{{ repair.condition_notes or '' }}</textarea></label>
+        <label class="fld" style="grid-column:1/-1"><span class="lbl">Комплектация (через запятую)</span>
+          <input type="text" name="complectation" value="{% if repair.complectation %}{% for k,v in repair.complectation.items() if v %}{{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}"></label>
+        <label class="fld"><span class="lbl">Второй контакт</span>
+          <input type="text" name="contact2_name" value="{{ repair.contact2_name or '' }}"></label>
+        <label class="fld"><span class="lbl">Телефон 2</span>
+          <input type="tel" name="contact2_phone" value="{{ repair.contact2_phone or '' }}"></label>
+        <label class="fld"><span class="lbl">Кто это</span>
+          <input type="text" name="contact2_relation" value="{{ repair.contact2_relation or '' }}"></label>
+        <label class="fld"><span class="lbl">Срок (дней)</span>
+          <input type="number" name="eta_days" min="0" value="{{ repair.eta_days or '' }}"></label>
+        <label class="fld"><span class="lbl">Район доставки</span>
+          <input type="text" name="delivery_district" value="{{ repair.delivery_district or '' }}"></label>
+        <label class="check" style="grid-column:1/-1"><input type="checkbox" name="is_delivery" {% if repair.is_delivery %}checked{% endif %}> Заказ с доставкой</label>
+        <div style="grid-column:1/-1"><button class="btn green" type="submit">Сохранить все поля</button></div>
       </form>
     </details>
     {% endif %}

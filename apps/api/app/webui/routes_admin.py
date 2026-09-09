@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.core import permissions as perms
 from app.core.security import hash_password
-from app.db.models import PrintJob, User, UserRole
+from app.db.models import Branch, City, PrintJob, User, UserRole
 from app.db.session import async_session_factory
 from app.services import audit
 from app.services import settings as settings_svc
@@ -93,6 +93,8 @@ async def admin_users(request: Request):
         return redir
     try:
         users = (await db.execute(select(User).order_by(User.name))).scalars().all()
+        cities = (await db.execute(select(City).order_by(City.name))).scalars().all()
+        branches = (await db.execute(select(Branch).order_by(Branch.name))).scalars().all()
 
         def _perm_view(u):
             grants = perms.user_grants(u)
@@ -111,6 +113,7 @@ async def admin_users(request: Request):
         ctx = await base_context(
             request, await get_web_user(request), active="/admin/users",
             users=users, roles=ROLE_CHOICES, perms_by_user=perms_by_user,
+            cities=cities, branches=branches,
         )
         html = await render_async("admin/users.html", **ctx)
         return HTMLResponse(html)
@@ -129,16 +132,80 @@ async def admin_users_create(request: Request):
         exists = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if exists:
             return HTMLResponse("Пользователь с таким email уже есть", status_code=409)
+        role = f.get("role", "operator")
+        extra_roles = [r for r in f.getlist("extra_roles") if r in ROLE_CHOICES and r != role]
+        city_raw = (f.get("city_id") or "").strip()
+        branch_raw = (f.get("branch_id") or "").strip()
         u = User(
             name=f.get("name", "").strip(),
             email=email,
             phone=(f.get("phone") or "").strip() or None,
+            telegram=(f.get("telegram") or "").strip() or None,
             password_hash=hash_password(f.get("password") or "changeme123"),
-            role=f.get("role", "operator"),
+            role=role,
+            extra_roles=extra_roles or None,
+            city_id=uuid.UUID(city_raw) if city_raw else None,
+            branch_id=uuid.UUID(branch_raw) if branch_raw else None,
             active=True,
         )
         db.add(u)
         await db.commit()
+        return RedirectResponse("/admin/users", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/admin/users/{user_id}/update")
+async def admin_users_update(request: Request, user_id: uuid.UUID):
+    """Полное редактирование карточки сотрудника (имя, контакты, роли, город)."""
+    db, actor, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        from app.routers import admin as admin_api
+        from app.schemas.user import UserUpdate
+
+        f = await request.form()
+        role = f.get("role") or None
+        extra = [r for r in f.getlist("extra_roles") if r in ROLE_CHOICES]
+        city_raw = (f.get("city_id") or "").strip()
+        branch_raw = (f.get("branch_id") or "").strip()
+        payload = UserUpdate(
+            name=(f.get("name") or "").strip() or None,
+            email=(f.get("email") or "").strip() or None,
+            phone=(f.get("phone") or "").strip() or None,
+            telegram=(f.get("telegram") or "").strip() or None,
+            role=role if role in ROLE_CHOICES else None,
+            roles=extra,
+            city_id=uuid.UUID(city_raw) if city_raw else None,
+            branch_id=uuid.UUID(branch_raw) if branch_raw else None,
+        )
+        try:
+            await admin_api.update_user(user_id, payload, db, actor)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse("/admin/users", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/admin/users/{user_id}/delete")
+async def admin_users_delete(request: Request, user_id: uuid.UUID):
+    """Отключить сотрудника (то же, что DELETE /api/admin/users)."""
+    db, actor, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        from app.routers import admin as admin_api
+
+        try:
+            await admin_api.deactivate_user(user_id, db, actor)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
         return RedirectResponse("/admin/users", status_code=303)
     finally:
         await db.close()

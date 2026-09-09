@@ -72,6 +72,12 @@ class RepairCreate(BaseModel):
 
 class RepairUpdate(BaseModel):
     status: str | None = None
+    device_type: str | None = Field(default=None, min_length=1, max_length=32)
+    fault_client: str | None = None
+    condition_notes: str | None = None
+    contact2_relation: str | None = None
+    delivery_district: str | None = None
+    complectation: dict | None = None
     master_id: uuid.UUID | None = None
     # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
     # Первый в списке становится основным (master_id).

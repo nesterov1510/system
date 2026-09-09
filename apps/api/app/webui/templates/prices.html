@@ -72,8 +72,28 @@
         <td class="num"><b>{{ p.price_avg | money('ман.') if p.price_avg else '—' }}</b></td>
         <td class="num">{% if p.typical_days %}{{ p.typical_days }} дн{% else %}—{% endif %}</td>
         {% if can_edit_prices %}
-        <td class="num">
-          <form method="post" action="/prices/{{ p.id }}/delete" style="margin:0"
+        <td class="wrap">
+          <details>
+            <summary class="btn sm ghost">✏️</summary>
+            <form method="post" action="/prices/{{ p.id }}/update" class="form-grid" style="margin-top:8px;min-width:280px">
+              <label class="fld"><span class="lbl">Тип техники</span>
+                <select name="device_type">
+                  <option value="">— любой —</option>
+                  {% for c in device_classes %}
+                  <option value="{{ c.value }}" {% if p.device_type==c.value %}selected{% endif %}>{{ c.value }}</option>
+                  {% endfor %}
+                </select></label>
+              <label class="fld"><span class="lbl">Марка</span><input type="text" name="brand" value="{{ p.brand or '' }}"></label>
+              <label class="fld"><span class="lbl">Услуга *</span><input type="text" name="fault" value="{{ p.fault or '' }}" required></label>
+              <label class="fld"><span class="lbl">Модель</span><input type="text" name="model_or_line" value="{{ p.model_or_line or '' }}"></label>
+              <label class="fld"><span class="lbl">От</span><input type="text" name="price_min" value="{{ p.price_min or '' }}"></label>
+              <label class="fld"><span class="lbl">До</span><input type="text" name="price_max" value="{{ p.price_max or '' }}"></label>
+              <label class="fld"><span class="lbl">Средняя</span><input type="text" name="price_avg" value="{{ p.price_avg or '' }}"></label>
+              <label class="fld"><span class="lbl">Срок</span><input type="number" name="typical_days" value="{{ p.typical_days or '' }}"></label>
+              <div><button class="btn sm green" type="submit">Сохранить</button></div>
+            </form>
+          </details>
+          <form method="post" action="/prices/{{ p.id }}/delete" style="display:inline"
                 onsubmit="return confirm('Удалить позицию из прайса?')">
             <button class="btn sm sec" type="submit">Удалить</button>
           </form>
