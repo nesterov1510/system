@@ -101,6 +101,9 @@ def test_all_main_pages_render_for_admin(client, path):
     cookies = _login(client)
     r = client.get(path, cookies=cookies)
     assert r.status_code == 200, f"{path} -> {r.status_code}: {r.text[:300]}"
+    # Отладочная метка шаблона не должна утекать в шапку (на телефоне видно как текст).
+    assert "&lt;!-- rail --&gt;" not in r.text
+    assert "<!-- rail -->" not in r.text
 
 
 def test_dashboard_has_metric_cards_and_finance_chart(client):
