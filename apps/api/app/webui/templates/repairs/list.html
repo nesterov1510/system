@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Все ремонты{% endblock %}
 {% block page_name %}Все ремонты{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/repair.css">{% endblock %}
 {% block topbar_actions %}
   <a class="btn sm sec" href="/repairs?view=board">Доска</a>
   <a class="btn sm" href="/repairs/new">➕ Приёмка</a>
@@ -21,41 +22,37 @@
   {% endif %}
 {% endif %}
 
-<section class="page-head">
-  <div>
-    <h1>Все ремонты</h1>
-    <p>Реестр ремонтов по этапам и быстрые действия.</p>
-    {% if dash_filter_label %}
-    <p class="muted" style="margin-top:6px">Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a></p>
-    {% endif %}
-  </div>
-  <a class="btn btn-primary" href="/repairs/new">＋ Новая приёмка</a>
+<div class="rlist-page">
+<section class="rlist-head">
+  <h1>Все ремонты</h1>
+  <p>{% if dash_filter_label %}Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a>{% else %}Реестр по этапам — статус, клиент и действия в одной строке.{% endif %}</p>
 </section>
 
-<div class="tabs">
-  <a href="/repairs?stage=all" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
-  {% for key, label in stages %}
-    <a href="/repairs?stage={{ key }}" class="{% if stage==key %}active{% endif %}">
-      {{ label }} <span class="chip">{{ counts[key] }}</span>
-    </a>
-  {% endfor %}
+<div class="rlist-toolbar">
+  <div class="tabs">
+    <a href="/repairs?stage=all" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
+    {% for key, label in stages %}
+      <a href="/repairs?stage={{ key }}" class="{% if stage==key %}active{% endif %}">
+        {{ label }} <span class="chip">{{ counts[key] }}</span>
+      </a>
+    {% endfor %}
+  </div>
+  <form class="row" method="get" action="/repairs">
+    <input type="hidden" name="stage" value="{{ stage }}">
+    {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
+    <input type="text" name="q" value="{{ q }}" placeholder="Номер, серийник, имя, телефон, марка…"
+           style="flex:1;min-width:200px;max-width:420px">
+    <select name="status" style="max-width:220px">
+      <option value="">Любой статус</option>
+      {% for s in statuses %}
+        <option value="{{ s }}" {% if s==status %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn sm" type="submit">Найти</button>
+  </form>
 </div>
 
-<form class="row" method="get" action="/repairs" style="margin-bottom:14px">
-  <input type="hidden" name="stage" value="{{ stage }}">
-  {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
-  <input type="text" name="q" value="{{ q }}" placeholder="Поиск: номер, серийник, имя, телефон, марка…"
-         style="max-width:420px" autofocus>
-  <select name="status" style="max-width:220px">
-    <option value="">Любой статус</option>
-    {% for s in statuses %}
-      <option value="{{ s }}" {% if s==status %}selected{% endif %}>{{ s }}</option>
-    {% endfor %}
-  </select>
-  <button class="btn sm" type="submit">Найти</button>
-</form>
-
-<div class="card">
+<div class="rlist-card">
   <div class="table-wrap">
     <table>
       <thead>
@@ -100,16 +97,21 @@
       <tbody>
       {% for r in repairs %}
         <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
-          <td>{{ r.accepted_at | date }}</td>
+          <td>
+            <div class="rlist-date">
+              <b>{{ r.accepted_at | date }}</b>
+              <span class="code">{{ r.number }}</span>
+            </div>
+          </td>
           <td class="wrap">
-            <span style="display:flex;align-items:center;gap:8px">
-              <span>{{ r.device_type | class_icon }}</span>
+            <div class="rlist-dev">
+              <span class="rlist-dev__ico">{{ r.device_type | class_icon }}</span>
               <span>
-                <span class="muted" style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.03em">{{ r.device_type | device_class }}</span>
-                <b>{{ r.brand or '' }} {{ r.model or '' }}{% if not (r.brand or r.model) %}Без модели{% endif %}</b>
+                <span class="rlist-dev__meta">{{ r.device_type | device_class }}{% if r.is_delivery %} · 🚚{% endif %}</span>
+                <span class="rlist-dev__name">{{ r.brand or '' }} {{ r.model or '' }}{% if not (r.brand or r.model) %}Без модели{% endif %}</span>
+                <span class="chip {{ r.status | status_chip }}">{{ r.status }}</span>
               </span>
-              {% if r.is_delivery %}<span title="Заказ с доставкой">🚚</span>{% endif %}
-            </span>
+            </div>
           </td>
           <td>{{ r.accepted_by_user.name if r.accepted_by_user else '—' }}</td>
           <td class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
@@ -191,5 +193,6 @@
     </table>
   </div>
 </div>
-<p class="muted" style="margin-top:10px">Всего: {{ total }}. Показаны последние 50. Уточните поиск для более старых записей.</p>
+<p class="rlist-foot">Всего: {{ total }}. Показаны последние 50.</p>
+</div>
 {% endblock %}
