@@ -21,6 +21,9 @@
   <div class="flash err"><b>Ремонт отмечен как готовый,</b> но SMS клиенту не ушло{% if sms_detail %}: {{ sms_detail }}{% endif %}. Проверьте «Админ → SMS».</div>
   {% endif %}
 {% endif %}
+{% if just == 'deleted' %}
+<div class="flash ok">✓ Удалено ремонтов: <b>{{ request.query_params.get('n') or n or '0' }}</b>.</div>
+{% endif %}
 
 <div class="rlist-page">
 <section class="rlist-head">
@@ -52,11 +55,20 @@
   </form>
 </div>
 
+{% if can_delete %}
+<form id="bulk-repairs" class="bulk-bar" method="post" action="/repairs/bulk-delete"
+      onsubmit="var n=document.querySelectorAll('input[name=ids][form=bulk-repairs]:checked').length; if(!n){alert('Отметьте ремонты для удаления'); return false;} return confirm('Удалить выбранные ремонты ('+n+')? Это нельзя отменить.');">
+  <label class="bulk-bar__all"><input type="checkbox" data-check-all="bulk-repairs"> отметить все</label>
+  <button class="btn sm red" type="submit">🗑 Удалить выбранные</button>
+</form>
+{% endif %}
+
 <div class="rlist-card">
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
+          {% if can_delete %}<th class="bulk-col"><span class="sr-only">Отметить</span></th>{% endif %}
           <th style="text-transform:none;letter-spacing:0">📅 Дата
             <button type="button" class="colhint" data-colhint data-title="Дата"
               data-hint="Дата приёма техники в сервис. Если сверху выбран срез «по закрытию» — дата, когда ремонт перевели в «Готово к выдаче».">?</button></th>
@@ -97,6 +109,11 @@
       <tbody>
       {% for r in repairs %}
         <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
+          {% if can_delete %}
+          <td class="bulk-col" onclick="event.stopPropagation()">
+            <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить {{ r.number }}">
+          </td>
+          {% endif %}
           <td>
             <div class="rlist-date">
               <b>{{ r.accepted_at | date }}</b>
@@ -184,10 +201,16 @@
             {% if r.client.phone %}
             <a class="act" href="tel:{{ r.client.phone }}" title="Позвонить">☎</a>
             {% endif %}
+            {% if can_delete %}
+            <form method="post" action="/repairs/{{ r.id }}/delete"
+                  onsubmit="return confirm('Удалить ремонт {{ r.number }}?')">
+              <button class="act" type="submit" title="Удалить">🗑</button>
+            </form>
+            {% endif %}
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="11" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
+        <tr><td colspan="{{ 12 if can_delete else 11 }}" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
       {% endfor %}
       </tbody>
     </table>

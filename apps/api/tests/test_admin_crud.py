@@ -150,6 +150,75 @@ def test_admin_edits_and_deletes_repair_all_fields(client, city_id, admin_header
     assert client.get(f"/api/repairs/{rid}", headers=admin_headers).status_code == 404
 
 
+def test_admin_marks_and_bulk_deletes_repairs_and_clients(client, city_id, admin_headers):
+    """Во «Все ремонты» и «Клиенты» админ отмечает строки и удаляет выбранные."""
+    cookies = _login(client)
+    a = client.post("/api/repairs", headers=admin_headers, json={
+        "city_id": city_id,
+        "client": {"full_name": "Массовый А", "phone": "+993611111001"},
+        "device_type": "Другое", "brand": "A",
+    })
+    b = client.post("/api/repairs", headers=admin_headers, json={
+        "city_id": city_id,
+        "client": {"full_name": "Массовый Б", "phone": "+993611111002"},
+        "device_type": "Другое", "brand": "B",
+    })
+    assert a.status_code == 201 and b.status_code == 201
+    rid_a, rid_b = a.json()["id"], b.json()["id"]
+    cid_a, cid_b = a.json()["client_id"], b.json()["client_id"]
+
+    page = client.get("/repairs", cookies=cookies)
+    assert page.status_code == 200
+    assert 'action="/repairs/bulk-delete"' in page.text
+    assert 'name="ids"' in page.text
+    assert 'form="bulk-repairs"' in page.text
+
+    gone = client.post(
+        "/repairs/bulk-delete",
+        cookies=cookies,
+        data={"ids": [rid_a, rid_b]},
+        follow_redirects=False,
+    )
+    assert gone.status_code == 303, gone.text
+    assert "just=deleted" in gone.headers["location"]
+    assert client.get(f"/api/repairs/{rid_a}", headers=admin_headers).status_code == 404
+    assert client.get(f"/api/repairs/{rid_b}", headers=admin_headers).status_code == 404
+
+    contacts = client.get("/clients", cookies=cookies)
+    assert contacts.status_code == 200
+    assert 'action="/clients/bulk-delete"' in contacts.text
+    assert 'form="bulk-clients"' in contacts.text
+
+    cdel = client.post(
+        "/clients/bulk-delete",
+        cookies=cookies,
+        data={"ids": [cid_a, cid_b]},
+        follow_redirects=False,
+    )
+    assert cdel.status_code == 303, cdel.text
+    assert client.get(f"/clients/{cid_a}", cookies=cookies).status_code == 404
+    assert client.get(f"/clients/{cid_b}", cookies=cookies).status_code == 404
+
+
+def test_master_cannot_bulk_delete_repairs_or_clients(client, city_id, admin_headers):
+    created = client.post("/api/repairs", headers=admin_headers, json={
+        "city_id": city_id,
+        "client": {"full_name": "Не трогать", "phone": "+993611111009"},
+        "device_type": "Другое",
+    })
+    rid = created.json()["id"]
+    cid = created.json()["client_id"]
+    cookies = _login(client, "master@msb.local", "master123")
+    page = client.get("/repairs", cookies=cookies)
+    assert 'action="/repairs/bulk-delete"' not in page.text
+    assert client.post(
+        "/repairs/bulk-delete", cookies=cookies, data={"ids": rid}, follow_redirects=False,
+    ).status_code == 403
+    assert client.post(
+        "/clients/bulk-delete", cookies=cookies, data={"ids": cid}, follow_redirects=False,
+    ).status_code == 403
+
+
 def test_master_cannot_admin_edit_or_delete_repair(client, city_id, admin_headers):
     created = client.post(
         "/api/repairs",

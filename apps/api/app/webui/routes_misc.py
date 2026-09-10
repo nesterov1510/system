@@ -55,7 +55,7 @@ async def _require(request):
 # Клиенты
 # --------------------------------------------------------------------------
 @router.get("/clients", response_class=HTMLResponse)
-async def clients_page(request: Request, q: str | None = None):
+async def clients_page(request: Request, q: str | None = None, just: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
@@ -77,10 +77,42 @@ async def clients_page(request: Request, q: str | None = None):
         clients = [{"c": c, "count": cnt} for c, cnt in rows]
         ctx = await base_context(
             request, await get_web_user(request), active="/clients",
-            clients=clients, q=q or "",
+            clients=clients, q=q or "", just=just,
+            n=request.query_params.get("n"),
+            can_delete=can_delete_client(user),
         )
         html = await render_async("clients.html", **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.post("/clients/bulk-delete")
+async def clients_bulk_delete(request: Request):
+    """Админ отмечает контакты в списке и удаляет выбранные."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        from app.routers import repairs as repairs_api
+
+        if not can_delete_client(user):
+            return HTMLResponse("Только администратор", status_code=403)
+        form = await request.form()
+        deleted = 0
+        for raw in form.getlist("ids")[:80]:
+            try:
+                cid = uuid.UUID(str(raw))
+            except ValueError:
+                continue
+            try:
+                await repairs_api.delete_client(cid, db, user)
+                deleted += 1
+            except HTTPException:
+                continue
+        return RedirectResponse(f"/clients?just=deleted&n={deleted}", status_code=303)
     finally:
         await db.close()
 

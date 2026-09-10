@@ -151,6 +151,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             sms_detail=request.query_params.get("sms_detail"),
             can_finish=can_finish_repair(user),
             can_print_any=not is_master_only(user),
+            can_delete=can_delete_repair(user),
             dash_filter=filter or "",
             dash_filter_label=DASHBOARD_FILTER_LABELS.get(filter or ""),
         )
@@ -158,6 +159,34 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             "repairs/list.html" if view == "table" else "repairs/board.html"
         , **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/bulk-delete")
+async def repairs_bulk_delete(request: Request):
+    """Админ отмечает ремонты в списке и удаляет выбранные."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        if not can_delete_repair(user):
+            return HTMLResponse("Только администратор", status_code=403)
+        form = await request.form()
+        deleted = 0
+        for raw in form.getlist("ids")[:80]:
+            try:
+                rid = uuid.UUID(str(raw))
+            except ValueError:
+                continue
+            try:
+                await repairs_api.delete_repair(rid, db, user)
+                deleted += 1
+            except HTTPException:
+                continue
+        return RedirectResponse(f"/repairs?just=deleted&n={deleted}", status_code=303)
     finally:
         await db.close()
 
