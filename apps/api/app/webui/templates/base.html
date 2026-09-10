@@ -50,10 +50,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#101820">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MSB">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>{% block title %}MSB-CBMRS{% endblock %} — MSB-CBMRS</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
   <link rel="stylesheet" href="/static/msb/base.css">
   <link rel="stylesheet" href="/static/msb/forms.css">
+  <link rel="stylesheet" href="/static/msb/pwa.css">
   {% block page_css %}{% endblock %}
 </head>
 <body>
@@ -173,6 +180,7 @@
   </div>
 
   <script src="/static/msb/base.js"></script>
+  <script src="/static/msb/pwa.js" defer></script>
   {% block page_js %}{% endblock %}
 {% else %}
   {% block anon %}{% endblock %}

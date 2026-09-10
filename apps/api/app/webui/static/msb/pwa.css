@@ -1,0 +1,35 @@
+.msb-pwa-banner{
+  position:fixed;left:16px;right:16px;bottom:16px;z-index:120;
+  display:grid;grid-template-columns:44px minmax(0,1fr) auto auto;align-items:center;gap:12px;
+  max-width:520px;margin:0 auto;padding:12px 12px 12px 14px;
+  border:1px solid #dfe4ea;border-radius:16px;background:#fff;
+  box-shadow:0 18px 50px rgba(8,15,22,.22);
+  transform:translateY(18px);opacity:0;pointer-events:none;
+  transition:transform .2s ease,opacity .2s ease;
+}
+.msb-pwa-banner.is-visible{transform:translateY(0);opacity:1;pointer-events:auto}
+.msb-pwa-banner__icon{
+  width:44px;height:44px;display:grid;place-items:center;border-radius:12px;
+  background:linear-gradient(145deg,#ff8f27,#ff6a00);color:#fff;font-weight:900;font-size:11px;
+  letter-spacing:.02em;box-shadow:0 8px 16px rgba(255,122,0,.22);
+}
+.msb-pwa-banner__copy{min-width:0}
+.msb-pwa-banner__copy strong,.msb-pwa-banner__copy span{display:block}
+.msb-pwa-banner__copy strong{font-size:14px;color:#19212b}
+.msb-pwa-banner__copy span{margin-top:3px;color:#75808d;font-size:12px;line-height:1.35}
+.msb-pwa-banner__install{
+  border:0;border-radius:10px;background:#ff7a00;color:#fff;font-weight:800;font-size:13px;
+  padding:10px 12px;cursor:pointer;white-space:nowrap;
+}
+.msb-pwa-banner__close{
+  width:34px;height:34px;border:0;border-radius:10px;background:#eef2f5;color:#5d6b76;
+  font-size:22px;line-height:1;cursor:pointer;
+}
+.msb-pwa-banner__close:hover{background:#e4e9ed}
+@media(max-width:560px){
+  .msb-pwa-banner{left:10px;right:10px;bottom:10px;grid-template-columns:40px minmax(0,1fr) auto;padding-right:10px}
+  .msb-pwa-banner__install{grid-column:2;justify-self:start;margin-top:2px}
+  .msb-pwa-banner__close{grid-column:3;grid-row:1}
+}
+@media(display-mode:standalone){.msb-pwa-banner{display:none!important}}
+@media(prefers-reduced-motion:reduce){.msb-pwa-banner{transition:none}}

@@ -156,7 +156,7 @@ async def ip_access_control(request, call_next):
 # статики, служебных маршрутов и самого poll-эндпоинта мониторинга — они
 # только шумят (тот же смысл, что werkzeug-фильтр в архиве on_off_debug).
 # --------------------------------------------------------------------------
-_DEBUG_SKIP_PREFIXES = ("/static", "/docs", "/openapi.json", "/health")
+_DEBUG_SKIP_PREFIXES = ("/static", "/docs", "/openapi.json", "/health", "/sw.js")
 _DEBUG_SKIP_EXACT = {"/admin/logs/panel", "/admin/logs/stream"}
 
 
@@ -221,6 +221,23 @@ from app.webui import (
 )
 
 _web_static_dir = str(_Path(__file__).parent / "webui" / "static")
+_sw_path = _Path(__file__).parent / "webui" / "static" / "sw.js"
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker():
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        _sw_path,
+        media_type="application/javascript; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
 app.mount("/static", StaticFiles(directory=_web_static_dir), name="webui-static")
 
 # Публичная страница клиента (без авторизации) — регистрируется до общих.

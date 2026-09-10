@@ -23,6 +23,40 @@ def test_login_page_renders_anon(client):
     r = client.get("/login")
     assert r.status_code == 200
     assert "MSB" in r.text and 'name="password"' in r.text
+    assert 'rel="manifest"' in r.text
+    assert "/static/msb/pwa.js" in r.text
+
+
+def test_pwa_manifest_and_service_worker(client):
+    """Манифест + SW с корня: браузер может предложить «Установить приложение»."""
+    manifest = client.get("/static/manifest.json")
+    assert manifest.status_code == 200
+    body = manifest.json()
+    assert body["display"] == "standalone"
+    assert body["start_url"] == "/"
+    srcs = [icon["src"] for icon in body["icons"]]
+    assert "/static/icons/icon-192.png" in srcs
+    assert "/static/icons/icon-512.png" in srcs
+    assert all(icon.get("type") != "image/svg+xml" for icon in body["icons"])
+
+    for path in (
+        "/static/icons/icon-192.png",
+        "/static/icons/icon-512.png",
+        "/static/icons/apple-touch-icon.png",
+    ):
+        icon = client.get(path)
+        assert icon.status_code == 200, path
+        assert icon.headers["content-type"].startswith("image/png")
+
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200
+    assert "service-worker-allowed" in {k.lower() for k in sw.headers}
+    assert sw.headers.get("service-worker-allowed") == "/"
+    assert "msb-shell-v1" in sw.text
+
+    page = client.get("/repairs", follow_redirects=True)
+    assert 'rel="manifest"' in page.text
+    assert "/static/msb/pwa.js" in page.text
 
 
 def test_protected_page_redirects_anon(client):
