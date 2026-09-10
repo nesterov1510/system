@@ -190,9 +190,10 @@
               {% else %}<span class="chip gray" title="Ещё не оплачено">долг</span>{% endif %}
             </div>
           </td>
-          <td class="row-actions" onclick="event.stopPropagation()">
-            <button type="button" class="rpop-trigger" data-pop title="Действия">⚡</button>
-            <div class="rpop rpop--actions" hidden>
+          <td class="row-actions rpop-cell" id="rpop-home-act-{{ r.id }}" onclick="event.stopPropagation()">
+            <button type="button" class="rpop-trigger" data-pop="rpop-act-{{ r.id }}"
+                    aria-expanded="false" aria-haspopup="menu" title="Действия">⚡</button>
+            <div id="rpop-act-{{ r.id }}" class="rpop rpop--actions" role="menu" aria-label="Действия">
               <p class="rpop__title">Действия</p>
               <a class="rpop-act" href="/repairs/{{ r.id }}">↗ Открыть карточку</a>
               {% if can_print_any %}
