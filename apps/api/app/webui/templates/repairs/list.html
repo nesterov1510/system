@@ -136,12 +136,30 @@
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
           </td>
-          <td class="wrap">
+          <td class="num" onclick="event.stopPropagation()">
             {% set pc = parts_cost.get(r.id) %}
+            {% set lines = parts_lines.get(r.id) if parts_lines is defined else none %}
             {% if pc %}
-              <div style="color:#d7393f;font-weight:700">{{ pc | money(currency.symbol) }}</div>
-              {% set pn = parts_names.get(r.id) %}
-              {% if pn %}<div class="muted" style="font-size:11px;line-height:1.4">{{ pn | join(', ') }}</div>{% endif %}
+            <button type="button" class="rpop-trigger is-cost" data-pop title="Состав запчастей">
+              {{ pc | money(currency.symbol) }}
+            </button>
+            <div class="rpop" hidden>
+              <p class="rpop__title">Запчасти</p>
+              {% if lines %}
+                {% for line in lines %}
+                <div class="rpop__row">
+                  <span>{{ line.label }}</span>
+                  <b>{{ line.amount | money(currency.symbol) }}</b>
+                </div>
+                {% endfor %}
+              {% else %}
+                {% set pn = parts_names.get(r.id) %}
+                {% for name in pn or [] %}
+                <div class="rpop__row"><span>{{ name }}</span></div>
+                {% endfor %}
+              {% endif %}
+              <div class="rpop__row rpop__total"><span>Итого</span><b>{{ pc | money(currency.symbol) }}</b></div>
+            </div>
             {% else %}<span class="muted">—</span>{% endif %}
           </td>
           <td class="wrap">
@@ -173,40 +191,44 @@
             </div>
           </td>
           <td class="row-actions" onclick="event.stopPropagation()">
-            <a class="act" href="/repairs/{{ r.id }}" title="Открыть карточку">↗</a>
-            {% if can_print_any %}
-            <form method="post" action="/repairs/{{ r.id }}/print">
-              <input type="hidden" name="next" value="/repairs">
-              <button class="act" type="submit" title="Печать бланка">🖨</button>
-            </form>
-            <form method="post" action="/repairs/{{ r.id }}/print-label">
-              <input type="hidden" name="next" value="/repairs">
-              <button class="act" type="submit" title="Печать этикетки">🏷</button>
-            </form>
-            {% endif %}
-            {% if can_finish and r.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
-            <form method="post" action="/repairs/{{ r.id }}/finish"
-                  onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по ✉.')">
-              <input type="hidden" name="next" value="/repairs">
-              <button class="act" type="submit" title="Ремонт закончен">✓</button>
-            </form>
-            {% endif %}
-            {% if can_finish and r.status not in ['Выдано', 'Архив', 'Отказ'] %}
-            <form method="post" action="/repairs/{{ r.id }}/notify-client"
-                  onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? После этого три дня будут приходить напоминания забрать технику.')">
-              <input type="hidden" name="next" value="/repairs">
-              <button class="act green" type="submit" title="Уведомить клиента">✉</button>
-            </form>
-            {% endif %}
-            {% if r.client.phone %}
-            <a class="act" href="tel:{{ r.client.phone }}" title="Позвонить">☎</a>
-            {% endif %}
-            {% if can_delete %}
-            <form method="post" action="/repairs/{{ r.id }}/delete"
-                  onsubmit="return confirm('Удалить ремонт {{ r.number }}?')">
-              <button class="act" type="submit" title="Удалить">🗑</button>
-            </form>
-            {% endif %}
+            <button type="button" class="rpop-trigger" data-pop title="Действия">⚡</button>
+            <div class="rpop rpop--actions" hidden>
+              <p class="rpop__title">Действия</p>
+              <a class="rpop-act" href="/repairs/{{ r.id }}">↗ Открыть карточку</a>
+              {% if can_print_any %}
+              <form method="post" action="/repairs/{{ r.id }}/print">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act" type="submit">🖨 Печать бланка</button>
+              </form>
+              <form method="post" action="/repairs/{{ r.id }}/print-label">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act" type="submit">🏷 Печать этикетки</button>
+              </form>
+              {% endif %}
+              {% if can_finish and r.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
+              <form method="post" action="/repairs/{{ r.id }}/finish"
+                    onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по ✉.')">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act" type="submit">✓ Ремонт закончен</button>
+              </form>
+              {% endif %}
+              {% if can_finish and r.status not in ['Выдано', 'Архив', 'Отказ'] %}
+              <form method="post" action="/repairs/{{ r.id }}/notify-client"
+                    onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? После этого три дня будут приходить напоминания забрать технику.')">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act is-green" type="submit">✉ Уведомить клиента</button>
+              </form>
+              {% endif %}
+              {% if r.client.phone %}
+              <a class="rpop-act" href="tel:{{ r.client.phone }}">☎ Позвонить</a>
+              {% endif %}
+              {% if can_delete %}
+              <form method="post" action="/repairs/{{ r.id }}/delete"
+                    onsubmit="return confirm('Удалить ремонт {{ r.number }}?')">
+                <button class="rpop-act is-danger" type="submit">🗑 Удалить</button>
+              </form>
+              {% endif %}
+            </div>
           </td>
         </tr>
       {% else %}
@@ -219,3 +241,4 @@
 <p class="rlist-foot">Всего: {{ total }}. Показаны последние 50.</p>
 </div>
 {% endblock %}
+{% block page_js %}<script src="/static/msb/repair-list.js"></script>{% endblock %}

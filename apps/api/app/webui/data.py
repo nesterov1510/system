@@ -112,6 +112,12 @@ async def repair_parts_cost(db, repair_ids: list[uuid.UUID]) -> dict[uuid.UUID, 
 
 async def repair_parts_names(db, repair_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[str]]:
     """Названия запчастей по ремонтам (для колонки «Запчасти» таблицы)."""
+    lines = await repair_parts_lines(db, repair_ids)
+    return {rid: [row["label"] for row in items] for rid, items in lines.items()}
+
+
+async def repair_parts_lines(db, repair_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict]]:
+    """Запчасти с количеством и суммой — для окошка в колонке «Запчасти»."""
     if not repair_ids:
         return {}
     rows = (
@@ -122,12 +128,15 @@ async def repair_parts_names(db, repair_ids: list[uuid.UUID]) -> dict[uuid.UUID,
             .order_by(RepairPart.created_at)
         )
     ).scalars().all()
-    out: dict[uuid.UUID, list[str]] = {}
+    out: dict[uuid.UUID, list[dict]] = {}
     for rp in rows:
-        if not rp.part:
-            continue
-        name = f"{rp.part.name} ×{rp.qty}" if rp.qty and rp.qty > 1 else rp.part.name
-        out.setdefault(rp.repair_id, []).append(name)
+        name = rp.part.name if rp.part else "запчасть"
+        qty = rp.qty or 1
+        amount = float(rp.price or 0) * qty
+        label = f"{name} ×{qty}" if qty > 1 else name
+        out.setdefault(rp.repair_id, []).append(
+            {"name": name, "qty": qty, "label": label, "amount": amount}
+        )
     return out
 
 

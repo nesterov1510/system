@@ -103,6 +103,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         from app.webui.data import (
             fetch_repairs,
             repair_parts_cost,
+            repair_parts_lines,
             repair_parts_names,
             repair_payments_total,
         )
@@ -112,6 +113,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         )
         ids = [r.id for r in repairs]
         parts_cost = await repair_parts_cost(db, ids)
+        parts_lines = await repair_parts_lines(db, ids)
         parts_names = await repair_parts_names(db, ids)
         pays = await repair_payments_total(db, ids)
         currency = await get_currency(db)
@@ -143,7 +145,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             request, await get_web_user(request), active="/repairs",
             repairs=repairs, total=total, stage=stage or "all", q=q or "",
             status=status, view=view, page=page, parts_cost=parts_cost,
-            parts_names=parts_names, pays=pays, currency=currency,
+            parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
             counts=counts, stages=stage_labels,
             just=just, printed=printed,

@@ -247,6 +247,8 @@ def test_repairs_table_compact_columns_and_hints(client):
     # Кнопка-пояснение «?» у каждой колонки (data-colhint).
     assert html.count("data-colhint") >= 11
     assert "row-actions" in html
+    assert "data-pop" in html
+    assert "Открыть карточку" in html
     # Данные созданного ремонта и бейдж оплаты «долг» (не оплачен).
     assert "LG" in html
     assert "Колонка Клиент" in html
