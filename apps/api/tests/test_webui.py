@@ -242,16 +242,18 @@ def test_repairs_table_compact_columns_and_hints(client):
     html = page.text
     for header in ("📅 Дата", "📺 Техника", "🧾 Принял", "🔧 Причина", "💵 Сумма",
                    "🔩 Запчасти", "👤 Клиент", "👷 Мастера", "💰 Выплата", "🏁 Итог",
-                   "✉ Клиенту"):
+                   "⚡ Действия"):
         assert header in html, header
     # Кнопка-пояснение «?» у каждой колонки (data-colhint).
     assert html.count("data-colhint") >= 11
-    assert "Уведомить" in html
+    assert "row-actions" in html
     # Данные созданного ремонта и бейдж оплаты «долг» (не оплачен).
     assert "LG" in html
     assert "Колонка Клиент" in html
     assert "долг" in html
     assert "/notify-client" in html
+    assert "/print-label" in html
+    assert "/finish" in html
 
 
 def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
@@ -293,6 +295,42 @@ def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
     body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
     assert body["status"] == "Готово к выдаче"
     assert body["reminder_next_at"] is not None
+
+
+def test_repair_card_is_one_page_with_chip_editors(client):
+    """Карточка ремонта — одна страница без вкладок, поля правятся в чипах."""
+    cookies = _login(client)
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    r = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "Чип Клиент",
+        "phone": "+993 61 7788001",
+        "device_type": "Телевизоры",
+        "brand": "Philips",
+        "model": "PUS88",
+        "fault_client": "нет сигнала",
+        "consent_pdn": "1", "consent_storage": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    items = client.get("/api/repairs?q=Чип Клиент", cookies=cookies).json()["items"]
+    rid = items[0]["id"]
+    page = client.get(f"/repairs/{rid}", cookies=cookies)
+    assert page.status_code == 200
+    html = page.text
+    assert "class=\"tabs\"" not in html
+    assert "?tab=" not in html
+    assert "data-ichip" in html
+    assert 'id="parts"' in html and 'id="pay"' in html and 'id="log"' in html
+    assert "/static/msb/repair-card.js" in html
+    patch = client.post(
+        f"/repairs/{rid}/field",
+        cookies=cookies,
+        data={"field": "fault_master", "value": "матрица", "next": f"/repairs/{rid}"},
+        follow_redirects=False,
+    )
+    assert patch.status_code == 303, patch.text
+    after = client.get(f"/repairs/{rid}", cookies=cookies)
+    assert "матрица" in after.text
 
 
 def test_finish_from_card_does_not_send_sms(client, monkeypatch):

@@ -92,9 +92,9 @@
           <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
             <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
               data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">✉ Клиенту
-            <button type="button" class="colhint" data-colhint data-title="Уведомить клиента"
-              data-hint="Отправить SMS, что ремонт закончен. После этого три дня клиенту приходят напоминания забрать технику.">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">⚡ Действия
+            <button type="button" class="colhint" data-colhint data-title="Действия по ремонту"
+              data-hint="Карточка, бланк, этикетка, «закончен», SMS клиенту и звонок. SMS уходит только по ✉.">?</button></th>
         </tr>
       </thead>
       <tbody>
@@ -153,15 +153,34 @@
               {% else %}<span class="chip gray" title="Ещё не оплачено">долг</span>{% endif %}
             </div>
           </td>
-          <td onclick="event.stopPropagation()">
+          <td class="row-actions" onclick="event.stopPropagation()">
+            <a class="act" href="/repairs/{{ r.id }}" title="Открыть карточку">↗</a>
+            {% if can_print_any %}
+            <form method="post" action="/repairs/{{ r.id }}/print">
+              <input type="hidden" name="next" value="/repairs">
+              <button class="act" type="submit" title="Печать бланка">🖨</button>
+            </form>
+            <form method="post" action="/repairs/{{ r.id }}/print-label">
+              <input type="hidden" name="next" value="/repairs">
+              <button class="act" type="submit" title="Печать этикетки">🏷</button>
+            </form>
+            {% endif %}
+            {% if can_finish and r.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
+            <form method="post" action="/repairs/{{ r.id }}/finish"
+                  onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по ✉.')">
+              <input type="hidden" name="next" value="/repairs">
+              <button class="act" type="submit" title="Ремонт закончен">✓</button>
+            </form>
+            {% endif %}
             {% if can_finish and r.status not in ['Выдано', 'Архив', 'Отказ'] %}
-            <form method="post" action="/repairs/{{ r.id }}/notify-client" style="margin:0"
+            <form method="post" action="/repairs/{{ r.id }}/notify-client"
                   onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? После этого три дня будут приходить напоминания забрать технику.')">
               <input type="hidden" name="next" value="/repairs">
-              <button class="btn sm green" type="submit" title="Уведомить клиента, что ремонт закончен">✉ Уведомить</button>
+              <button class="act green" type="submit" title="Уведомить клиента">✉</button>
             </form>
-            {% else %}
-            <span class="muted">—</span>
+            {% endif %}
+            {% if r.client.phone %}
+            <a class="act" href="tel:{{ r.client.phone }}" title="Позвонить">☎</a>
             {% endif %}
           </td>
         </tr>

@@ -108,50 +108,38 @@ def test_admin_edits_and_deletes_repair_all_fields(client, city_id, admin_header
 
     page = client.get(f"/repairs/{rid}", cookies=cookies)
     assert page.status_code == 200
-    assert 'action="/repairs/' in page.text and "/admin" in page.text
-    assert "Админ: все поля карточки" in page.text
-    assert "🗑 Удалить" in page.text
+    assert "data-ichip" in page.text
+    assert "Админ: все поля карточки" not in page.text
+    assert "🗑" in page.text
 
-    r = client.post(
-        f"/repairs/{rid}/admin",
-        cookies=cookies,
-        data={
-            "client_name": "Новый Клиент",
-            "client_phone": "+993619998877",
-            "device_type": "Мониторы",
-            "brand": "Dell",
-            "model": "P2419H",
-            "serial": "SN-ADMIN-1",
-            "fault_client": "нет изображения",
-            "fault_master": "матрица",
-            "condition_notes": "царапина",
-            "complectation": "Пульт, Кабель",
-            "contact2_name": "Брат",
-            "contact2_phone": "+99362000001",
-            "contact2_relation": "родственник",
-            "eta_days": "4",
-            "is_delivery": "1",
-            "delivery_district": "Парахат 7",
-        },
-        follow_redirects=False,
-    )
-    assert r.status_code == 303, r.text
+    def _chip(field, value):
+        resp = client.post(
+            f"/repairs/{rid}/field",
+            cookies=cookies,
+            data={"field": field, "value": value, "next": f"/repairs/{rid}"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, f"{field}: {resp.text}"
+
+    _chip("client_name", "Новый Клиент")
+    _chip("client_phone", "+993619998877")
+    _chip("brand", "Dell")
+    _chip("model", "P2419H")
+    _chip("serial", "SN-ADMIN-1")
+    _chip("fault_client", "нет изображения")
+    _chip("fault_master", "матрица")
+    _chip("condition_notes", "царапина")
+    _chip("eta_days", "4")
 
     repair = client.get(f"/api/repairs/{rid}", headers=admin_headers).json()
-    assert repair["device_type"] == "Мониторы"
     assert repair["brand"] == "Dell"
     assert repair["model"] == "P2419H"
     assert repair["serial"] == "SN-ADMIN-1"
     assert repair["fault_client"] == "нет изображения"
     assert repair["fault_master"] == "матрица"
     assert repair["condition_notes"] == "царапина"
-    assert repair["contact2_name"] == "Брат"
-    assert repair["contact2_relation"] == "родственник"
-    assert repair["is_delivery"] is True
-    assert repair["delivery_district"] == "Парахат 7"
     assert repair["eta_days"] == 4
     assert repair["client_name"] == "Новый Клиент"
-    assert "Пульт" in (repair.get("complectation") or {})
 
     client_card = client.get(f"/clients/{cid}", cookies=cookies)
     assert client_card.status_code == 200

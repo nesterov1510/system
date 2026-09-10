@@ -150,6 +150,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             sms=request.query_params.get("sms"),
             sms_detail=request.query_params.get("sms_detail"),
             can_finish=can_finish_repair(user),
+            can_print_any=not is_master_only(user),
             dash_filter=filter or "",
             dash_filter_label=DASHBOARD_FILTER_LABELS.get(filter or ""),
         )
@@ -381,9 +382,9 @@ async def _load_repair(db, repair_id: uuid.UUID):
 
 
 @router.get("/repairs/{repair_id}", response_class=HTMLResponse)
-async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info",
+async def repair_detail(request: Request, repair_id: uuid.UUID,
                         just: str | None = None, sms: str | None = None,
-                        sms_detail: str | None = None):
+                        sms_detail: str | None = None, printed: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
@@ -420,7 +421,7 @@ async def repair_detail(request: Request, repair_id: uuid.UUID, tab: str = "info
             request, await get_web_user(request), active="/repairs",
             repair=repair, parts=parts, payments=payments, photos=photos,
             catalog=catalog, currency=currency, statuses=statuses, masters=masters,
-            tab=tab, just=just, sms=sms, sms_detail=sms_detail,
+            just=just, sms=sms, sms_detail=sms_detail, printed=printed,
             parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
             device_classes=DEVICE_CLASSES,
@@ -472,7 +473,7 @@ async def repair_add_comment(request: Request, repair_id: uuid.UUID):
     try:
         form = await request.form()
         await repairs_api.add_event(repair_id, db, user, {"message": form.get("message", "")})
-        return RedirectResponse(f"/repairs/{repair_id}?tab=timeline", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#log", status_code=303)
     finally:
         await db.close()
 
@@ -498,7 +499,66 @@ async def repair_finance(request: Request, repair_id: uuid.UUID):
             warranty_text=(form.get("warranty_text") or "").strip() or None,
         )
         await repairs_api.update_repair(repair_id, payload, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}?tab=payment", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#pay", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/field")
+async def repair_patch_field(request: Request, repair_id: uuid.UUID):
+    """Одно поле карточки: правка прямо в чипе, без вкладок и большой формы."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        field = (form.get("field") or "").strip()
+        raw = form.get("value")
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_access_repair(user, repair):
+            return HTMLResponse("Нет доступа", status_code=403)
+
+        text_fields = {
+            "brand", "model", "serial", "fault_client", "fault_master",
+            "condition_notes", "work_done", "warranty_text", "status",
+        }
+        if field not in text_fields | {"eta_days", "price_final", "paid", "client_name", "client_phone"}:
+            return HTMLResponse("Неизвестное поле", status_code=400)
+
+        try:
+            if field in ("client_name", "client_phone"):
+                if not user.has_role("admin", "manager", "operator"):
+                    return HTMLResponse("Недостаточно прав", status_code=403)
+                kwargs = {}
+                text = (raw or "").strip()
+                if field == "client_name":
+                    kwargs["full_name"] = text
+                else:
+                    kwargs["phone"] = text
+                await repairs_api.update_client(
+                    repair.client_id, repairs_api.ClientUpdate(**kwargs), db, user,
+                )
+            else:
+                value = None if raw is None else str(raw).strip()
+                if field == "paid":
+                    payload = RepairUpdate(paid=value in ("1", "true", "on", "да"))
+                elif field == "eta_days":
+                    payload = RepairUpdate(eta_days=int(value) if value else None)
+                elif field == "price_final":
+                    payload = RepairUpdate(
+                        price_final=float(value.replace(",", ".")) if value else None
+                    )
+                else:
+                    payload = RepairUpdate(**{field: value or None})
+                await repairs_api.update_repair(repair_id, payload, db, user)
+        except (TypeError, ValueError):
+            return HTMLResponse("Некорректное значение", status_code=400)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
     finally:
         await db.close()
 
@@ -644,7 +704,7 @@ async def repair_add_part(request: Request, repair_id: uuid.UUID):
             price=price_val,
         )
         await parts_api.add_repair_part(repair_id, add, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}?tab=parts", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#parts", status_code=303)
     finally:
         await db.close()
 
@@ -656,7 +716,7 @@ async def repair_del_part(request: Request, repair_id: uuid.UUID, rp_id: uuid.UU
         return redir
     try:
         await parts_api.remove_repair_part(repair_id, rp_id, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}?tab=parts", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#parts", status_code=303)
     finally:
         await db.close()
 
@@ -680,7 +740,7 @@ async def repair_add_payment(request: Request, repair_id: uuid.UUID):
             method = "cash"
         payload = PaymentCreate(amount=amount, method=method)
         await payments_api.add_payment(repair_id, payload, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}?tab=payment", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#pay", status_code=303)
     finally:
         await db.close()
 
@@ -693,7 +753,7 @@ async def repair_delete_payment(request: Request, repair_id: uuid.UUID, payment_
         return redir
     try:
         await payments_api.delete_payment(payment_id, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}?tab=payment", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#pay", status_code=303)
     finally:
         await db.close()
 
@@ -713,11 +773,13 @@ async def repair_finish(request: Request, repair_id: uuid.UUID):
         return redir
     try:
         from fastapi import HTTPException
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
         try:
             await repairs_api.finish_repair(repair_id, db, user)
         except HTTPException as e:
             return HTMLResponse(str(e.detail), status_code=e.status_code)
-        return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+        return RedirectResponse(nxt, status_code=303)
     finally:
         await db.close()
 
@@ -757,10 +819,13 @@ async def repair_print(request: Request, repair_id: uuid.UUID):
     if redir:
         return redir
     try:
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
         await prints_api.create_print_job(
             repair_id=repair_id, db=db, user=user, request=request
         )
-        return RedirectResponse(f"/repairs/{repair_id}?printed=blank", status_code=303)
+        sep = "&" if "?" in nxt else "?"
+        return RedirectResponse(f"{nxt}{sep}printed=blank", status_code=303)
     finally:
         await db.close()
 
@@ -771,10 +836,13 @@ async def repair_print_label(request: Request, repair_id: uuid.UUID):
     if redir:
         return redir
     try:
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
         await prints_api.create_label_print_job(
             repair_id=repair_id, db=db, user=user, request=request
         )
-        return RedirectResponse(f"/repairs/{repair_id}?printed=label", status_code=303)
+        sep = "&" if "?" in nxt else "?"
+        return RedirectResponse(f"{nxt}{sep}printed=label", status_code=303)
     finally:
         await db.close()
 
@@ -811,6 +879,6 @@ async def repair_upload_photo(request: Request, repair_id: uuid.UUID):
                 repair_id=repair_id, db=db, user=user,
                 file=upload, caption=caption,
             )
-        return RedirectResponse(f"/repairs/{repair_id}?tab=timeline", status_code=303)
+        return RedirectResponse(f"/repairs/{repair_id}#log", status_code=303)
     finally:
         await db.close()

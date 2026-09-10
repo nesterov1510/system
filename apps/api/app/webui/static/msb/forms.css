@@ -215,3 +215,32 @@ th .colhint{position:relative;top:-1px}
 .page-head p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.55;max-width:720px}
 .page-head .btn{align-self:flex-end}
 @media(max-width:560px){.page-head{align-items:stretch;flex-direction:column}.page-head .btn{align-self:flex-start}}
+
+/* ===== Компактная карточка ремонта: чипы вместо вкладок ===== */
+.rcard{display:grid;gap:12px}
+.rcard-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:10px}
+.rcard-head h1{margin:0;font-size:clamp(18px,2.2vw,24px);letter-spacing:-.03em}
+.rcard-chips{display:flex;flex-wrap:wrap;gap:7px}
+.ichip{display:inline-flex;align-items:center;gap:6px;margin:0;padding:4px 10px;border:1px solid #dce2e8;border-radius:999px;background:#fff;min-height:30px}
+.ichip-k{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#8a949d}
+.ichip-view{border:0;background:transparent;padding:0;font:inherit;font-size:13px;font-weight:700;color:#1e2833;cursor:pointer;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ichip-view.is-static{cursor:default;font-weight:650}
+.ichip-edit{min-height:26px!important;height:26px;padding:0 8px!important;border-radius:8px!important;font-size:13px!important;max-width:180px}
+.ichip select.ichip-edit{max-width:200px}
+.rcard-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:12px}
+.rcard-block{background:#fff;border:1px solid #e4e8ed;border-radius:14px;padding:14px}
+.rcard-block h3{margin:0 0 10px;font-size:13px;color:#1e2833}
+.rcard-note{margin:0 0 8px;font-size:13px;line-height:1.45;color:#2c3740}
+.rcard-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px}
+.rcard-photos img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+.rcard .timeline{margin:0;padding:0;list-style:none;display:grid;gap:8px;max-height:280px;overflow:auto}
+.rcard .timeline .t-time{font-size:11px;color:#8a949d}
+.rcard .timeline .t-body{font-size:13px}
+.row-actions{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.row-actions form{margin:0}
+.act{width:30px;height:30px;display:grid;place-items:center;border:1px solid #e1e6ea;border-radius:8px;background:#fff;color:#3d4851;text-decoration:none;font-size:13px;cursor:pointer;padding:0}
+.act:hover{border-color:#ef9a4b;background:#fff7ef}
+.act.green{background:#eaf8f1;border-color:#bfe6cf}
+.btn.red,.btn.danger{background:#c0392b;color:#fff}
+.btn.red:hover,.btn.danger:hover{background:#a93226}
+@media(max-width:820px){.rcard-grid{grid-template-columns:1fr}}

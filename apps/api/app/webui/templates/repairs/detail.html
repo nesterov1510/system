@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ repair.number }}{% endblock %}
 {% block page_name %}{{ repair.number }}{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/forms.css">{% endblock %}
 {% block topbar_actions %}
   {% if can.print %}
     <form method="post" action="/repairs/{{ repair.id }}/print" style="margin:0"><button class="btn sm sec" type="submit">🖨 Бланк</button></form>
@@ -8,314 +9,210 @@
   {% endif %}
   {% if can.finish and repair.status not in ['Выдано','Архив','Отказ'] %}
     <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
-          onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? Три дня будут приходить напоминания забрать технику.')">
+          onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен?')">
       <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
-      <button class="btn sm green" type="submit">✉ Уведомить клиента</button>
+      <button class="btn sm green" type="submit">✉ Уведомить</button>
     </form>
   {% endif %}
   {% if can.finish and repair.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
     <form method="post" action="/repairs/{{ repair.id }}/finish" style="margin:0"
-          onsubmit="return confirm('Перевести ремонт в «Готово к выдаче»? SMS клиенту уйдёт только по кнопке «Уведомить клиента».')">
-      <button class="btn sm" type="submit">✓ Ремонт закончен</button>
+          onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по «Уведомить».')">
+      <button class="btn sm" type="submit">✓ Закончен</button>
     </form>
   {% endif %}
   {% if can.delete %}
     <form method="post" action="/repairs/{{ repair.id }}/delete" style="margin:0"
-          onsubmit="return confirm('Удалить ремонт {{ repair.number }} безвозвратно?')">
-      <button class="btn sm red" type="submit">🗑 Удалить</button>
+          onsubmit="return confirm('Удалить ремонт {{ repair.number }}?')">
+      <button class="btn sm red" type="submit">🗑</button>
     </form>
   {% endif %}
 {% endblock %}
 {% block content %}
 
+{% macro chip(field, label, value, can_edit=false, kind='text', extra='') -%}
+<form class="ichip" method="post" action="/repairs/{{ repair.id }}/field" data-ichip{% if kind=='select' %} data-ichip-auto{% endif %}>
+  <input type="hidden" name="field" value="{{ field }}">
+  <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+  <span class="ichip-k">{{ label }}</span>
+  {% if can_edit and kind == 'select' %}
+    <select class="ichip-edit" name="value">{{ extra|safe }}</select>
+  {% elif can_edit %}
+    <button type="button" class="ichip-view" data-ichip-open title="Нажмите, чтобы изменить">{{ value if value not in [None, ''] else '—' }}</button>
+    <input class="ichip-edit" type="{{ kind }}" name="value" value="{{ value or '' }}" hidden>
+  {% else %}
+    <span class="ichip-view is-static">{{ value if value not in [None, ''] else '—' }}</span>
+  {% endif %}
+</form>
+{%- endmacro %}
+
 {% if just == 'accepted' %}
-<div class="flash ok">✓ Техника принята. Номер <b>{{ repair.number }}</b>. Этикетка отправлена на печать.</div>
+<div class="flash ok">✓ Техника принята. Номер <b>{{ repair.number }}</b>.</div>
 {% endif %}
 {% if printed %}
-<div class="flash ok">🖨 Задание на печать ({{ 'этикетка' if printed=='label' else 'бланк' }}) добавлено в очередь. Print-agent напечатает его автоматически.</div>
+<div class="flash ok">🖨 {{ 'Этикетка' if printed=='label' else 'Бланк' }} в очереди печати.</div>
+{% endif %}
+{% if just == 'notified' %}
+  {% if sms == '1' %}<div class="flash ok">✓ SMS клиенту отправлено.</div>
+  {% else %}<div class="flash err">Ремонт готов, SMS не ушло{% if sms_detail %}: {{ sms_detail }}{% endif %}.</div>{% endif %}
 {% endif %}
 
-<div class="card" style="margin-bottom:16px">
-  <div class="card-b">
-    <div class="between">
-      <div>
-        <h1 style="margin:0">{{ repair.device_type | class_icon }} {{ repair.brand or '' }} {{ repair.model or '' }}</h1>
-        <div class="muted">{{ repair.device_type }}{% if repair.serial %} · SN: <span class="mono">{{ repair.serial }}</span>{% endif %}</div>
-      </div>
-      <form method="post" action="/repairs/{{ repair.id }}/status" class="row" style="margin:0">
-        <select name="status" style="width:auto">
-          {% for s in statuses %}
-          <option value="{{ s }}" {% if s==repair.status %}selected{% endif %}>{{ s }}</option>
-          {% endfor %}
-        </select>
-        <button class="btn sm" type="submit">Сменить</button>
-      </form>
-    </div>
-    <div class="tiles" style="margin:14px 0 0">
-      <div class="tile"><div class="k">Статус</div><div class="v small"><span class="chip {{ repair.status | status_chip }}">{{ repair.status }}</span></div></div>
-      <div class="tile"><div class="k">Клиент</div><div class="v small">{{ repair.client.full_name }}</div></div>
-      <div class="tile"><div class="k">Телефон</div><div class="v small mono">{{ repair.client.phone }}</div></div>
-      <div class="tile"><div class="k">Принято</div><div class="v small">{{ repair.accepted_at | date }}</div></div>
-      <div class="tile"><div class="k">Хранение до</div><div class="v small">{{ repair.storage_until | date if repair.storage_until else '—' }}</div></div>
-      <div class="tile"><div class="k">Сумма</div><div class="v small">{{ (repair.price_final or repair.price_max or 0) | money(currency.symbol) }}</div></div>
-    </div>
-  </div>
-</div>
+{% set status_opts %}
+  {% for s in statuses %}<option value="{{ s }}" {% if s==repair.status %}selected{% endif %}>{{ s }}</option>{% endfor %}
+{% endset %}
 
-<div class="tabs">
-  <a href="/repairs/{{ repair.id }}?tab=info" class="{% if tab=='info' %}active{% endif %}">Инфо</a>
-  <a href="/repairs/{{ repair.id }}?tab=parts" class="{% if tab=='parts' %}active{% endif %}">Запчасти</a>
-  <a href="/repairs/{{ repair.id }}?tab=payment" class="{% if tab=='payment' %}active{% endif %}">Оплата</a>
-  <a href="/repairs/{{ repair.id }}?tab=timeline" class="{% if tab=='timeline' %}active{% endif %}">Лента</a>
-</div>
+<article class="rcard">
+  <header class="rcard-head">
+    <div>
+      <div class="muted" style="font-size:12px;font-weight:800;letter-spacing:.04em">{{ repair.number }} · {{ repair.device_type | class_icon }} {{ repair.device_type }}</div>
+      <h1>{{ repair.brand or '' }} {{ repair.model or '' }}{% if not (repair.brand or repair.model) %}Без модели{% endif %}</h1>
+    </div>
+    <span class="chip {{ repair.status | status_chip }}">{{ repair.status }}</span>
+  </header>
 
-{% if tab == 'info' %}
-<div class="grid" style="grid-template-columns:2fr 1fr">
-  <div class="card"><div class="card-h"><h3>📋 Данные ремонта</h3></div><div class="card-b">
-    <dl class="kv">
-      <dt>Неисправность клиента</dt><dd>{{ repair.fault_client or '—' }}</dd>
-      <dt>Диагноз мастера</dt><dd>{{ repair.fault_master or '—' }}</dd>
-      <dt>Внешний вид</dt><dd>{{ repair.condition_notes or '—' }}</dd>
-      <dt>Комплектация</dt>
-      <dd>
-        {% if repair.complectation %}
-          {% for k, v in repair.complectation.items() %}{% if v %}<span class="chip" style="margin:2px">{{ k }}</span>{% endif %}{% endfor %}
-        {% else %}—{% endif %}
-      </dd>
-      {% if repair.contact2_name or repair.contact2_phone %}
-      <dt>Второй контакт</dt><dd>{{ repair.contact2_name or '' }} {{ repair.contact2_phone or '' }}</dd>{% endif %}
-      <dt>Принял</dt><dd>{{ repair.accepted_by_user.name if repair.accepted_by_user else '—' }}</dd>
-    </dl>
-    {% if can.device %}
-    <details style="margin-top:14px">
-      <summary class="btn sm sec" style="display:inline-block">✏️ Исправить технику (марка/модель/SN)</summary>
-      <form method="post" action="/repairs/{{ repair.id }}/device" class="form-grid" style="margin-top:12px">
-        <label class="fld"><span class="lbl">Марка</span><input type="text" name="brand" value="{{ repair.brand or '' }}"></label>
-        <label class="fld"><span class="lbl">Модель</span><input type="text" name="model" value="{{ repair.model or '' }}"></label>
-        <label class="fld"><span class="lbl">Серийный №</span><input type="text" name="serial" value="{{ repair.serial or '' }}"></label>
-        <div><button class="btn sm" type="submit">Сохранить</button></div>
-      </form>
-    </details>
-    {% endif %}
+  <div class="rcard-chips">
+    {{ chip('status', 'Статус', repair.status, can.finish or can.admin, 'select', status_opts) }}
+    {{ chip('brand', 'Марка', repair.brand, can.device) }}
+    {{ chip('model', 'Модель', repair.model, can.device) }}
+    {{ chip('serial', 'SN', repair.serial, can.device) }}
+    {{ chip('client_name', 'Клиент', repair.client.full_name, can.admin) }}
     {% if can.admin %}
-    <details style="margin-top:14px" open>
-      <summary class="btn sm" style="display:inline-block">🛠 Админ: все поля карточки</summary>
-      <form method="post" action="/repairs/{{ repair.id }}/admin" class="form-grid" style="margin-top:12px">
-        <label class="fld"><span class="lbl">Клиент</span>
-          <input type="text" name="client_name" value="{{ repair.client.full_name }}"></label>
-        <label class="fld"><span class="lbl">Телефон клиента</span>
-          <input type="tel" name="client_phone" value="{{ repair.client.phone }}"></label>
-        <label class="fld"><span class="lbl">Тип техники</span>
-          <select name="device_type">
-            {% for c in device_classes %}
-            <option value="{{ c.value }}" {% if repair.device_type==c.value %}selected{% endif %}>{{ c.value }}</option>
-            {% endfor %}
-          </select></label>
-        <label class="fld"><span class="lbl">Марка</span><input type="text" name="brand" value="{{ repair.brand or '' }}"></label>
-        <label class="fld"><span class="lbl">Модель</span><input type="text" name="model" value="{{ repair.model or '' }}"></label>
-        <label class="fld"><span class="lbl">Серийный №</span><input type="text" name="serial" value="{{ repair.serial or '' }}"></label>
-        <label class="fld" style="grid-column:1/-1"><span class="lbl">Неисправность клиента</span>
-          <textarea name="fault_client">{{ repair.fault_client or '' }}</textarea></label>
-        <label class="fld" style="grid-column:1/-1"><span class="lbl">Диагноз мастера</span>
-          <textarea name="fault_master">{{ repair.fault_master or '' }}</textarea></label>
-        <label class="fld" style="grid-column:1/-1"><span class="lbl">Внешний вид / состояние</span>
-          <textarea name="condition_notes">{{ repair.condition_notes or '' }}</textarea></label>
-        <label class="fld" style="grid-column:1/-1"><span class="lbl">Комплектация (через запятую)</span>
-          <input type="text" name="complectation" value="{% if repair.complectation %}{% for k,v in repair.complectation.items() if v %}{{ k }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}"></label>
-        <label class="fld"><span class="lbl">Второй контакт</span>
-          <input type="text" name="contact2_name" value="{{ repair.contact2_name or '' }}"></label>
-        <label class="fld"><span class="lbl">Телефон 2</span>
-          <input type="tel" name="contact2_phone" value="{{ repair.contact2_phone or '' }}"></label>
-        <label class="fld"><span class="lbl">Кто это</span>
-          <input type="text" name="contact2_relation" value="{{ repair.contact2_relation or '' }}"></label>
-        <label class="fld"><span class="lbl">Срок (дней)</span>
-          <input type="number" name="eta_days" min="0" value="{{ repair.eta_days or '' }}"></label>
-        <label class="fld"><span class="lbl">Район доставки</span>
-          <input type="text" name="delivery_district" value="{{ repair.delivery_district or '' }}"></label>
-        <label class="check" style="grid-column:1/-1"><input type="checkbox" name="is_delivery" {% if repair.is_delivery %}checked{% endif %}> Заказ с доставкой</label>
-        <div style="grid-column:1/-1"><button class="btn green" type="submit">Сохранить все поля</button></div>
-      </form>
-    </details>
+      {{ chip('client_phone', 'Тел', repair.client.phone, true, 'tel') }}
+    {% else %}
+      <a class="ichip" href="tel:{{ repair.client.phone }}"><span class="ichip-k">Тел</span><span class="ichip-view is-static">{{ repair.client.phone }}</span></a>
     {% endif %}
-  </div></div>
-
-  <div class="card"><div class="card-h"><h3>👷 Мастера</h3></div><div class="card-b">
-    {% set mnames = [] %}{% for m in repair.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
-    <p>{{ mnames | join(', ') if mnames else 'Не назначен' }}</p>
-    {% if can.assign %}
-    <form method="post" action="/repairs/{{ repair.id }}/assign">
-      <label class="fld"><span class="lbl">Назначить мастеров</span>
-        <select name="master_ids" multiple size="5">
-          {% for m in masters %}
-          <option value="{{ m.id }}" {% if m.id in master_ids %}selected{% endif %}>{{ m.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button class="btn sm" type="submit">Назначить</button>
-    </form>
-    {% endif %}
-    <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
-    <p class="muted" style="font-size:13px">
-      Публичная QR-страница клиента:<br>
-      <a href="/r/{{ repair.public_token }}" target="_blank">/r/{{ repair.public_token[:12] }}…</a>
-    </p>
-  </div></div>
-</div>
-
-{% elif tab == 'parts' %}
-<div class="card"><div class="card-h"><h3>🔩 Запчасти ремонта</h3>
-  <span class="chip" style="margin-left:auto">{{ parts_cost | money(currency.symbol) }}</span></div>
-  <div class="card-b">
-    <div class="table-wrap"><table>
-      <thead><tr><th>Запчасть</th><th class="num">Кол-во</th><th class="num">Цена</th><th class="num">Сумма</th><th></th></tr></thead>
-      <tbody>
-      {% for p in parts %}
-        <tr>
-          <td>{{ p.part.name if p.part else 'запчасть' }}{% if p.is_manual %} <span class="chip gray">вручную</span>{% endif %}</td>
-          <td class="num">{{ p.qty }}</td>
-          <td class="num">{{ (p.price or 0) | money(currency.symbol) }}</td>
-          <td class="num">{{ ((p.price or 0) * p.qty) | money(currency.symbol) }}</td>
-          <td>
-            {% if can.finance or not can.master_only %}
-            <form method="post" action="/repairs/{{ repair.id }}/parts/{{ p.id }}/delete" style="margin:0"
-                  onsubmit="return confirm('Убрать запчасть (вернуть на склад)?')">
-              <button class="btn sm red" type="submit">✕</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-      {% else %}
-        <tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Запчасти не добавлены</td></tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-
-    {% if can.addpart %}
-    <form method="post" action="/repairs/{{ repair.id }}/parts/add" class="row" style="margin-top:14px">
-      <select name="part_id" style="max-width:280px">
-        <option value="">— со склада —</option>
-        {% for part in catalog %}
-        <option value="{{ part.id }}">{{ part.name }} (остаток {{ part.stock_qty }})</option>
-        {% endfor %}
+    {{ chip('eta_days', 'Срок, дн', repair.eta_days, can.device or can.admin, 'number') }}
+    {{ chip('price_final', 'Цена', repair.price_final, can.finance, 'text') }}
+    {{ chip('warranty_text', 'Гарантия', repair.warranty_text, can.finance) }}
+    <form class="ichip" method="post" action="/repairs/{{ repair.id }}/field" data-ichip-auto>
+      <input type="hidden" name="field" value="paid">
+      <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+      <span class="ichip-k">Оплата</span>
+      {% if can.finance %}
+      <select class="ichip-edit" name="value">
+        <option value="0" {% if not repair.paid %}selected{% endif %}>долг</option>
+        <option value="1" {% if repair.paid %}selected{% endif %}>оплачено</option>
       </select>
-      <input type="text" name="name" placeholder="…или вручную (название)" style="max-width:220px">
-      <input type="number" name="qty" value="1" min="1" style="max-width:90px" title="Кол-во">
-      {% if can.setpartprice %}
-      <input type="text" name="price" placeholder="цена" style="max-width:110px">
+      {% else %}
+      <span class="ichip-view is-static">{{ 'оплачено' if repair.paid else 'долг' }}</span>
       {% endif %}
-      <button class="btn sm green" type="submit">Добавить</button>
     </form>
+    <span class="ichip"><span class="ichip-k">Принято</span><span class="ichip-view is-static">{{ repair.accepted_at | date }}</span></span>
+    <span class="ichip"><span class="ichip-k">Хранение</span><span class="ichip-view is-static">{{ repair.storage_until | date if repair.storage_until else '—' }}</span></span>
+    {% if repair.is_delivery %}<span class="chip amber">🚚 {{ repair.delivery_district or 'доставка' }}</span>{% endif %}
+    {% if repair.complectation %}
+      {% for k, v in repair.complectation.items() if v %}<span class="chip gray">{{ k }}</span>{% endfor %}
     {% endif %}
   </div>
-</div>
 
-{% elif tab == 'payment' %}
-<div class="grid" style="grid-template-columns:1fr 1fr">
-  <div class="card"><div class="card-h"><h3>💵 Касса</h3></div><div class="card-b">
-    <div class="table-wrap"><table>
-      <thead><tr><th>Дата</th><th>Метод</th><th class="num">Сумма</th><th>Оператор</th>{% if can.refund %}<th></th>{% endif %}</tr></thead>
-      <tbody>
-      {% for p in payments %}
-        <tr>
-          <td>{{ p.paid_at | dt }}</td>
-          <td><span class="chip">{{ {'cash':'наличные','card':'карта','transfer':'перевод'}.get(p.method, p.method) }}</span></td>
-          <td class="num"><b>{{ p.amount | money(currency.symbol) }}</b></td>
-          <td>{{ p.operator.name if p.operator else '—' }}</td>
-          {% if can.refund %}
-          <td class="num">
-            <form method="post" action="/repairs/{{ repair.id }}/payments/{{ p.id }}/delete"
-                  onsubmit="return confirm('Сторнировать платёж на {{ p.amount | money(currency.symbol) }}?')">
-              <button class="btn sm danger" type="submit" title="Сторно платежа">↩ Сторно</button>
-            </form>
-          </td>
+  <div class="rcard-grid">
+    <div class="rcard-block">
+      <h3>Неисправность</h3>
+      {{ chip('fault_client', 'Клиент', repair.fault_client, can.device or can.admin) }}
+      {{ chip('fault_master', 'Мастер', repair.fault_master, true) }}
+      {{ chip('work_done', 'Сделано', repair.work_done, can.finance or not can.master_only) }}
+      {{ chip('condition_notes', 'Вид', repair.condition_notes, can.device or can.admin) }}
+      <div style="margin-top:12px">
+        <h3>👷 Мастера</h3>
+        {% set mnames = [] %}{% for m in repair.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
+        <p class="rcard-note">{{ mnames | join(', ') if mnames else (repair.master.name if repair.master else 'Не назначен') }}</p>
+        {% if can.assign %}
+        <form method="post" action="/repairs/{{ repair.id }}/assign" class="row">
+          <select name="master_ids" multiple size="3" style="max-width:100%;min-width:180px">
+            {% for m in masters %}
+            <option value="{{ m.id }}" {% if m.id in master_ids %}selected{% endif %}>{{ m.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn sm" type="submit">Назначить</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="rcard-block" id="parts">
+      <h3>🔩 Запчасти · {{ parts_cost | money(currency.symbol) }}</h3>
+      {% for p in parts %}
+      <div class="row" style="justify-content:space-between">
+        <span>{{ p.part.name if p.part else 'запчасть' }} ×{{ p.qty }}</span>
+        <span>
+          {{ ((p.price or 0) * p.qty) | money(currency.symbol) }}
+          {% if can.finance or not can.master_only %}
+          <form method="post" action="/repairs/{{ repair.id }}/parts/{{ p.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Убрать запчасть?')">
+            <button class="act" type="submit" title="Убрать">✕</button>
+          </form>
           {% endif %}
-        </tr>
-      {% else %}
-        <tr><td colspan="5" class="muted" style="text-align:center;padding:16px">Платежей нет</td></tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-    <p class="between" style="margin-top:10px"><span class="muted">Оплачено всего:</span>
-      <b>{{ paid_total | money(currency.symbol) }}</b></p>
-    {% if can.payment %}
-    <form method="post" action="/repairs/{{ repair.id }}/payments/add" class="row" style="margin-top:10px">
-      <input type="text" name="amount" placeholder="Сумма" required style="max-width:130px">
-      <select name="method" style="max-width:140px">
-        <option value="cash">Наличные</option>
-        <option value="card">Карта</option>
-        <option value="transfer">Перевод</option>
-      </select>
-      <button class="btn sm green" type="submit">Принять оплату</button>
-    </form>
-    {% endif %}
-  </div></div>
+        </span>
+      </div>
+      {% else %}<p class="muted">Нет запчастей</p>{% endfor %}
+      {% if can.addpart %}
+      <form method="post" action="/repairs/{{ repair.id }}/parts/add" class="row" style="margin-top:8px">
+        <select name="part_id" style="max-width:200px">
+          <option value="">со склада</option>
+          {% for part in catalog %}<option value="{{ part.id }}">{{ part.name }}</option>{% endfor %}
+        </select>
+        <input type="text" name="name" placeholder="или вручную" style="max-width:140px">
+        <input type="number" name="qty" value="1" min="1" style="max-width:64px">
+        {% if can.setpartprice %}<input type="text" name="price" placeholder="цена" style="max-width:90px">{% endif %}
+        <button class="btn sm green" type="submit">+</button>
+      </form>
+      {% endif %}
+    </div>
 
-  <div class="card"><div class="card-h"><h3>🧾 Финансы ремонта</h3></div><div class="card-b">
-    {% if can.finance %}
-    <form method="post" action="/repairs/{{ repair.id }}/finance" class="form-grid">
-      <label class="fld"><span class="lbl">Итоговая цена</span>
-        <input type="text" name="price_final" value="{{ repair.price_final or '' }}"></label>
-      <label class="fld"><span class="lbl">Расходы (себестоимость)</span>
-        <input type="text" name="cost_amount" value="{{ repair.cost_amount or '' }}"></label>
-      <label class="fld"><span class="lbl">Выплата мастеру</span>
-        <input type="text" name="master_payout" value="{{ repair.master_payout or '' }}"></label>
-      <label class="fld"><span class="lbl">Гарантия</span>
-        <input type="text" name="warranty_text" value="{{ repair.warranty_text or '' }}" placeholder="3 aý / 90 дней"></label>
-      <label class="fld" style="grid-column:1/-1"><span class="lbl">Что починили (для бланка)</span>
-        <textarea name="work_done">{{ repair.work_done or '' }}</textarea></label>
-      <label class="check" style="grid-column:1/-1"><input type="checkbox" name="paid" {% if repair.paid %}checked{% endif %}> Отметить как оплаченное клиентом</label>
-      <div style="grid-column:1/-1"><button class="btn" type="submit">Сохранить финансы</button></div>
-    </form>
-    {% else %}
-    <dl class="kv">
-      <dt>Итоговая цена</dt><dd>{{ repair.price_final | money(currency.symbol) if repair.price_final else '—' }}</dd>
-      <dt>Запчасти</dt><dd>{{ parts_cost | money(currency.symbol) }}</dd>
-      <dt>Выплата мастеру</dt><dd>{{ repair.master_payout | money(currency.symbol) if repair.master_payout else '—' }}</dd>
-      <dt>Оплачено клиентом</dt><dd>{{ 'Да' if repair.paid else 'Нет' }}</dd>
-    </dl>
-    <p class="muted" style="font-size:13px">Финансовые поля доступны администратору, менеджеру или оператору.</p>
-    {% endif %}
-  </div></div>
-</div>
+    <div class="rcard-block" id="pay">
+      <h3>💵 Касса · {{ paid_total | money(currency.symbol) }}</h3>
+      {% for p in payments %}
+      <div class="row" style="justify-content:space-between">
+        <span>{{ p.paid_at | dt }} · {{ {'cash':'нал','card':'карта','transfer':'перевод'}.get(p.method, p.method) }}</span>
+        <span><b>{{ p.amount | money(currency.symbol) }}</b>
+          {% if can.refund %}
+          <form method="post" action="/repairs/{{ repair.id }}/payments/{{ p.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Сторно?')">
+            <button class="act" type="submit">↩</button>
+          </form>
+          {% endif %}
+        </span>
+      </div>
+      {% else %}<p class="muted">Платежей нет</p>{% endfor %}
+      {% if can.payment %}
+      <form method="post" action="/repairs/{{ repair.id }}/payments/add" class="row" style="margin-top:8px">
+        <input type="text" name="amount" placeholder="Сумма" required style="max-width:110px">
+        <select name="method" style="max-width:120px">
+          <option value="cash">Нал</option><option value="card">Карта</option><option value="transfer">Перевод</option>
+        </select>
+        <button class="btn sm green" type="submit">Принять</button>
+      </form>
+      {% endif %}
+    </div>
 
-{% elif tab == 'timeline' %}
-<div class="grid" style="grid-template-columns:2fr 1fr">
-  <div class="card"><div class="card-h"><h3>📜 Лента событий</h3></div><div class="card-b">
-    <ul class="timeline">
-      {% for e in repair.events | sort(attribute='created_at', reverse=true) %}
-      <li>
-        <div class="t-time">{{ e.created_at | dt }} · {{ e.type }}</div>
-        <div class="t-body">
-          {% if e.data and e.data.message %}{{ e.data.message }}
-          {% elif e.type == 'status_change' %}{{ e.data.get('from','—') }} → {{ e.data.get('to') }}
-          {% else %}{{ e.type }}{% endif %}
-        </div>
-      </li>
-      {% else %}
-      <li class="muted">Событий пока нет</li>
-      {% endfor %}
-    </ul>
-    <form method="post" action="/repairs/{{ repair.id }}/comment" style="margin-top:14px">
-      <label class="fld"><span class="lbl">Комментарий / звонок</span>
-        <textarea name="message" placeholder="Добавить запись в ленту…"></textarea></label>
-      <button class="btn sm" type="submit">Добавить</button>
-    </form>
-  </div></div>
-  <div class="card"><div class="card-h"><h3>📷 Фото ({{ photos | length }})</h3></div><div class="card-b">
-    {% if photos %}
-      {% for ph in photos %}
-      <img src="{{ ph.object_key and ('/media/' + ph.object_key) or '' }}" alt="" style="width:100%;border-radius:10px;margin-bottom:8px">
-      {% endfor %}
-    {% else %}
-    <p class="muted">Фото не загружены. Загрузка фото — в мобильном PWA / через API.</p>
-    {% endif %}
-    <form method="post" action="/repairs/{{ repair.id }}/photos" enctype="multipart/form-data">
-      <label class="fld"><span class="lbl">Загрузить фото</span>
-        <input type="file" name="file" accept="image/*" capture="environment"></label>
-      <button class="btn sm" type="submit">Загрузить</button>
-    </form>
-  </div></div>
-</div>
-{% endif %}
-
+    <div class="rcard-block" id="log">
+      <h3>📜 Лента</h3>
+      <ul class="timeline">
+        {% for e in repair.events | sort(attribute='created_at', reverse=true) %}
+        {% if loop.index <= 8 %}
+        <li>
+          <div class="t-time">{{ e.created_at | dt }} · {{ e.type }}</div>
+          <div class="t-body">{% if e.data and e.data.message %}{{ e.data.message }}{% elif e.type == 'status_change' %}{{ e.data.get('from','—') }} → {{ e.data.get('to') }}{% else %}{{ e.type }}{% endif %}</div>
+        </li>
+        {% endif %}
+        {% else %}<li class="muted">Пока пусто</li>{% endfor %}
+      </ul>
+      <form method="post" action="/repairs/{{ repair.id }}/comment" class="row" style="margin-top:8px">
+        <input type="text" name="message" placeholder="Комментарий…" required style="flex:1;min-width:140px">
+        <button class="btn sm" type="submit">+</button>
+      </form>
+      <h3 style="margin-top:14px">📷 Фото</h3>
+      <div class="rcard-photos">
+        {% for ph in photos %}
+        <img src="{{ ph.object_key and ('/media/' + ph.object_key) or '' }}" alt="">
+        {% else %}<span class="muted">нет</span>{% endfor %}
+      </div>
+      <form method="post" action="/repairs/{{ repair.id }}/photos" enctype="multipart/form-data" class="row" style="margin-top:8px">
+        <input type="file" name="file" accept="image/*" capture="environment">
+        <button class="btn sm" type="submit">Загрузить</button>
+      </form>
+      <p class="muted" style="margin-top:10px;font-size:12px">QR клиента: <a href="/r/{{ repair.public_token }}" target="_blank">открыть</a></p>
+    </div>
+  </div>
+</article>
 {% endblock %}
+{% block page_js %}<script src="/static/msb/repair-card.js"></script>{% endblock %}
