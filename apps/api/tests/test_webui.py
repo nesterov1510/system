@@ -248,7 +248,9 @@ def test_repairs_table_compact_columns_and_hints(client):
     assert html.count("data-colhint") >= 11
     assert "row-actions" in html
     assert "data-pop" in html
+    assert "msbRpop(this)" in html
     assert "Открыть карточку" in html
+    assert "/static/msb/repair-list.js" in html
     # Данные созданного ремонта и бейдж оплаты «долг» (не оплачен).
     assert "LG" in html
     assert "Колонка Клиент" in html
