@@ -491,8 +491,11 @@ if systemctl cat msb-print-agent.service >/dev/null 2>&1; then
 fi
 sudo systemctl daemon-reload
 
-# Установит зависимости, проверит Python, перезапустит API
-# (и активный print-agent) и выполнит health-check.
+# Проверит и при необходимости пересоздаст .venv обоих сервисов (лечит
+# «status=203/EXEC» после обновления системного Python), установит
+# зависимости, перезапустит API и print-agent (даже если агент упал
+# в restart-loop — лишь бы его unit был установлен и не выключен)
+# и выполнит health-check.
 sudo bash deploy/update.sh
 ```
 
@@ -563,6 +566,28 @@ sudo systemctl --no-pager --full status \
 
 sudo journalctl -u msb-api -n 100 --no-pager
 sudo journalctl -u msb-print-agent -n 100 --no-pager
+```
+
+### Сервис падает сразу: `status=203/EXEC`
+
+systemd не смог выполнить файл из `ExecStart=` — обычно после обновления
+системного Python сломался симлинк `.venv/bin/python` (203/EXEC, в журнале
+нет строк `[print-agent]`, только рестарты). Проверка:
+
+```bash
+sudo -u windowrepair-ae \
+  /home/windowrepair-ae/msb/apps/print-agent/.venv/bin/python -V
+# «No such file or directory» при существующем файле = битый симлинк
+```
+
+Лечение — обычное обновление: `sudo bash deploy/update.sh` пересоздаст
+сломанный `.venv` и перезапустит сервис. Вручную то же самое:
+
+```bash
+cd /home/windowrepair-ae/msb/apps/print-agent
+rm -rf .venv && python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+sudo systemctl restart msb-print-agent
 ```
 
 ### Порт занят

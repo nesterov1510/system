@@ -358,6 +358,109 @@ def render_repair_label_pdf(
     return buf.getvalue()
 
 
+def render_client_label_pdf(
+    *,
+    repair_number: str,
+    client_url: str,
+    storage_months: int = 3,
+    width_mm: float = 58,
+    height_mm: float = 38,
+) -> bytes:
+    """Карманная этикетка 58×38 ДЛЯ КЛИЕНТА с QR на публичную страницу статуса.
+
+    В отличие от этикетки на технику (данные приёмки + QR в закрытую карточку
+    мастера), здесь QR ведёт на публичную страницу /r/{token}, где клиент
+    видит статус ремонта, условия хранения и юридическую информацию.
+    """
+    _register_fonts()
+
+    width_mm = min(100.0, max(30.0, float(width_mm)))
+    height_mm = min(100.0, max(20.0, float(height_mm)))
+    page = (width_mm * mm, height_mm * mm)
+    w, h = page
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=page, pageCompression=1)
+    c.setTitle(f"MSB client label {repair_number}")
+    c.setAuthor("MSB")
+    c.setFillColorRGB(0, 0, 0)
+
+    margin = 2 * mm
+    qr_size = min(24 * mm, (height_mm - 6) * mm, width_mm * 0.44 * mm)
+    qr_x = w - margin - qr_size
+    qr_y = h - margin - qr_size
+    text_right = qr_x - 1.5 * mm
+    text_width = max(12 * mm, text_right - margin)
+
+    qr_buf = _qr_png(client_url, border=4)
+    c.drawImage(
+        ImageReader(qr_buf),
+        qr_x,
+        qr_y,
+        width=qr_size,
+        height=qr_size,
+        preserveAspectRatio=True,
+        mask="auto",
+    )
+
+    # Номер ремонта — как на этикетке техники, чтобы клиент сверил.
+    number = f"№ {repair_number}"
+    number_size = 6.6
+    while number_size > 4.2 and c.stringWidth(
+        number, FONT_BOLD, number_size
+    ) > text_width:
+        number_size -= 0.2
+    c.setFont(FONT_BOLD, number_size)
+    c.drawString(
+        margin,
+        h - 3.4 * mm,
+        _ellipsis(c, number, FONT_BOLD, number_size, text_width),
+    )
+
+    c.setFont(FONT_BOLD, 5.2)
+    c.drawString(margin, h - 8.0 * mm, "Ваш статус ремонта —")
+    c.setFont(FONT_BOLD, 6.4)
+    c.drawString(margin, h - 11.4 * mm, "сканируйте QR")
+
+    c.setFont(FONT, 4.4)
+    hint_lines = _label_lines(
+        c,
+        "На странице: этап ремонта, срок готовности, условия хранения и юридическая информация сервисного центра.",
+        font=FONT,
+        size=4.4,
+        max_width=text_width,
+        max_lines=4,
+    )
+    hint_y = h - 15.0 * mm
+    for line in hint_lines:
+        c.drawString(margin, hint_y, line)
+        hint_y -= 1.95 * mm
+
+    # Условия хранения крупным пунктом — это то, что клиент спрашивает чаще
+    # всего; полный текст условий открывается по QR.
+    c.setFont(FONT_BOLD, 4.8)
+    storage_lines = _label_lines(
+        c,
+        f"Хранение: {storage_months} мес. после уведомления о готовности.",
+        font=FONT_BOLD,
+        size=4.8,
+        max_width=w - 2 * margin,
+        max_lines=2,
+    )
+    storage_y = 6.6 * mm
+    for line in storage_lines:
+        c.drawString(margin, storage_y, line)
+        storage_y -= 1.95 * mm
+
+    c.setFont(FONT_BOLD, 4.2)
+    c.drawCentredString(w / 2, 1.8 * mm, "MERYOSAB electronics")
+
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+
 def _render_turkmen_form(
     *,
     t: dict,

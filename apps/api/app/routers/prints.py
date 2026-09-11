@@ -31,6 +31,7 @@ from app.services.print import (
     FontNotAvailable,
     body_to_template,
     render_blank_pdf,
+    render_client_label_pdf,
     render_repair_label_pdf,
 )
 from app.services import audit
@@ -42,6 +43,7 @@ from app.services.settings import (
     get_legal_text,
     get_printer,
     get_print_stub,
+    get_storage_months,
 )
 
 router = APIRouter(tags=["print"])
@@ -361,6 +363,88 @@ async def create_label_print_job(
         "status": job.status,
         "pdf_base64": base64.b64encode(pdf).decode("ascii"),
         "repair_url": repair_url,
+    }
+
+
+@router.post("/repairs/{repair_id}/print-client-label")
+async def create_client_label_print_job(
+    repair_id: uuid.UUID,
+    db: DbSession,
+    user: CurrentUser,
+    request: Request,
+):
+    """Вторая (клиентская) этикетка 58×38: QR на публичную страницу статуса.
+
+    Клиент сканирует QR и видит статус ремонта, условия хранения и
+    юридическую информацию — без логина. Клеится на талон/отдаётся клиенту,
+    а не на технику.
+    """
+    row = await db.execute(
+        select(Repair)
+        .where(Repair.id == repair_id)
+        .options(selectinload(Repair.client))
+    )
+    repair = row.scalar_one_or_none()
+    if repair is None:
+        raise HTTPException(404, "Ремонт не найден")
+    if not _can_print(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    printer = await get_label_printer(db)
+    if printer.get("mode") == "cups_remote" and not printer.get("ip"):
+        raise HTTPException(400, "Не задан IP компьютера с принтером этикеток")
+    if not printer.get("name"):
+        raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
+
+    status_url = public_status_url(repair.public_token, request)
+    storage_months = await get_storage_months(db)
+    width_mm = printer.get("width_mm", 58)
+    height_mm = printer.get("height_mm", 38)
+    try:
+        pdf = render_client_label_pdf(
+            repair_number=repair.number,
+            client_url=status_url,
+            storage_months=storage_months,
+            width_mm=width_mm,
+            height_mm=height_mm,
+        )
+    except FontNotAvailable as exc:
+        raise HTTPException(503, str(exc))
+
+    job = PrintJob(
+        repair_id=repair.id,
+        template_id="client-label-58x38",
+        payload={
+            "document_kind": "client_label",
+            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "printer": printer,
+            "status_url": status_url,
+        },
+        status="queued",
+        branch_id=repair.branch_id,
+    )
+    db.add(job)
+    await db.flush()  # job.id нужен для события аудита до commit
+    db.add(
+        RepairEvent(
+            repair_id=repair.id,
+            type="print",
+            actor_id=user.id,
+            data={
+                "job_id": str(job.id),
+                "kind": "client_label",
+                "printer": printer.get("name"),
+            },
+        )
+    )
+    await db.commit()
+    await db.refresh(job)
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+        "status_url": status_url,
     }
 
 

@@ -9,6 +9,7 @@
   {% if can.print %}
     <form method="post" action="/repairs/{{ repair.id }}/print" style="margin:0"><button class="btn sm sec" type="submit">🖨 Бланк</button></form>
     <form method="post" action="/repairs/{{ repair.id }}/print-label" style="margin:0"><button class="btn sm sec" type="submit">🏷 Этикетка</button></form>
+    <form method="post" action="/repairs/{{ repair.id }}/print-client-label" style="margin:0"><button class="btn sm sec" type="submit" title="Этикетка для клиента: QR на публичную страницу статуса, условия хранения и юр. информация">🏷 Клиенту (QR)</button></form>
   {% endif %}
   {% if can.finish and repair.status not in ['Выдано','Архив','Отказ'] %}
     <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
@@ -52,7 +53,7 @@
 <div class="flash ok">✓ Техника принята. Номер <b>{{ repair.number }}</b>.</div>
 {% endif %}
 {% if printed %}
-<div class="flash ok">🖨 {{ 'Этикетка' if printed=='label' else 'Бланк' }} в очереди печати.</div>
+<div class="flash ok">🖨 {% if printed == 'label' %}Этикетка{% elif printed == 'client-label' %}Клиентская этикетка (QR){% else %}Бланк{% endif %} в очереди печати.</div>
 {% endif %}
 {% if just == 'notified' %}
   {% if sms == '1' %}<div class="flash ok">✓ SMS клиенту отправлено.</div>
