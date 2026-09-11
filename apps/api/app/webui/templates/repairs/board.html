@@ -40,8 +40,7 @@
     <h4>{{ label }} <span class="chip">{{ ns[key] | length }}</span></h4>
     {% for r in ns[key] %}
     <div class="kcard" onclick="location.href='/repairs/{{ r.id }}'">
-      <div class="num mono">{{ r.number }}</div>
-      <div style="margin:4px 0">{{ r.device_type | class_icon }} <b>{{ r.brand or '' }}</b> {{ r.model or '' }}</div>
+      <div>{{ r.device_type | class_icon }} <b>{{ r.brand or '' }}</b> {{ r.model or '' }}</div>
       <div class="muted" style="font-size:12.5px">{{ r.client.full_name }}</div>
       <div class="row" style="margin-top:6px;justify-content:space-between">
         <span class="chip {{ r.status | status_chip }}" style="font-size:11px">{{ r.status }}</span>

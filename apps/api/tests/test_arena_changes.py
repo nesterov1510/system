@@ -136,14 +136,19 @@ def test_clients_suggest_finds_by_phone_and_name(client, admin_headers):
 
 
 # ------------------------------------------------------------------- список
-def test_list_has_perpage_selector_and_number_in_device_column(client):
+def test_list_has_perpage_selector_and_no_number_anywhere(client, admin_headers):
+    rep = _make_repair(client, admin_headers, "nonum-1", "Номер Скрыт", "+993 61 121212")
     cookies = _login(client)
     page = client.get("/repairs?per_page=100", cookies=cookies)
     assert page.status_code == 200
     assert "На странице" in page.text
     assert 'name="per_page"' in page.text
-    # Номер ремонта больше не висит под датой (старый стиль .code).
+    # Номер ремонта не отображается нигде: ни под датой, ни в других колонках,
+    # ни в aria/слуховых подписях — и на доске тоже.
+    assert rep["number"] not in page.text
     assert 'class="code">' not in page.text
+    board = client.get("/repairs?view=board", cookies=cookies)
+    assert rep["number"] not in board.text
 
 
 def test_list_inline_edit_marks_for_admin_and_not_for_master(client):

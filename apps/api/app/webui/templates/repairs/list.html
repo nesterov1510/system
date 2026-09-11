@@ -108,7 +108,7 @@ textarea.riedit{min-height:64px;resize:vertical}
               data-hint="Дата и время, когда технику приняли в сервис.">?</button></th>
           <th style="text-transform:none;letter-spacing:0">📺 Техника
             <button type="button" class="colhint" data-colhint data-title="Название техники"
-              data-hint="Номер ремонта, класс техники, марка и модель. Карточка открывается через меню ⚡ в последней колонке."
+              data-hint="Класс техники, марка и модель. Карточка открывается через меню ⚡ в последней колонке."
               data-details="🚚 — заказ с доставкой (курьер или забрали с адреса)">?</button></th>
           <th style="text-transform:none;letter-spacing:0">🧾 Принял
             <button type="button" class="colhint" data-colhint data-title="Кто принял технику"
@@ -145,7 +145,7 @@ textarea.riedit{min-height:64px;resize:vertical}
         <tr>
           {% if can_delete %}
           <td class="bulk-col">
-            <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить {{ r.number }}">
+            <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить ремонт клиента {{ r.client.full_name }}">
           </td>
           {% endif %}
           <td title="Принято {{ r.accepted_at | dt }}">
@@ -157,7 +157,7 @@ textarea.riedit{min-height:64px;resize:vertical}
             <div class="rlist-dev">
               <span class="rlist-dev__ico">{{ r.device_type | class_icon }}</span>
               <span>
-                <span class="rlist-dev__meta"><span class="mono">{{ r.number }}</span> · {{ r.device_type | device_class }}{% if r.is_delivery %} · 🚚{% endif %}</span>
+                <span class="rlist-dev__meta">{{ r.device_type | device_class }}{% if r.is_delivery %} · 🚚{% endif %}</span>
                 {% if can_inline and can_device %}
                 <span class="rlist-dev__name rieditable" data-edit="device" data-edit-kind="device" data-repair-id="{{ r.id }}"
                       data-edit-value="{{ r.brand or '' }}" data-edit-value2="{{ r.model or '' }}"
@@ -320,7 +320,7 @@ textarea.riedit{min-height:64px;resize:vertical}
               {% endif %}
               {% if can_delete %}
               <form method="post" action="/repairs/{{ r.id }}/delete"
-                    onsubmit="return confirm('Удалить ремонт {{ r.number }}?')">
+                    onsubmit="return confirm('Удалить ремонт: {{ r.client.full_name }} · {{ r.brand or '' }} {{ r.model or '' }}?')">
                 <button class="rpop-act is-danger" type="submit">🗑 Удалить</button>
               </form>
               {% endif %}
