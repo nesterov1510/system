@@ -44,6 +44,20 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         },
         "description": "Юридический текст согласия на диагностику и ремонт",
     },
+    "print_stub": {
+        "value": {
+            # Заголовки и подписи отрывной части бланка A4 (талон клиента).
+            # Редактируются администратором в /admin/settings → Печать.
+            "title": "KLIENTE / ДЛЯ КЛИЕНТА",
+            "terms_label": "Условия хранения:",
+            "consent_label": "О ремонте:",
+            "qr_caption": "Сканируйте — статус ремонта",
+            "sign_client": "Подпись клиента",
+            "sign_date": "Дата",
+            "cut_hint": "— ✂ отрывная часть для клиента ✂ —",
+        },
+        "description": "Отрывная часть бланка A4 (талон клиента): заголовки и подписи",
+    },
     "brand": {
         "value": {"name": "MSB"},
         "description": "Название сервисного центра",
@@ -77,6 +91,23 @@ DEFAULT_SETTINGS: dict[str, dict] = {
     "region": {
         "value": {"country": "Туркменистан", "timezone": "Asia/Ashgabat"},
         "description": "Регион развёртывания",
+    },
+    "ip_control": {
+        "value": {
+            # off        — фильтр выключен, доступ открыт всем;
+            # whitelist  — разрешены только перечисленные IP/сети (белый список);
+            # blacklist  — запрещены перечисленные IP/сети (чёрный список).
+            #
+            # ПО УМОЛЧАНИЮ включён белый список с рабочими сетями офиса:
+            # 192.168.5.0/24 (компьютеры) и 192.168.8.0/24 (сеть сервера) —
+            # обе доступны сразу, остальные адреса админ открывает сам.
+            "mode": "whitelist",
+            "whitelist": ["192.168.5.0/24", "192.168.8.0/24"],
+            "blacklist": [],
+            # Доверять X-Forwarded-For (включать ТОЛЬКО за обратным прокси nginx).
+            "trust_proxy": False,
+        },
+        "description": "Контроль доступа к интерфейсу по IP клиента (белый/чёрный список)",
     },
     "printer": {
         "value": {"ip": "", "port": 631, "mode": "agent", "name": ""},
@@ -234,3 +265,64 @@ async def get_sms_templates(db: AsyncSession) -> dict:
     if saved:
         value.update(saved)
     return value
+
+
+async def get_ip_control(db) -> dict:
+    """Настройки IP-контроля доступа (белый/чёрный список IP клиентов).
+
+    Возвращает dict: mode (off|whitelist|blacklist), whitelist, blacklist —
+    списки строк (IP или CIDR-сети). Локальные адреса (127.0.0.1, ::1) всегда
+    разрешены, чтобы администратор не заблокировал сам себя.
+    """
+    value = {
+        # По умолчанию — белый список с рабочими сетями офиса (192.168.5.0/24 и
+        # 192.168.8.0/24): они доступны сразу, остальное админ открывает сам.
+        # Loopback разрешён всегда.
+        "mode": "whitelist",
+        "whitelist": ["192.168.5.0/24", "192.168.8.0/24"],
+        "blacklist": [],
+        "trust_proxy": False,
+    }
+    saved = await get_setting(db, "ip_control")
+    if saved:
+        if saved.get("mode") in ("off", "whitelist", "blacklist"):
+            value["mode"] = saved["mode"]
+        value["whitelist"] = [str(x).strip() for x in (saved.get("whitelist") or []) if str(x).strip()]
+        value["blacklist"] = [str(x).strip() for x in (saved.get("blacklist") or []) if str(x).strip()]
+        value["trust_proxy"] = bool(saved.get("trust_proxy"))
+    return value
+
+
+async def get_print_stub(db) -> dict:
+    """Заголовки и подписи отрывной части бланка A4 (талон клиента).
+
+    Редактируются администратором на вкладке «Печать» (/admin/settings).
+    """
+    value = {
+        "title": "KLIENTE / ДЛЯ КЛИЕНТА",
+        "terms_label": "Условия хранения:",
+        "consent_label": "О ремонте:",
+        "qr_caption": "Сканируйте — статус ремонта",
+        "sign_client": "Подпись клиента",
+        "sign_date": "Дата",
+        "cut_hint": "— ✂ отрывная часть для клиента ✂ —",
+    }
+    saved = await get_setting(db, "print_stub")
+    if saved:
+        for key in value:
+            val = (saved.get(key) or "").strip()
+            if val:
+                value[key] = val
+    return value
+
+
+async def get_intake_auto_print(db) -> str:
+    """Что печатать автоматически при приёмке: label / blank / both / none.
+
+    По умолчанию — этикетка 58×38 (её клеят на технику при клиенте).
+    """
+    saved = await get_setting(db, "intake_auto_print")
+    mode = (saved or {}).get("mode", "label")
+    if mode not in ("label", "blank", "both", "none"):
+        return "label"
+    return mode

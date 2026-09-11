@@ -41,6 +41,25 @@ def _run(fn):
     return asyncio.run(_wrap())
 
 
+def _notify_client(client, headers, repair, monkeypatch):
+    """Кнопка «Уведомить»: SMS + очередь напоминаний на 3 дня."""
+
+    async def _ok(phone, text, db=None):
+        return {"ok": True, "detail": "http_200"}
+
+    monkeypatch.setattr("app.routers.repairs.send_sms", _ok)
+    r = client.post(f"/api/repairs/{repair['id']}/finish", headers=headers)
+    assert r.status_code == 200, r.text
+    text = r.json()["sms"]["text"]
+    r2 = client.post(
+        f"/api/repairs/{repair['id']}/finish-sms",
+        headers=headers,
+        json={"text": text},
+    )
+    assert r2.status_code == 200, r2.text
+    return r.json()
+
+
 def _mk_repair(client, headers, city_id, key, name="Клиент Напоминание", phone="+993 61 555000"):
     r = client.post(
         "/api/repairs",
@@ -146,6 +165,12 @@ def test_default_reminder_text_has_service_and_address():
     assert "MERYOSAB" in DEFAULT_PICKUP_REMINDER_TEXT
     assert "Парахат 3/2" in DEFAULT_PICKUP_REMINDER_TEXT
     assert "забрать" in DEFAULT_PICKUP_REMINDER_TEXT.lower()
+    assert "закончен" in DEFAULT_PICKUP_REMINDER_TEXT.lower()
+
+
+def test_reminders_default_to_three_days():
+    """После уведомления клиенту три дня приходят SMS «заберите технику»."""
+    assert settings.REMINDER_MAX_COUNT == 3
 
 
 def test_build_reminder_text_uses_default_template():
@@ -206,26 +231,26 @@ def test_unknown_placeholder_does_not_break_text():
 # ---------------------------------------------------------------------------
 
 
-def test_finish_schedules_reminder_for_next_day(client, operator_headers, city_id):
+def test_notify_schedules_reminder_for_next_day(client, operator_headers, city_id, monkeypatch):
+    """SMS и 3-дневные напоминания — только после кнопки «Уведомить», не сами."""
     repair = _mk_repair(client, operator_headers, city_id, "rem-finish-1")
-    r = client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
-    assert r.status_code == 200, r.text
-    body = r.json()["repair"]
+    client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
+    row = _load_repair(repair["id"])
+    assert row.status == "Готово к выдаче"
+    assert row.reminder_next_at is None
 
-    assert body["status"] == "Готово к выдаче"
-    assert body["ready_at"] is not None
-    assert body["reminder_next_at"] is not None, "после «Ремонт закончен» напоминание не запланировано"
-    assert body["reminder_count"] == 0
-
-    row = _load_repair(body["id"])
+    _notify_client(client, operator_headers, repair, monkeypatch)
+    row = _load_repair(repair["id"])
+    assert row.reminder_next_at is not None
+    assert row.reminder_count == 0
     delta = row.reminder_next_at - row.ready_at
     assert timedelta(hours=settings.REMINDER_FIRST_DELAY_HOURS - 1) < delta <= timedelta(
         hours=settings.REMINDER_FIRST_DELAY_HOURS + 1
     )
 
 
-def test_status_change_to_ready_schedules_reminder(client, operator_headers, city_id):
-    """Готовность поставили не кнопкой «Ремонт закончен», а сменой статуса."""
+def test_status_change_to_ready_does_not_send_sms(client, operator_headers, city_id):
+    """Смена статуса на «Готово» не шлёт SMS и не ставит напоминания."""
     repair = _mk_repair(client, operator_headers, city_id, "rem-status-1")
     r = client.patch(
         f"/api/repairs/{repair['id']}",
@@ -233,12 +258,12 @@ def test_status_change_to_ready_schedules_reminder(client, operator_headers, cit
         json={"status": "Готово к выдаче"},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["reminder_next_at"] is not None
+    assert r.json()["reminder_next_at"] is None
 
 
-def test_issuing_repair_stops_reminders(client, operator_headers, city_id):
+def test_issuing_repair_stops_reminders(client, operator_headers, city_id, monkeypatch):
     repair = _mk_repair(client, operator_headers, city_id, "rem-stop-1")
-    client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
+    _notify_client(client, operator_headers, repair, monkeypatch)
     assert _load_repair(repair["id"]).reminder_next_at is not None
 
     r = client.patch(
@@ -341,7 +366,6 @@ def test_reminder_written_to_repair_history(client, operator_headers, city_id, m
 def test_quiet_hours_do_not_send(client, operator_headers, city_id, monkeypatch):
     repair = _mk_repair(client, operator_headers, city_id, "rem-quiet-1")
     client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
-    before = _load_repair(repair["id"]).reminder_next_at
     _patch_repair(repair["id"], reminder_next_at=utcnow() - timedelta(minutes=5))
     _only_this_reminder(repair["id"])
 
@@ -354,7 +378,7 @@ def test_quiet_hours_do_not_send(client, operator_headers, city_id, monkeypatch)
     assert sent == []
     # Напоминание не «сгорело»: оно уйдёт, как только окно откроется.
     assert _load_repair(repair["id"]).reminder_next_at < utcnow()
-    assert before is not None
+    # Очередь не сбрасывается в тихие часы (дата остаётся в прошлом).
 
 
 def test_disabled_gateway_keeps_reminder_queued(client, operator_headers, city_id, monkeypatch):
@@ -493,10 +517,10 @@ def test_template_from_admin_is_used(client, admin_headers, operator_headers, ci
 
 
 def test_admin_reminders_queue_shows_scheduled_repairs(
-    client, admin_headers, operator_headers, city_id
+    client, admin_headers, operator_headers, city_id, monkeypatch
 ):
     repair = _mk_repair(client, operator_headers, city_id, "rem-queue-1")
-    client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
+    _notify_client(client, operator_headers, repair, monkeypatch)
 
     r = client.get("/api/admin/reminders", headers=admin_headers)
     assert r.status_code == 200, r.text

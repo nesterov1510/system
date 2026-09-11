@@ -2,14 +2,49 @@
 бренду, мастеру. Anti-hallucination: below threshold -> "мало данных".
 """
 import uuid
-from app.db.base import utcnow
+from collections import defaultdict
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.base import utcnow
 from app.db.models import Part, Payment, Repair
 
 MIN_SAMPLE = 3
+ASHGABAT = ZoneInfo("Asia/Ashgabat")
+
+CLOSED_STATUSES = ("Выдано", "Архив", "Отказ")
+IN_PROCESS_STATUSES = ("Принято", "Диагностика", "Согласование", "В ремонте")
+
+DASHBOARD_FILTER_LABELS = {
+    "all": "Все ремонты",
+    "ready": "Готово к выдаче",
+    "waiting-parts": "Ожидаем запчасть",
+    "today": "Сегодня принята",
+    "in-repair": "В процессе ремонта",
+    "not-picked-up": "Не забирает",
+    "disposable": "Можно выбрасывать",
+    "warranty": "На гарантии",
+}
+
+PERIOD_LABELS = {
+    "today": "Сегодня",
+    "week": "Неделя",
+    "14d": "14 дней",
+    "month": "Месяц",
+    "3m": "3 месяца",
+    "6m": "6 месяцев",
+    "year": "Год",
+    "all": "Всё время",
+    "custom": "Свой период",
+}
+
+_MONTHS_RU = (
+    "янв", "фев", "мар", "апр", "мая", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек",
+)
 
 
 def _median(values: list[float]) -> float | None:
@@ -34,6 +69,62 @@ def _resolved_price(r: Repair) -> float | None:
         if val is not None:
             return float(val)
     return None
+
+
+def _today_start_utc() -> datetime:
+    now_local = datetime.now(ASHGABAT)
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _to_local(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(ASHGABAT)
+
+
+def dashboard_filter_clauses(key: str | None) -> list:
+    """SQL-условия для карточек панели и списка ремонтов — одно и то же."""
+    if not key or key == "all":
+        return []
+    now = utcnow()
+    if key == "ready":
+        return [Repair.status == "Готово к выдаче"]
+    if key == "waiting-parts":
+        return [Repair.status == "Ожидание запчастей"]
+    if key == "today":
+        return [Repair.accepted_at >= _today_start_utc()]
+    if key == "in-repair":
+        return [Repair.status.in_(IN_PROCESS_STATUSES)]
+    if key == "not-picked-up":
+        three = now - timedelta(days=3)
+        return [
+            or_(
+                Repair.status == "Не забрано",
+                and_(
+                    Repair.status == "Готово к выдаче",
+                    Repair.issued_at.is_(None),
+                    Repair.ready_at.isnot(None),
+                    Repair.ready_at < three,
+                    or_(Repair.storage_until.is_(None), Repair.storage_until >= now),
+                ),
+            )
+        ]
+    if key == "disposable":
+        return [
+            Repair.storage_until.isnot(None),
+            Repair.storage_until < now,
+            Repair.status.notin_(list(CLOSED_STATUSES)),
+        ]
+    if key == "warranty":
+        return [
+            Repair.status == "Выдано",
+            Repair.warranty_text.isnot(None),
+            Repair.warranty_text != "",
+        ]
+    return []
 
 
 async def city_stats(
@@ -127,9 +218,24 @@ async def overview(db: AsyncSession) -> dict:
     finished_count, finished_revenue, finished_cost = fin
     profit = float(finished_revenue or 0) - float(finished_cost or 0)
 
+    async def _metric(key: str) -> int:
+        clauses = dashboard_filter_clauses(key)
+        stmt = select(func.count(Repair.id))
+        if clauses:
+            stmt = stmt.where(*clauses)
+        return int((await db.execute(stmt)).scalar_one() or 0)
+
     return {
         "total": total,
+        "all_repairs": int(total or 0),
         "active": active,
+        "ready": await _metric("ready"),
+        "waiting_parts": await _metric("waiting-parts"),
+        "accepted_today": await _metric("today"),
+        "in_repair": await _metric("in-repair"),
+        "not_picked_up": await _metric("not-picked-up"),
+        "disposable": await _metric("disposable"),
+        "warranty": await _metric("warranty"),
         "overdue_storage": overdue,
         "low_stock": low_stock,
         "revenue": float(revenue or 0),
@@ -218,3 +324,261 @@ async def tiles(
             f = filters + [Repair.master_id == mid]
             out.append(await _aggregate(db, f, u.name if u else str(mid)))
     return out
+
+
+def _fmt_day(d: date) -> str:
+    return f"{d.day} {_MONTHS_RU[d.month - 1]}"
+
+
+def _naive_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _monday(d: date) -> date:
+    return d - timedelta(days=d.weekday())
+
+
+def _period_window(
+    period: str, date_from: str | None, date_to: str | None
+) -> tuple[datetime, datetime, str, date, date]:
+    now_local = datetime.now(ASHGABAT)
+    today = now_local.date()
+    grain = "day"
+    start_d, end_d = today, today
+
+    if period not in PERIOD_LABELS:
+        period = "14d"
+
+    if period == "today":
+        start_d = end_d = today
+        grain = "hour"
+    elif period == "week":
+        start_d = today - timedelta(days=6)
+        grain = "day"
+    elif period == "14d":
+        start_d = today - timedelta(days=13)
+        grain = "day"
+    elif period == "month":
+        start_d = today - timedelta(days=29)
+        grain = "day"
+    elif period == "3m":
+        start_d = today - timedelta(days=89)
+        grain = "week"
+    elif period == "6m":
+        start_d = today - timedelta(days=179)
+        grain = "week"
+    elif period == "year":
+        start_d = date(today.year - 1, today.month, 1)
+        grain = "month"
+    elif period == "custom":
+        try:
+            start_d = date.fromisoformat(date_from or "")
+            end_d = date.fromisoformat(date_to or "")
+        except ValueError:
+            start_d = today - timedelta(days=13)
+            end_d = today
+        if end_d < start_d:
+            start_d, end_d = end_d, start_d
+        span = (end_d - start_d).days + 1
+        if span <= 2:
+            grain = "hour"
+        elif span <= 62:
+            grain = "day"
+        elif span <= 370:
+            grain = "week"
+        else:
+            grain = "month"
+    elif period == "all":
+        start_d = today - timedelta(days=365)
+        grain = "month"
+
+    start_local = datetime.combine(start_d, datetime.min.time(), tzinfo=ASHGABAT)
+    if period == "today":
+        end_local = now_local
+    else:
+        end_local = datetime.combine(end_d, datetime.max.time(), tzinfo=ASHGABAT)
+        if end_local > now_local and period != "custom":
+            end_local = now_local
+    return _naive_utc(start_local), _naive_utc(end_local), grain, start_d, end_d
+
+
+def _bucket_key(local_dt: datetime, grain: str):
+    if grain == "hour":
+        return local_dt.replace(tzinfo=None, minute=0, second=0, microsecond=0)
+    if grain == "day":
+        return local_dt.date()
+    if grain == "week":
+        return _monday(local_dt.date())
+    return date(local_dt.year, local_dt.month, 1)
+
+
+def _iter_buckets(start_d: date, end_d: date, grain: str) -> list:
+    out = []
+    if grain == "hour":
+        cur = datetime.combine(start_d, datetime.min.time())
+        last = datetime.combine(end_d, datetime.max.time()).replace(
+            minute=0, second=0, microsecond=0
+        )
+        while cur <= last:
+            out.append(cur)
+            cur += timedelta(hours=1)
+        return out
+    if grain == "day":
+        cur = start_d
+        while cur <= end_d:
+            out.append(cur)
+            cur += timedelta(days=1)
+        return out
+    if grain == "week":
+        cur = _monday(start_d)
+        last = _monday(end_d)
+        while cur <= last:
+            out.append(cur)
+            cur += timedelta(days=7)
+        return out
+    cur = date(start_d.year, start_d.month, 1)
+    last = date(end_d.year, end_d.month, 1)
+    while cur <= last:
+        out.append(cur)
+        if cur.month == 12:
+            cur = date(cur.year + 1, 1, 1)
+        else:
+            cur = date(cur.year, cur.month + 1, 1)
+    return out
+
+
+def _label_for(bucket, grain: str) -> str:
+    if grain == "hour":
+        return bucket.strftime("%H:%M")
+    if grain == "month":
+        return f"{_MONTHS_RU[bucket.month - 1]} {bucket.year}"
+    return _fmt_day(bucket)
+
+
+def _tooltip_for(bucket, grain: str) -> str:
+    if grain == "hour":
+        return f"{_fmt_day(bucket.date())} {bucket.strftime('%H:%M')}"
+    if grain == "week":
+        end = bucket + timedelta(days=6)
+        return f"{_fmt_day(bucket)} — {_fmt_day(end)}"
+    if grain == "month":
+        return f"{_MONTHS_RU[bucket.month - 1]} {bucket.year}"
+    return _fmt_day(bucket)
+
+
+async def finance_chart(
+    db: AsyncSession,
+    period: str = "14d",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> dict:
+    """Ряды оборот / прибыль / расходы для графика панели."""
+    from app.services.settings import get_currency
+
+    period = (period or "14d").strip() or "14d"
+    if period not in PERIOD_LABELS:
+        period = "14d"
+
+    start_utc, end_utc, grain, start_d, end_d = _period_window(period, date_from, date_to)
+
+    if period == "all":
+        pay_min = (await db.execute(select(func.min(Payment.paid_at)))).scalar()
+        cost_min = (
+            await db.execute(
+                select(func.min(func.coalesce(Repair.issued_at, Repair.ready_at, Repair.accepted_at)))
+            )
+        ).scalar()
+        candidates = [d for d in (pay_min, cost_min) if d]
+        if candidates:
+            first_local = _to_local(min(candidates))
+            if first_local is not None:
+                start_d = first_local.date()
+                start_local = datetime.combine(start_d, datetime.min.time(), tzinfo=ASHGABAT)
+                start_utc = _naive_utc(start_local)
+            span = (end_d - start_d).days
+            if span > 370:
+                grain = "month"
+            elif span > 62:
+                grain = "week"
+            else:
+                grain = "day"
+
+    buckets = _iter_buckets(start_d, end_d, grain) or [start_d]
+    turnover_map: dict = defaultdict(float)
+    expense_map: dict = defaultdict(float)
+
+    pay_rows = (
+        await db.execute(
+            select(Payment.paid_at, Payment.amount).where(
+                Payment.paid_at >= start_utc,
+                Payment.paid_at <= end_utc,
+            )
+        )
+    ).all()
+    for paid_at, amount in pay_rows:
+        local = _to_local(paid_at)
+        if local is None:
+            continue
+        turnover_map[_bucket_key(local, grain)] += float(amount or 0)
+
+    repair_rows = (
+        await db.execute(
+            select(
+                Repair.issued_at,
+                Repair.ready_at,
+                Repair.accepted_at,
+                Repair.cost_amount,
+                Repair.master_payout,
+            ).where(
+                or_(
+                    and_(Repair.issued_at.isnot(None), Repair.issued_at >= start_utc, Repair.issued_at <= end_utc),
+                    and_(
+                        Repair.issued_at.is_(None),
+                        Repair.ready_at.isnot(None),
+                        Repair.ready_at >= start_utc,
+                        Repair.ready_at <= end_utc,
+                    ),
+                    and_(
+                        Repair.issued_at.is_(None),
+                        Repair.ready_at.is_(None),
+                        Repair.accepted_at >= start_utc,
+                        Repair.accepted_at <= end_utc,
+                    ),
+                )
+            )
+        )
+    ).all()
+    for issued_at, ready_at, accepted_at, cost_amount, master_payout in repair_rows:
+        when = issued_at or ready_at or accepted_at
+        local = _to_local(when)
+        if local is None:
+            continue
+        expense_map[_bucket_key(local, grain)] += float(cost_amount or 0) + float(master_payout or 0)
+
+    labels = [_label_for(b, grain) for b in buckets]
+    tooltip_labels = [_tooltip_for(b, grain) for b in buckets]
+    turnover = [round(turnover_map[b], 2) for b in buckets]
+    expenses = [round(expense_map[b], 2) for b in buckets]
+    profit = [round(t - e, 2) for t, e in zip(turnover, expenses)]
+
+    cur = await get_currency(db)
+    currency = (cur or {}).get("code") or "TMT"
+    period_label = PERIOD_LABELS.get(period, "Период")
+    caption = f"{period_label} · {_fmt_day(start_d)} — {_fmt_day(end_d)}"
+
+    return {
+        "ok": True,
+        "period": period,
+        "period_label": period_label,
+        "caption": caption,
+        "date_from": start_d.isoformat(),
+        "date_to": end_d.isoformat(),
+        "currency": currency,
+        "labels": labels,
+        "tooltip_labels": tooltip_labels,
+        "turnover": turnover,
+        "profit": profit,
+        "expenses": expenses,
+    }

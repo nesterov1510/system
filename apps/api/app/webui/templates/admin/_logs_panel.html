@@ -1,0 +1,69 @@
+{# HTML-фрагмент для HTMX-автообновления /admin/logs/panel #}
+<section class="log-cards">
+  <article class="log-card log-card--critical">
+    <span>Critical</span><strong>{{ error_summary.critical_lines }}</strong>
+    <small>{{ error_summary.critical_files }} файлов</small>
+  </article>
+  <article class="log-card log-card--error">
+    <span>Error</span><strong>{{ error_summary.error_lines }}</strong>
+    <small>{{ error_summary.error_files }} файлов</small>
+  </article>
+  <article class="log-card log-card--error1">
+    <span>Error1</span><strong>{{ error_summary.error1_lines }}</strong>
+    <small>{{ error_summary.error1_files }} файлов</small>
+  </article>
+  <article class="log-card log-card--warning">
+    <span>Warning</span><strong>{{ error_summary.warning_lines }}</strong>
+    <small>{{ error_summary.warning_files }} файлов</small>
+  </article>
+  <article class="log-card log-card--meta">
+    <span>Уровень</span><strong>{{ selected_level_label or '—' }}</strong>
+    <small>{{ selected_level_title }}</small>
+  </article>
+  <article class="log-card log-card--meta">
+    <span>Показано строк</span><strong>{{ visible_lines }}</strong>
+    <small>{% if search_q %}найдено {{ matched_total }} · из {{ total_file_lines }}{% else %}из {{ total_file_lines }}{% endif %}</small>
+  </article>
+  <article class="log-card log-card--meta">
+    <span>Размер файла</span><strong>{{ file_size_human }}</strong>
+    <small>изменён {{ file_mtime or '—' }}</small>
+  </article>
+  <article class="log-card log-card--meta">
+    <span>Обновлено</span><strong style="font-size:15px">{{ last_update }}</strong>
+    <small style="word-break:break-all">{{ base_log_dir }}</small>
+  </article>
+</section>
+
+<div class="grid" style="grid-template-columns:280px 1fr;align-items:start">
+  <div class="card"><div class="card-h"><h3>Уровни логов</h3></div>
+    <div class="card-b" style="padding:8px">
+      {% for item in stats %}
+      <a class="level-item severity-{{ item.severity }} {% if item.name == selected_level %}active{% endif %}"
+         href="/admin/logs?level={{ item.name }}">
+        <span class="level-item__label">{{ item.label }}</span>
+        <span class="level-item__title">{{ item.title }}</span>
+        <span class="level-item__meta">{{ item.total_files }} файл. / {{ item.total_lines }} строк / {{ item.total_size_human }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card"><div class="card-h">
+    <h3>📄 {{ selected_file or '—' }}
+      <span class="muted" style="font-weight:400;font-size:12px">{{ selected_date }}</span>
+      {% if search_q %}<span class="muted" style="font-weight:400;font-size:12px"> · поиск: «{{ search_q }}» ({{ matched_total }})</span>{% endif %}
+    </h3>
+  </div>
+    <div class="card-b">
+      <div class="log-window severity-{{ selected_level_severity }}">
+        {% if log_lines %}
+          {% for line in log_lines %}<pre class="log-line">{{ line }}</pre>{% endfor %}
+        {% else %}
+          <div class="empty" style="border-color:rgba(255,255,255,.2);background:transparent;color:#7f909f">
+            Для выбранного уровня логов пока нет записей.
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>

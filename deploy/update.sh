@@ -6,27 +6,27 @@
 #
 # Запуск (на сервере):
 #   cd /home/windowrepair-ae/msb
-#   sudo bash deploy/update.sh              # web + api + активный print-agent
-#   sudo bash deploy/update.sh --web-only   # только фронтенд
-#   sudo bash deploy/update.sh --api-only   # backend + активный print-agent
+#   sudo bash deploy/update.sh              # api + активный print-agent
+#   sudo bash deploy/update.sh --api-only   # то же (фронтенд отдельного нет)
 #
 # Можно запускать и без sudo — права администратора будут запрошены сами
 # (для systemctl). Каталог проекта берётся из MSB_ROOT (по умолчанию —
-# родительский каталог этого скрипта), порты — из MSB_WEB_PORT / MSB_API_PORT.
+# родительский каталог этого скрипта), порт API — из MSB_API_PORT.
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${MSB_ROOT:-$(dirname "$SCRIPT_DIR")}"
-WEB_PORT="${MSB_WEB_PORT:-3030}"
 API_PORT="${MSB_API_PORT:-8085}"
 
-DO_WEB=1
-DO_API=1
 for arg in "$@"; do
   case "$arg" in
-    --web-only) DO_API=0 ;;
-    --api-only) DO_WEB=0 ;;
+    --web-only)
+      echo "Отдельного фронтенда больше нет (Jinja2 UI отдаёт API на :$API_PORT)."
+      echo "Используйте: sudo bash deploy/update.sh"
+      exit 0
+      ;;
+    --api-only) ;;
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "Неизвестный аргумент: $arg"; exit 2 ;;
   esac
@@ -64,13 +64,13 @@ restart_unit() {
   fi
 }
 
-echo "${BLD}MSB update${RST}  root=$ROOT  web:$WEB_PORT  api:$API_PORT"
-[ -d "$ROOT/apps/web" ] || die "не найден $ROOT/apps/web — задайте MSB_ROOT=/путь/к/msb"
+echo "${BLD}MSB update${RST}  root=$ROOT  api:$API_PORT"
+[ -d "$ROOT/apps/api" ] || die "не найден $ROOT/apps/api — задайте MSB_ROOT=/путь/к/msb"
 
 # Владелец каталога проекта: под root собираем от его имени, чтобы файлы
-# сборки не стали root-овыми и следующий запуск без sudo не сломался.
-OWNER="$(stat -c '%U' "$ROOT/apps/web")"
-OWNER_GRP="$(stat -c '%G' "$ROOT/apps/web")"
+# не стали root-овыми и следующий запуск без sudo не сломался.
+OWNER="$(stat -c '%U' "$ROOT/apps/api")"
+OWNER_GRP="$(stat -c '%G' "$ROOT/apps/api")"
 run_as_owner() {
   if [ "$(id -u)" -eq 0 ] && [ "$OWNER" != "root" ] && command -v runuser >/dev/null 2>&1; then
     runuser -u "$OWNER" -- "$@"
@@ -80,58 +80,21 @@ run_as_owner() {
 }
 
 # ---------------------------------------------------------------- API
-if [ "$DO_API" = 1 ]; then
-  step "Backend (FastAPI)"
-  cd "$ROOT/apps/api" || die "нет каталога apps/api"
-  if [ -x .venv/bin/pip ]; then
-    run_as_owner .venv/bin/pip install -q -r requirements.txt || warn "pip install завершился с ошибкой"
-    run_as_owner .venv/bin/python -m compileall -q app >/dev/null || die "синтаксическая ошибка в python-коде"
-    ok "зависимости и синтаксис в порядке"
-  else
-    warn ".venv не найден — пропускаю установку зависимостей"
-  fi
-  restart_unit msb-api
+step "Backend + UI (FastAPI / Jinja2)"
+cd "$ROOT/apps/api" || die "нет каталога apps/api"
+if [ -x .venv/bin/pip ]; then
+  run_as_owner .venv/bin/pip install -q -r requirements.txt || warn "pip install завершился с ошибкой"
+  run_as_owner .venv/bin/python -m compileall -q app >/dev/null || die "синтаксическая ошибка в python-коде"
+  ok "зависимости и синтаксис в порядке"
+else
+  warn ".venv не найден — пропускаю установку зависимостей"
 fi
-
-# ---------------------------------------------------------------- WEB
-if [ "$DO_WEB" = 1 ]; then
-  step "Frontend (Next.js standalone)"
-  cd "$ROOT/apps/web" || die "нет каталога apps/web"
-
-  if [ -f package-lock.json ]; then
-    run_as_owner npm ci --no-audit --no-fund || die "npm ci не прошёл"
-  else
-    run_as_owner npm install --no-audit --no-fund || die "npm install не прошёл"
-  fi
-  ok "зависимости установлены"
-
-  # Чистая сборка: остатки прошлой сборки — частая причина 500 после замены файлов.
-  rm -rf .next
-  # Для native/systemd deployment браузер всегда использует same-origin.
-  # Пустые NEXT_PUBLIC_* не дают случайно зашить localhost/IP в JS-бандл.
-  run_as_owner env NEXT_PUBLIC_API_URL= NEXT_PUBLIC_WS_URL= npm run build \
-    || die "СБОРКА УПАЛА — Web не перезапущен; исправьте ошибку и повторите обновление"
-  ok "next build выполнен"
-
-  [ -d .next/standalone ] || die ".next/standalone не создан (проверьте output:'standalone' в next.config.mjs)"
-
-  # Standalone-сервер не включает статику и public — их копируют вручную.
-  cp -r .next/static .next/standalone/.next/static || die "не удалось скопировать .next/static"
-  [ -d public ] && cp -r public .next/standalone/public
-  ok "статика скопирована в standalone"
-
-  # Вернуть владельца, если что-то создалось от root.
-  if [ "$(id -u)" -eq 0 ] && [ "$OWNER" != "root" ]; then
-    chown -R "$OWNER:$OWNER_GRP" .next 2>/dev/null
-  fi
-
-  restart_unit msb-web
-fi
+restart_unit msb-api
 
 # ---------------------------------------------------------- PRINT AGENT
 # Агент читает формат задания из payload. Если он уже запущен, обязательно
 # перезапускаем его вместе с backend, чтобы новые типы заданий не ушли не туда.
-if [ "$DO_API" = 1 ] && have_systemd \
+if have_systemd \
    && $SUDO systemctl is-active --quiet msb-print-agent.service; then
   step "Print-agent"
   if [ -x "$ROOT/apps/print-agent/.venv/bin/pip" ]; then
@@ -148,15 +111,12 @@ if command -v curl >/dev/null 2>&1; then
   api_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$API_PORT/health" 2>/dev/null); api_code=${api_code:-000}
   [ "$api_code" = "200" ] && ok "API /health → 200" || warn "API /health → $api_code (порт $API_PORT)"
 
-  web_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$WEB_PORT/login" 2>/dev/null); web_code=${web_code:-000}
-  if [ "$web_code" = "200" ]; then
-    ok "Web /login → 200"
-    curl -s --max-time 15 "http://127.0.0.1:$WEB_PORT/login" | grep -q "Запомнить вход" \
-      && ok "чекбокс «Запомнить вход» на странице есть" \
-      || warn "чекбокс не найден — возможно, отдаётся старая сборка"
+  login_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$API_PORT/login" 2>/dev/null); login_code=${login_code:-000}
+  if [ "$login_code" = "200" ]; then
+    ok "UI /login → 200"
   else
-    warn "Web /login → $web_code (порт $WEB_PORT)"
-    have_systemd && $SUDO journalctl -u msb-web -n 30 --no-pager
+    warn "UI /login → $login_code (порт $API_PORT)"
+    have_systemd && $SUDO journalctl -u msb-api -n 30 --no-pager
   fi
 else
   warn "curl не установлен — проверьте сайт вручную"

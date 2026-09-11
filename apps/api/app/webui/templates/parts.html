@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Склад{% endblock %}
+{% block page_name %}Склад{% endblock %}
+{% block topbar_actions %}{% if can_catalog %}<button class="btn sm" onclick="document.getElementById('add-part').style.display='block'">➕ Позиция</button>{% endif %}{% endblock %}
+{% block content %}
+
+<section class="page-head">
+  <div>
+    <h1>Склад</h1>
+    <p>Запчасти, остатки и купленная техника-доноры.</p>
+  </div>
+  {% if can_catalog %}<button class="btn btn-primary" type="button" onclick="document.getElementById('add-part').style.display='block'">＋ Добавить позицию</button>{% endif %}
+</section>
+
+<div class="tabs">
+  <a href="/parts" class="active">🔩 Запчасти</a>
+</div>
+
+<form class="row" method="get" action="/parts" style="margin-bottom:14px">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск по названию/SKU…" style="max-width:320px">
+  <label class="check" style="margin:0"><input type="checkbox" name="low" value="1" {% if low %}checked{% endif %}
+         onchange="this.form.submit()"> Низкий остаток</label>
+  <button class="btn sm" type="submit">Найти</button>
+</form>
+
+{% if can_catalog %}
+<div class="card" id="add-part" style="display:none;margin-bottom:16px">
+  <div class="card-h"><h3>Новая позиция склада</h3></div>
+  <form method="post" action="/parts/create" class="card-b form-grid">
+    <label class="fld"><span class="lbl">Название *</span><input type="text" name="name" required></label>
+    <label class="fld"><span class="lbl">SKU / артикул</span><input type="text" name="sku"></label>
+    <label class="fld"><span class="lbl">Категория</span><input type="text" name="category"></label>
+    <label class="fld"><span class="lbl">Поставщик</span><input type="text" name="supplier"></label>
+    <label class="fld"><span class="lbl">Остаток</span><input type="number" name="stock_qty" value="0"></label>
+    <label class="fld"><span class="lbl">Мин. остаток</span><input type="number" name="min_stock" value="0"></label>
+    <label class="fld"><span class="lbl">Цена закупки</span><input type="text" name="cost_price"></label>
+    <label class="fld"><span class="lbl">Цена продажи</span><input type="text" name="sell_price"></label>
+    <div style="grid-column:1/-1"><button class="btn green" type="submit">Создать</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Название</th><th>SKU</th><th>Категория</th><th class="num">Остаток</th><th class="num">Закупка</th><th class="num">Продажа</th>{% if can_catalog %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for p in parts %}
+      <tr>
+        <td><b>{{ p.name }}</b>{% if p.supplier %}<div class="muted" style="font-size:11px">{{ p.supplier }}</div>{% endif %}</td>
+        <td class="mono muted">{{ p.sku or '—' }}</td>
+        <td>{{ p.category or '—' }}</td>
+        <td class="num">
+          <b>{{ p.stock_qty }}</b>
+          {% if p.stock_qty <= p.min_stock and p.min_stock > 0 %}<span class="chip red">мало</span>{% endif %}
+        </td>
+        <td class="num">{{ p.cost_price | money('ман.') if p.cost_price else '—' }}</td>
+        <td class="num">{{ p.sell_price | money('ман.') if p.sell_price else '—' }}</td>
+        {% if can_catalog %}
+        <td class="wrap">
+          <details>
+            <summary class="btn sm ghost">✏️</summary>
+            <form method="post" action="/parts/{{ p.id }}/update" class="form-grid" style="margin-top:8px;min-width:280px">
+              <label class="fld"><span class="lbl">Название</span><input type="text" name="name" value="{{ p.name }}" required></label>
+              <label class="fld"><span class="lbl">SKU</span><input type="text" name="sku" value="{{ p.sku or '' }}"></label>
+              <label class="fld"><span class="lbl">Категория</span><input type="text" name="category" value="{{ p.category or '' }}"></label>
+              <label class="fld"><span class="lbl">Поставщик</span><input type="text" name="supplier" value="{{ p.supplier or '' }}"></label>
+              <label class="fld"><span class="lbl">Остаток</span><input type="number" name="stock_qty" value="{{ p.stock_qty }}"></label>
+              <label class="fld"><span class="lbl">Мин. остаток</span><input type="number" name="min_stock" value="{{ p.min_stock }}"></label>
+              <label class="fld"><span class="lbl">Закупка</span><input type="text" name="cost_price" value="{{ p.cost_price or '' }}"></label>
+              <label class="fld"><span class="lbl">Продажа</span><input type="text" name="sell_price" value="{{ p.sell_price or '' }}"></label>
+              <div><button class="btn sm green" type="submit">Сохранить</button></div>
+            </form>
+          </details>
+          <form method="post" action="/parts/{{ p.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Архивировать позицию «{{ p.name }}»?')">
+            <button class="btn sm sec" type="submit">Удалить</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 7 if can_catalog else 6 }}" class="muted" style="text-align:center;padding:30px">Склад пуст</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+
+<div class="page-head" style="margin-top:28px">
+  <div>
+    <p class="eyebrow">Доноры</p>
+    <h2 style="font-size:22px">🛠 Купленная техника</h2>
+    <p>Техника, закупленная на запчасти. Отмечайте разборку и место хранения.</p>
+  </div>
+</div>
+
+{% if can_catalog %}
+<div class="msb-form-card">
+  <div class="msb-form-card__head"><h2>Добавить купленную технику</h2></div>
+  <form method="post" action="/equipment/create" class="msb-form-card__body">
+    <div class="msb-form-grid">
+      <label class="fld"><span class="lbl">Название / тип *</span>
+        <input type="text" name="name" required placeholder="напр. Samsung UE43 — донор"></label>
+      <label class="fld"><span class="lbl">Марка</span>
+        <input type="text" name="brand" placeholder="Samsung"></label>
+      <label class="fld"><span class="lbl">Модель</span>
+        <input type="text" name="model" placeholder="UE43NU…"></label>
+      <label class="fld"><span class="lbl">Цена закупки (ман.)</span>
+        <input type="text" name="purchase_price" inputmode="decimal" placeholder="0"></label>
+      <label class="fld"><span class="lbl">Место хранения</span>
+        <input type="text" name="storage_place" placeholder="Склад, полка 3"></label>
+      <label class="fld"><span class="lbl">Комплектующие (через запятую)</span>
+        <input type="text" name="components" placeholder="матрица, БП, mainboard"></label>
+    </div>
+    <label class="fld"><span class="lbl">Примечание</span>
+      <input type="text" name="notes" placeholder="что пригодное / состояние"></label>
+    <div><button class="btn green" type="submit">＋ Добавить технику</button></div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Техника</th><th>Статус</th><th class="num">Закупка</th><th>Место</th>{% if can_catalog %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for e in equipment %}
+      <tr>
+        <td><b>{{ e.name }}</b> {{ e.brand or '' }} {{ e.model or '' }}
+          {% if e.notes %}<div class="muted" style="font-size:11px">{{ e.notes }}</div>{% endif %}</td>
+        <td><span class="chip">{{ {'in_stock':'в наличии','partial':'частично разобран','dismantled':'разобран'}.get(e.status, e.status) }}</span></td>
+        <td class="num">{{ e.purchase_price | money('ман.') if e.purchase_price else '—' }}</td>
+        <td>{{ e.storage_place or '—' }}</td>
+        {% if can_catalog %}
+        <td class="wrap">
+          <details>
+            <summary class="btn sm ghost">✏️</summary>
+            <form method="post" action="/equipment/{{ e.id }}/update" class="form-grid" style="margin-top:8px;min-width:280px">
+              <label class="fld"><span class="lbl">Название</span><input type="text" name="name" value="{{ e.name }}" required></label>
+              <label class="fld"><span class="lbl">Марка</span><input type="text" name="brand" value="{{ e.brand or '' }}"></label>
+              <label class="fld"><span class="lbl">Модель</span><input type="text" name="model" value="{{ e.model or '' }}"></label>
+              <label class="fld"><span class="lbl">Закупка</span><input type="text" name="purchase_price" value="{{ e.purchase_price or '' }}"></label>
+              <label class="fld"><span class="lbl">Место</span><input type="text" name="storage_place" value="{{ e.storage_place or '' }}"></label>
+              <label class="fld"><span class="lbl">Статус</span>
+                <select name="status">
+                  <option value="in_stock" {% if e.status=='in_stock' %}selected{% endif %}>в наличии</option>
+                  <option value="partial" {% if e.status=='partial' %}selected{% endif %}>частично разобран</option>
+                  <option value="dismantled" {% if e.status=='dismantled' %}selected{% endif %}>разобран</option>
+                </select></label>
+              <label class="fld" style="grid-column:1/-1"><span class="lbl">Комплектующие</span>
+                <input type="text" name="components" value="{{ (e.components or []) | join(', ') }}"></label>
+              <label class="fld" style="grid-column:1/-1"><span class="lbl">Примечание</span>
+                <input type="text" name="notes" value="{{ e.notes or '' }}"></label>
+              <div><button class="btn sm green" type="submit">Сохранить</button></div>
+            </form>
+          </details>
+          <form method="post" action="/equipment/{{ e.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Убрать технику «{{ e.name }}» со склада?')">
+            <button class="btn sm sec" type="submit">Удалить</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 5 if can_catalog else 4 }}" style="padding:24px;text-align:center;color:#8a949f">Купленной техники пока нет.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

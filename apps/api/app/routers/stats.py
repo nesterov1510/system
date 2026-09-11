@@ -28,3 +28,13 @@ async def tiles(
     city: uuid.UUID | None = None,
 ):
     return await stats_service.tiles(db, type_=type, brand=brand, model=model, city_id=city)
+
+
+@router.get("/finance", dependencies=[CanViewAnalytics])
+async def finance(
+    db: DbSession,
+    period: str = "14d",
+    date_from: str | None = None,
+    date_to: str | None = None,
+):
+    return await stats_service.finance_chart(db, period=period, date_from=date_from, date_to=date_to)

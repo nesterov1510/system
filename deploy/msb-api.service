@@ -3,7 +3,7 @@
 # Installation is documented in DEPLOY.md.
 
 [Unit]
-Description=MSB API (FastAPI backend)
+Description=MSB API + UI (FastAPI / Jinja2)
 # PostgreSQL may be an existing system service or a container on 5432.
 # Restart=on-failure below handles a short database startup race.
 After=network-online.target

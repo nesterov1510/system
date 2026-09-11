@@ -20,7 +20,9 @@ from app.main import app  # noqa: E402
 @pytest.fixture(scope="session")
 def client():
     """Start a clean test app and add only test fixtures, never production seed data."""
-    with TestClient(app) as c:
+    # client=("127.0.0.1", ...) — запросы идут с loopback, который IP-контроль
+    # пропускает всегда (чтобы тесты не зависели от настроек whitelist/blacklist).
+    with TestClient(app, client=("127.0.0.1", 50000)) as c:
         admin_login = c.post(
             "/api/auth/login",
             json={"email": "admin@msb.local", "password": "admin123"},

@@ -309,6 +309,8 @@ def test_invalid_status_rejected(client, operator_headers, city_id):
     "device_type,prefix",
     [
         ("Телевизоры", "TV"),
+        ("Мониторы", "MN"),
+        ("ТВ-приставки", "BX"),
         ("Компьютеры", "PC"),
         ("Бытовая техника", "BT"),
         ("Другое", "OT"),
@@ -324,20 +326,18 @@ def test_device_prefix_matches_ui_catalog(device_type, prefix):
 
 def test_ui_device_classes_all_have_prefix():
     """Ни один класс техники из UI не должен деградировать в 'RE'."""
-    import pathlib
-
     from app.services.numbering import FALLBACK_PREFIX, device_prefix
+    # Справочник классов техники живёт в серверном UI (Jinja2):
+    from app.webui.catalog import DEVICE_CLASSES
 
-    # apps/api/tests/<этот файл> -> parents[2] = apps/
-    catalog = pathlib.Path(__file__).resolve().parents[2] / "web" / "lib" / "catalog.ts"
-    assert catalog.is_file(), f"не найден справочник UI: {catalog}"
-    values = [
-        v for v in ("Телевизоры", "Компьютеры", "Бытовая техника", "Другое")
-    ]
-    # Проверяем, что значения действительно присутствуют в справочнике UI.
-    text = catalog.read_text(encoding="utf-8")
+    values = [c["value"] for c in DEVICE_CLASSES]
+    # Базовый набор классов должен присутствовать.
+    for required in (
+        "Телевизоры", "Мониторы", "ТВ-приставки",
+        "Компьютеры", "Бытовая техника", "Другое",
+    ):
+        assert required in values, f"{required} пропал из DEVICE_CLASSES"
     for value in values:
-        assert f'value: "{value}"' in text, f"{value} пропал из DEVICE_CLASSES"
         assert device_prefix(value) != FALLBACK_PREFIX, f"{value} -> {FALLBACK_PREFIX}"
 
 

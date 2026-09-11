@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101820">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MSB">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Вход — MSB-CBMRS</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="stylesheet" href="/static/msb/access.css">
+  <link rel="stylesheet" href="/static/msb/pwa.css">
+</head>
+<body class="access-login-body">
+  <main class="access-login-shell">
+    <section class="access-login-brand">
+      <div class="access-login-brand__top">
+        <div class="access-msb-logo">MSB</div>
+        <div><strong>MSB-CBMRS</strong><small>M.E.R.Y.O.S.A.B Electronics</small></div>
+      </div>
+      <div class="access-login-copy">
+        <span class="access-kicker">SERVICE CENTER · АШХАБАД</span>
+        <h1>Управление приёмкой и ремонтом техники</h1>
+        <p>Customer Base Management Repair Services — единая система приёмки, ремонта, склада, кассы и печати сервисного центра.</p>
+      </div>
+      <div class="access-security-list">
+        <div><b>01</b><span><strong>Учётные записи</strong><small>Индивидуальный вход каждого сотрудника</small></span></div>
+        <div><b>02</b><span><strong>Роли и права</strong><small>Доступ к разделам по ролям: admin, manager, operator, master, callcenter</small></span></div>
+        <div><b>03</b><span><strong>Защита входа</strong><small>httpOnly-сессия, hash-пароли (bcrypt), JWT access+refresh</small></span></div>
+      </div>
+      <footer>M.E.R.Y.O.S.A.B Electronics · v0.9.11</footer>
+    </section>
+
+    <section class="access-login-form-side">
+      <div class="access-login-card">
+        <div class="access-login-card__head">
+          <div class="access-lock-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="3"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
+          </div>
+          <div><span>MSB-CBMRS</span><h2>Вход в систему</h2><p>Email и пароль сотрудника</p></div>
+        </div>
+
+        {% if error %}<div class="access-message access-message--error">{{ error }}</div>{% endif %}
+
+        <form method="post" action="/login" autocomplete="on" class="access-login-form">
+          <input type="hidden" name="next_url" value="{{ next_url }}">
+          <label class="access-field">
+            <span>Email</span>
+            <input type="email" name="email" value="admin@msb.local" placeholder="admin@msb.local" autocomplete="username" required autofocus>
+          </label>
+          <label class="access-field">
+            <span>Пароль</span>
+            <div class="access-password-wrap">
+              <input id="accessPassword" type="password" name="password" placeholder="Введите пароль" autocomplete="current-password" required>
+              <button type="button" data-password-toggle aria-label="Показать пароль">Показать</button>
+            </div>
+          </label>
+          <button class="access-submit" type="submit">Войти в MSB-CBMRS</button>
+        </form>
+
+        <div class="access-login-meta">
+          <span>Сервис <strong>MSB · Ашхабад</strong></span>
+          <span>Валюта <strong>TMT (ман.)</strong></span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    document.querySelector('[data-password-toggle]').addEventListener('click', function(){
+      var p = document.getElementById('accessPassword');
+      var show = p.type === 'password';
+      p.type = show ? 'text' : 'password';
+      this.textContent = show ? 'Скрыть' : 'Показать';
+    });
+  </script>
+  <script src="/static/msb/pwa.js" defer></script>
+</body>
+</html>

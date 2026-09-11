@@ -1,9 +1,11 @@
 """WebSocket-эндпоинт для realtime-событий (чат, статусы ремонтов).
 
-Токен передаётся в query-параметре, поэтому здесь ОБЯЗАТЕЛЬНА та же проверка
-типа токена, что и в REST-слое (`core.deps.get_current_user`): иначе
-долговременный refresh-токен открывал live-соединение вместо 30-минутного
-access-токена.
+Токен берётся из httpOnly-cookie (серверный веб-интерфейс на Jinja2) либо из
+query-параметра `token` (обратная совместимость с API-клиентами/print-agent).
+
+В ОБОИХ случаях обязательна та же проверка типа токена, что и в REST-слое
+(`core.deps.get_current_user`): принимаем только access-токены, иначе
+долговременный refresh-токен открывал бы live-соединение.
 """
 import uuid
 
@@ -13,16 +15,26 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.security import decode_token
 from app.db.models import User
 from app.db.session import async_session_factory
+from app.webui.deps import ACCESS_COOKIE
 from app.ws.manager import manager
 
 router = APIRouter(tags=["ws"])
 
-# Код закрытия, который понимает клиент (см. apps/web/lib/chatSocket.ts).
+# Код закрытия, который понимает клиент (см. webui/templates/chat.html).
 CLOSE_UNAUTHORIZED = 4401
+
+
+def _extract_token(websocket: WebSocket) -> str | None:
+    """access-токен: сначала из cookie (серверный UI), затем из query (API)."""
+    cookie_token = websocket.cookies.get(ACCESS_COOKIE)
+    if cookie_token:
+        return cookie_token
+    return websocket.query_params.get("token")
 
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = None):
+    token = _extract_token(websocket)
     if not token:
         await websocket.close(code=CLOSE_UNAUTHORIZED)
         return

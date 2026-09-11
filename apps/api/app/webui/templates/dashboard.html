@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% block title %}Панель{% endblock %}
+{% block page_name %}Панель{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/dashboard.css">{% endblock %}
+
+{% block content %}
+<section class="dashboard-head">
+  <div>
+    <p class="dashboard-eyebrow">Оперативная сводка</p>
+    <h1>Панель</h1>
+    <p>Ремонты, текущие статусы и финансовая динамика в одном экране.</p>
+  </div>
+  <a class="dashboard-new-repair" href="/repairs/new">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    <span>Новая приёмка</span>
+  </a>
+</section>
+
+<section class="repair-metrics" aria-label="Состояние ремонтов">
+  <a class="repair-metric repair-metric--all" href="/repairs?filter=all">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Все ремонты</span><strong>{{ overview.all_repairs }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--ready" href="/repairs?filter=ready">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Готово к выдаче</span><strong>{{ overview.ready }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--parts" href="/repairs?filter=waiting-parts">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M4 8h16v10H4zM8 8V5h8v3M9 13h6"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Ожидаем запчасть</span><strong>{{ overview.waiting_parts }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--today" href="/repairs?filter=today">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M6 3v3M18 3v3M4 8h16M5 5h14v15H5zM12 11v6M9 14h6"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Сегодня принята</span><strong>{{ overview.accepted_today }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--process" href="/repairs?filter=in-repair">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="m14 6 4 4M4 20l5-1 9-9-4-4-9 9zM13 7l4 4"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">В процессе ремонта</span><strong>{{ overview.in_repair }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--late" href="/repairs?filter=not-picked-up">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M12 8v5l3 2M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v6h-6"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Не забирает</span><strong>{{ overview.not_picked_up }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--dispose" href="/repairs?filter=disposable">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">Можно выбрасывать</span><strong>{{ overview.disposable }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+
+  <a class="repair-metric repair-metric--warranty" href="/repairs?filter=warranty">
+    <span class="repair-metric__icon"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 2.8 8.1 7 10 4.2-1.9 7-5.6 7-10V6zM9 12l2 2 4-4"/></svg></span>
+    <span class="repair-metric__body"><span class="repair-metric__label">На гарантии</span><strong>{{ overview.warranty }}</strong></span>
+    <span class="repair-metric__arrow">→</span>
+  </a>
+</section>
+
+<section class="finance-panel" data-finance-chart data-finance-endpoint="/dashboard/finance">
+  <header class="finance-panel__head">
+    <div class="finance-panel__title">
+      <p class="finance-panel__eyebrow">Финансы</p>
+      <h2>Оборот <span>/</span> Прибыль <span>/</span> Расходы</h2>
+      <p data-finance-caption>{{ finance_chart.caption }}</p>
+    </div>
+
+    <div class="finance-panel__actions">
+      <div class="finance-period" data-finance-period>
+        <button class="finance-period__trigger" type="button" data-finance-period-trigger aria-haspopup="true" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3v3M17 3v3M4 8h16M5 5h14v15H5z"/></svg>
+          <span data-finance-period-label>{{ finance_chart.period_label }}</span>
+          <svg class="finance-period__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 9 5 5 5-5"/></svg>
+        </button>
+
+        <div class="finance-period__menu" data-finance-period-menu role="menu" hidden>
+          <div class="finance-period__menu-title">Показать период</div>
+          <button type="button" data-period-value="today" role="menuitem">Сегодня</button>
+          <button type="button" data-period-value="week" role="menuitem">Неделя</button>
+          <button type="button" data-period-value="14d" class="is-active" role="menuitem">14 дней</button>
+          <button type="button" data-period-value="month" role="menuitem">Месяц</button>
+          <button type="button" data-period-value="3m" role="menuitem">3 месяца</button>
+          <button type="button" data-period-value="6m" role="menuitem">6 месяцев</button>
+          <button type="button" data-period-value="year" role="menuitem">Год</button>
+          <button type="button" data-period-value="all" role="menuitem">Всё время</button>
+          <div class="finance-period__separator"></div>
+          <button type="button" data-period-value="custom" data-custom-period-open role="menuitem">
+            <span>Свой период</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+
+          <div class="finance-custom-period" data-finance-custom hidden>
+            <label>
+              <span>От</span>
+              <input type="date" data-finance-date-from value="{{ finance_chart.date_from }}">
+            </label>
+            <label>
+              <span>До</span>
+              <input type="date" data-finance-date-to value="{{ finance_chart.date_to }}">
+            </label>
+            <div class="finance-custom-period__actions">
+              <button type="button" class="finance-custom-period__back" data-custom-period-back>Назад</button>
+              <button type="button" class="finance-custom-period__apply" data-custom-period-apply>Применить</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="finance-summary" aria-label="Финансовая сводка">
+        <div class="finance-summary__item finance-summary__item--turnover">
+          <span><i></i>Общий оборот</span>
+          <strong data-finance-turnover-total>0 {{ finance_chart.currency }}</strong>
+        </div>
+        <div class="finance-summary__item finance-summary__item--profit">
+          <span><i></i>Прибыль</span>
+          <strong data-finance-profit-total>0 {{ finance_chart.currency }}</strong>
+        </div>
+        <div class="finance-summary__item finance-summary__item--expense">
+          <span><i></i>Расходы</span>
+          <strong data-finance-expense-total>0 {{ finance_chart.currency }}</strong>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="finance-chart-status" data-finance-status hidden></div>
+
+  <div class="finance-chart-wrap">
+    <div class="finance-y-axis" aria-hidden="true" data-finance-y-axis></div>
+
+    <div class="finance-chart" data-finance-plot>
+      <div class="finance-grid-lines" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+
+      <svg class="finance-svg" viewBox="0 0 1000 320" preserveAspectRatio="none" aria-label="График прибыли и расходов">
+        <defs>
+          <linearGradient id="profitFill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="currentColor" stop-opacity=".18"/>
+            <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path class="finance-area finance-area--profit" data-profit-area d=""></path>
+        <path class="finance-line finance-line--profit" data-profit-line d=""></path>
+        <path class="finance-line finance-line--expense" data-expense-line d=""></path>
+      </svg>
+
+      <div class="knowledge-finance-wholepage-chart__highlight-line" data-finance-highlight></div>
+      <div class="finance-hover-point finance-hover-point--profit" data-profit-point></div>
+      <div class="finance-hover-point finance-hover-point--expense" data-expense-point></div>
+
+      <div class="finance-tooltip" data-finance-tooltip role="status" aria-live="polite">
+        <strong data-tooltip-date>—</strong>
+        <span class="finance-tooltip__profit">Прибыль <b data-tooltip-profit>0 {{ finance_chart.currency }}</b></span>
+        <span class="finance-tooltip__expense">Расходы <b data-tooltip-expense>0 {{ finance_chart.currency }}</b></span>
+      </div>
+    </div>
+
+    <div class="finance-x-axis" aria-hidden="true" data-finance-x-axis></div>
+  </div>
+
+  <script type="application/json" id="dashboardFinanceData">{{ finance_chart | tojson }}</script>
+</section>
+
+<section class="finance-panel analytics-panel">
+  <header class="finance-panel__head">
+    <div class="finance-panel__title">
+      <p class="finance-panel__eyebrow">Аналитика</p>
+      <h2>Средние показатели по типам техники</h2>
+      <p>Считаются по завершённым ремонтам: медианный срок, средний чек и соблюдение SLA.</p>
+    </div>
+  </header>
+  <div class="analytics-table-wrap">
+    <table class="analytics-table">
+      <thead>
+        <tr>
+          <th>Группа</th>
+          <th class="num">Ремонтов</th>
+          <th class="num">Срок (медиана)</th>
+          <th class="num">Средний чек</th>
+          <th class="num">SLA %</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in tiles %}
+        <tr>
+          <td><b>{{ t.group }}</b></td>
+          <td class="num">{{ t.n }}</td>
+          <td class="num">{% if t.median_days %}{{ t.median_days }} дн{% else %}<span class="muted">мало данных</span>{% endif %}</td>
+          <td class="num">{{ t.avg_price | money('ман.') if t.avg_price else '—' }}</td>
+          <td class="num">{% if t.sla_pct is not none %}{{ t.sla_pct }}%{% else %}—{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="muted analytics-empty">Пока недостаточно завершённых ремонтов для статистики.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block page_js %}
+<script src="/static/msb/dashboard/dashboard.js"></script>
+{% endblock %}

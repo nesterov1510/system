@@ -17,7 +17,7 @@ class ClientCreate(BaseModel):
 
         Без этого строка вроде "-----" нормализуется в пустой phone_norm, и все
         такие клиенты сливаются в одну запись (phone_norm — UNIQUE). Фронтенд
-        проверяет номер строго (apps/web/lib/phone.ts), но API доступен и
+        проверяет номер строго (webui), но API доступен и
         напрямую, поэтому проверка дублируется на сервере.
         """
         if not any(ch.isdigit() for ch in (v or "")):
@@ -42,6 +42,7 @@ class RepairCreate(BaseModel):
     # доставил её в сервис — разные люди, разные номера).
     contact2_name: str | None = None
     contact2_phone: str | None = None
+    contact2_relation: str | None = None
     device_type: str = Field(min_length=1, max_length=32)
 
     @field_validator("contact2_phone")
@@ -65,10 +66,18 @@ class RepairCreate(BaseModel):
     consent_repair: bool = False
     # Заказ доставлен курьером / забран с адреса клиента.
     is_delivery: bool = False
+    # Район доставки (вместе с is_delivery).
+    delivery_district: str | None = None
 
 
 class RepairUpdate(BaseModel):
     status: str | None = None
+    device_type: str | None = Field(default=None, min_length=1, max_length=32)
+    fault_client: str | None = None
+    condition_notes: str | None = None
+    contact2_relation: str | None = None
+    delivery_district: str | None = None
+    complectation: dict | None = None
     master_id: uuid.UUID | None = None
     # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
     # Первый в списке становится основным (master_id).
@@ -172,7 +181,9 @@ class RepairOut(BaseModel):
     events: list[RepairEventOut] = []
     contact2_name: str | None = None
     contact2_phone: str | None = None
+    contact2_relation: str | None = None
     is_delivery: bool = False
+    delivery_district: str | None = None
 
     # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
     reminder_next_at: datetime | None = None

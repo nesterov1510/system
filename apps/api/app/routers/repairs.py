@@ -193,7 +193,9 @@ def _serialize(repair: Repair) -> RepairOut:
         events=events,
         contact2_name=repair.contact2_name,
         contact2_phone=repair.contact2_phone,
+        contact2_relation=repair.contact2_relation,
         is_delivery=repair.is_delivery,
+        delivery_district=repair.delivery_district,
         reminder_next_at=repair.reminder_next_at,
         reminder_last_at=repair.reminder_last_at,
         reminder_count=repair.reminder_count or 0,
@@ -547,6 +549,36 @@ async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     return {"ok": True}
 
 
+async def _record_master_sms(db, user, repair, master) -> dict:
+    """Отправить SMS мастеру о назначении и записать итог в ленту ремонта."""
+    result = await send_master_assignment_sms(master, repair, db=db)
+    detail = result.get("detail") or ""
+    if result.get("ok"):
+        message = f"Мастеру {master.name} отправлено SMS о назначении"
+    elif detail == "no_master_phone":
+        message = f"SMS мастеру {master.name} не отправлено: в профиле нет телефона"
+    elif detail == "sms_disabled":
+        message = f"SMS мастеру {master.name} не отправлено: SMS-шлюз выключен"
+    else:
+        message = f"SMS мастеру {master.name} не отправлено: {detail}"
+    repair.events.append(
+        RepairEvent(
+            repair_id=repair.id,
+            type="notify",
+            actor_id=getattr(user, "id", None),
+            data={
+                "message": message,
+                "kind": "master_assign_sms",
+                "ok": bool(result.get("ok")),
+                "detail": detail,
+                "phone": getattr(master, "phone", None),
+            },
+        )
+    )
+    await db.commit()
+    return result
+
+
 @router.post("", response_model=RepairOut, status_code=201)
 async def create_repair(
     payload: RepairCreate,
@@ -631,7 +663,7 @@ async def create_repair(
     if repair.master is not None:
         if _is_assigner(user) and repair.master.id != user.id:
             await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
-        await send_master_assignment_sms(repair.master, repair, db=db)
+        await _record_master_sms(db, user, repair, repair.master)
 
     await manager.broadcast(
         {
@@ -750,7 +782,9 @@ async def _persist_repair(
         condition_notes=payload.condition_notes,
         contact2_name=payload.contact2_name,
         contact2_phone=payload.contact2_phone,
+        contact2_relation=payload.contact2_relation,
         is_delivery=payload.is_delivery,
+        delivery_district=payload.delivery_district,
         consent_repair_at=now if payload.consent_repair else None,
         accepted_by=user_id,
         master_id=master_id,
@@ -1158,8 +1192,12 @@ async def update_repair(
         # Обновляем список «по-разному»: существующие связи переиспользуем,
         # иначе DELETE+INSERT той же пары в одном flush ломает уникальный индекс.
         existing = {m.user_id: m for m in repair.masters}
-        already = set(existing) | ({repair.master_id} if repair.master_id else set())
-        newly_assigned_ids = [mid for mid in ordered_ids if mid not in already]
+        already_masters = {
+            m.user_id for m in repair.masters if (m.kind or "master") != "helper"
+        }
+        if old_master_id:
+            already_masters.add(old_master_id)
+        newly_assigned_ids = [mid for mid in ordered_ids if mid not in already_masters]
         for link in list(repair.masters):
             if link.user_id not in ordered_ids:
                 repair.masters.remove(link)
@@ -1271,9 +1309,9 @@ async def update_repair(
             repair.issued_at = utcnow()
         # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
         # готов к выдаче, и снимаются, как только технику выдали/закрыли.
-        if repair.status in REMINDER_STATUSES:
-            schedule_reminders(repair)
-        elif repair.status in STOP_STATUSES:
+        # SMS клиенту и очередь напоминаний — только по кнопке «Уведомить»,
+        # не при смене статуса. Выдача по-прежнему снимает очередь.
+        if repair.status in STOP_STATUSES:
             cancel_reminders(repair)
 
     # Правка паспорта техники видна в ленте: кто и что именно поменял.
@@ -1383,7 +1421,7 @@ async def update_repair(
                 await send_assignment_notice(
                     db, actor=user, master=master, repair=repair
                 )
-            await send_master_assignment_sms(master, repair, db=db)
+            await _record_master_sms(db, user, repair, master)
 
     if repair.status != old_status:
         await manager.broadcast(
@@ -1427,10 +1465,6 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
         repair.status = "Готово к выдаче"
         repair.ready_at = utcnow()
-        # С этого момента клиенту раз в сутки напоминает о себе сервис:
-        # первое напоминание — через сутки (сегодня он уже получил SMS
-        # «ремонт готов»), дальше каждый день, пока технику не заберут.
-        schedule_reminders(repair)
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
@@ -1478,6 +1512,7 @@ async def finish_repair_send_sms(
             502, f"Не удалось отправить SMS: {result.get('detail', 'ошибка шлюза')}"
         )
 
+    schedule_reminders(repair)
     repair.events.append(
         RepairEvent(
             repair_id=repair.id,
@@ -1488,6 +1523,39 @@ async def finish_repair_send_sms(
     )
     await db.commit()
     return {"ok": True, "to": repair.client.phone}
+
+
+async def notify_client_ready(repair_id: uuid.UUID, db, user) -> dict:
+    """Закрыть ремонт и отправить клиенту SMS. Ошибка шлюза не откатывает статус.
+
+    После этого три дня идут напоминания «заберите технику» (см. reminders).
+    """
+    finished = await finish_repair(repair_id, db, user)
+    sms = finished.get("sms") or {}
+    text = (sms.get("text") or "").strip()
+    to = sms.get("to") or ""
+    if not text or not to:
+        return {**finished, "sms_sent": False, "sms_detail": "no_phone"}
+    repair = await _get_repair_or_404(db, repair_id)
+    schedule_reminders(repair)
+    result = await send_sms(to, text, db=db)
+    if result.get("ok"):
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="notify",
+                actor_id=user.id,
+                data={"message": "Клиенту отправлено SMS о готовности ремонта"},
+            )
+        )
+        await db.commit()
+        return {**finished, "sms_sent": True, "sms_detail": result.get("detail")}
+    await db.commit()
+    return {
+        **finished,
+        "sms_sent": False,
+        "sms_detail": result.get("detail") or "ошибка шлюза",
+    }
 
 
 @router.post("/{repair_id}/events", response_model=RepairOut)

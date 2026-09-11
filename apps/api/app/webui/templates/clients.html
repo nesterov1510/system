@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Клиенты{% endblock %}
+{% block page_name %}Клиенты{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/repair.css">{% endblock %}
+{% block topbar_actions %}<a class="btn sm" href="/repairs/new">➕ Новая приёмка</a>{% endblock %}
+{% block content %}
+{% if just == 'deleted' %}
+<div class="flash ok">✓ Удалено контактов: <b>{{ n or request.query_params.get('n') or '0' }}</b>.</div>
+{% endif %}
+<section class="page-head">
+  <div>
+    <h1>Клиенты</h1>
+    <p>База заказчиков и история их ремонтов.</p>
+  </div>
+  <a class="btn btn-primary" href="/repairs/new">＋ Новая приёмка</a>
+</section>
+<form class="row" method="get" action="/clients" style="margin-bottom:14px">
+  <input type="text" name="q" value="{{ q }}" placeholder="Поиск по имени или телефону…" style="max-width:380px" autofocus>
+  <button class="btn sm" type="submit">Найти</button>
+</form>
+{% if can_delete %}
+<form id="bulk-clients" class="bulk-bar" method="post" action="/clients/bulk-delete"
+      onsubmit="var n=document.querySelectorAll('input[name=ids][form=bulk-clients]:checked').length; if(!n){alert('Отметьте контакты для удаления'); return false;} return confirm('Удалить выбранные контакты ('+n+')? Это нельзя отменить.');">
+  <label class="bulk-bar__all"><input type="checkbox" data-check-all="bulk-clients"> отметить все</label>
+  <button class="btn sm red" type="submit">🗑 Удалить выбранные</button>
+</form>
+{% endif %}
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        {% if can_delete %}<th class="bulk-col"></th>{% endif %}
+        <th>Клиент</th><th>Телефон</th><th class="num">Ремонтов</th>
+        {% if can_delete %}<th></th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for item in clients %}
+      <tr class="clickable" onclick="location.href='/clients/{{ item.c.id }}'">
+        {% if can_delete %}
+        <td class="bulk-col" onclick="event.stopPropagation()">
+          <input type="checkbox" name="ids" value="{{ item.c.id }}" form="bulk-clients" aria-label="Отметить {{ item.c.full_name }}">
+        </td>
+        {% endif %}
+        <td><b>{{ item.c.full_name }}</b>{% if item.c.deleted_at %} <span class="chip red">удалён</span>{% endif %}</td>
+        <td class="mono">{{ item.c.phone }}</td>
+        <td class="num"><span class="chip">{{ item.count }}</span></td>
+        {% if can_delete %}
+        <td class="row-actions" onclick="event.stopPropagation()">
+          <form method="post" action="/clients/{{ item.c.id }}/delete"
+                onsubmit="return confirm('Удалить клиента {{ item.c.full_name }}?')">
+            <button class="act" type="submit" title="Удалить">🗑</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+    {% else %}
+      <tr><td colspan="{{ 5 if can_delete else 3 }}" class="muted" style="text-align:center;padding:30px">Клиенты не найдены</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% if can_delete %}
+<script>
+document.addEventListener("change", function (e) {
+  var all = e.target.getAttribute("data-check-all");
+  if (!all) return;
+  document.querySelectorAll("input[name=ids][form=" + all + "]").forEach(function (c) {
+    c.checked = e.target.checked;
+  });
+});
+</script>
+{% endif %}
+{% endblock %}

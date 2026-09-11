@@ -3,9 +3,8 @@ import uuid
 from typing import Annotated
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -22,8 +21,15 @@ DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 async def get_current_user(
     db: DbSession,
+    request: Request,
     token: Annotated[str | None, Depends(oauth2_scheme)],
 ) -> User:
+    # Bearer-токен (API-клиенты, print-agent) — основной путь. Серверный
+    # веб-интерфейс (Jinja2) ходит тем же fetch'ем, но токен лежит в
+    # httpOnly-cookie, которую JS прочитать не может, — поэтому как fallback
+    # принимаем access-токен из cookie. Проверки подписи/типа одинаковы для обоих.
+    if token is None:
+        token = request.cookies.get("msb_access")
     if token is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated"

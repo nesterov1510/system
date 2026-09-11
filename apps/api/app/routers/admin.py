@@ -1,9 +1,10 @@
 import base64
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.config import settings
 from app.core.deps import AdminOnly, CurrentUser, DbSession
@@ -114,6 +115,7 @@ async def create_user(payload: UserCreate, db: DbSession, actor: CurrentUser):
     if existing.scalar_one_or_none():
         raise HTTPException(409, "Email уже занят")
     extra_roles = [r for r in (payload.roles or []) if r and r != payload.role]
+    from app.core.permissions import FEATURE_KEYS
     user = User(
         name=payload.name,
         email=payload.email.lower(),
@@ -121,6 +123,7 @@ async def create_user(payload: UserCreate, db: DbSession, actor: CurrentUser):
         password_hash=hash_password(payload.password),
         role=payload.role,
         extra_roles=extra_roles or None,
+        extra_permissions=[k for k in (payload.permissions or []) if k in FEATURE_KEYS] or None,
         city_id=payload.city_id,
         branch_id=payload.branch_id,
         active=payload.active,
@@ -150,11 +153,25 @@ async def update_user(
     data = payload.model_dump(exclude_unset=True)
     password = data.pop("password", None)
     roles = data.pop("roles", None)
+    permissions = data.pop("permissions", None)
+    if "email" in data:
+        new_email = (data["email"] or "").strip().lower()
+        if not new_email:
+            raise HTTPException(400, "Email не может быть пустым")
+        clash = await db.execute(
+            select(User).where(User.email == new_email, User.id != user_id)
+        )
+        if clash.scalar_one_or_none():
+            raise HTTPException(409, "Email уже занят")
+        data["email"] = new_email
     for field, value in data.items():
         setattr(user, field, value)
     if roles is not None:
         base_role = data.get("role", user.role)
         user.extra_roles = [r for r in roles if r and r != base_role] or None
+    if permissions is not None:
+        from app.core.permissions import FEATURE_KEYS
+        user.extra_permissions = [k for k in permissions if k in FEATURE_KEYS] or None
     if password:
         user.password_hash = hash_password(password)
     await audit.record(
@@ -167,11 +184,13 @@ async def update_user(
             "fields": sorted(data.keys()),
             "password_changed": bool(password),
             "roles_changed": roles is not None,
+            "permissions_changed": permissions is not None,
             "role": user.role,
             "roles": user.roles,
         },
     )
     await db.commit()
+    await db.refresh(user)
     return user
 
 
@@ -370,7 +389,9 @@ async def test_label_print(db: DbSession):
     if not printer.get("name") or not printer.get("ip"):
         raise HTTPException(400, "Не настроен удалённый CUPS-принтер этикеток")
 
-    repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs"
+    from app.services.public_url import public_base_url
+
+    repair_url = f"{public_base_url()}/repairs"
     try:
         pdf = render_repair_label_pdf(
             repair_number="ТЕСТ-58x38",
@@ -689,7 +710,7 @@ async def _unset_defaults(db):
 
 
 @router.post("/print-templates/preview")
-async def preview_print_template(db: DbSession, body: dict):
+async def preview_print_template(db: DbSession, body: dict, request: Request):
     """Render a preview PDF from a template (and optional real repair)."""
     from fastapi.responses import Response as PDFResponse
 
@@ -711,10 +732,12 @@ async def preview_print_template(db: DbSession, body: dict):
         )
         repair = row.scalar_one_or_none()
 
+    from app.services.public_url import public_status_url
+
     if repair:
         from app.routers.prints import build_context
 
-        ctx = await build_context(db, repair)
+        ctx = await build_context(db, repair, request)
     else:
         # Пример для превью — из региона развёртывания (Ашхабад, +993, ман.),
         # а не из старой «московской» версии системы.
@@ -734,7 +757,7 @@ async def preview_print_template(db: DbSession, body: dict):
             "eta_days": "6",
             "legal_text": "Техника хранится в сервисном центре бесплатно в течение 3 (трёх) месяцев с момента уведомления о готовности.",
             "storage_until": "26.11.2026 14:02",
-            "qr_url": f"{settings.PUBLIC_BASE_URL}/r/example-token",
+            "qr_url": public_status_url("example-token"),
         }
 
     try:

@@ -4,8 +4,35 @@ All values come from environment variables (see `.env.example`).
 Secrets live only in env — never hardcoded.
 """
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# UI раньше жил отдельным Next.js на :3000/:3030. Сейчас всё на FastAPI :8085.
+# QR на бланке не должен вести на мёртвый фронтенд.
+APP_HTTP_PORT = 8085
+LEGACY_FRONTEND_PORTS = {3000, 3030}
+
+
+def normalize_public_base_url(url: str | None) -> str:
+    """Публичный origin без хвоста: схема://хост[:порт], порт 3030/3000 → 8085."""
+    raw = (url or "").strip() or f"http://localhost:{APP_HTTP_PORT}"
+    if "://" not in raw:
+        raw = "http://" + raw
+    parts = urlsplit(raw)
+    host = parts.hostname or "localhost"
+    scheme = parts.scheme or "http"
+    port = parts.port
+    if port in LEGACY_FRONTEND_PORTS:
+        port = APP_HTTP_PORT
+    if port is None and parts.netloc.rsplit("]", 1)[-1].endswith(tuple(f":{p}" for p in LEGACY_FRONTEND_PORTS)):
+        port = APP_HTTP_PORT
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        netloc = host
+    else:
+        netloc = f"{host}:{port}"
+    return urlunsplit((scheme, netloc, "", "", "")).rstrip("/")
 
 
 class Settings(BaseSettings):
@@ -15,9 +42,15 @@ class Settings(BaseSettings):
     APP_NAME: str = "MSB"
     ENV: str = "dev"  # dev | prod
     API_PREFIX: str = "/api"
-    # Публичный адрес фронтенда, куда ведёт QR на бланке (/r/{token}).
-    # Для локальной сети укажите IP машины, например http://192.168.8.81:3030
-    PUBLIC_BASE_URL: str = "http://localhost:3030"
+    # Публичный адрес сервиса: QR на бланке ведёт на /r/{token} (отдаёт сам API
+    # на :8085, Jinja2-интерфейс). Для локальной сети укажите IP машины,
+    # например http://192.168.8.81:8085
+    PUBLIC_BASE_URL: str = "http://localhost:8085"
+
+    @field_validator("PUBLIC_BASE_URL", mode="before")
+    @classmethod
+    def _rewrite_legacy_frontend_port(cls, value: str | None) -> str:
+        return normalize_public_base_url(value)
 
     # --- Database ---
     # prod: postgresql+asyncpg://user:pass@postgres:5432/msb
@@ -31,7 +64,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
 
     # --- CORS ---
-    CORS_ORIGINS: list[str] = ["http://localhost:3030", "http://localhost:8085"]
+    # Интерфейс отдаётся тем же сервисом (same-origin на :8085); CORS нужен
+    # внешним API-клиентам.
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:8085",
+        "http://127.0.0.1:8085",
+    ]
 
     # --- Storage ---
     # local = filesystem (dev/MVP), s3 = MinIO/S3-compatible (prod).
@@ -81,8 +119,9 @@ class Settings(BaseSettings):
     REMINDER_SEND_FROM_HOUR: int = 9
     REMINDER_SEND_TO_HOUR: int = 20
     REMINDER_TIMEZONE: str = "Asia/Ashgabat"
-    # 0 = напоминать, пока технику не заберут. Иначе — не больше N напоминаний.
-    REMINDER_MAX_COUNT: int = 0
+    # Сколько дней подряд напоминать после SMS «ремонт закончен».
+    # 0 = пока технику не заберут. По старой логике — 3 дня.
+    REMINDER_MAX_COUNT: int = 3
 
     # --- Seed admin (first boot) ---
     SEED_ADMIN_EMAIL: str = "admin@msb.local"

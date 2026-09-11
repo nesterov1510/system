@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Уведомления{% endblock %}
+{% block page_name %}Уведомления{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Центр уведомлений</p>
+    <h1>Уведомления</h1>
+    <p>Напоминания о готовой технике, просрочке хранения, согласованиях и событиях по вашим ремонтам.</p>
+  </div>
+  <div class="row">
+    {% if not only_unread %}
+      <a class="btn sec sm" href="/notifications?unread=1">Только непрочитанные{% if unread_count %} ({{ unread_count }}){% endif %}</a>
+    {% else %}
+      <a class="btn sec sm" href="/notifications">Все уведомления</a>
+    {% endif %}
+    {% if unread_count %}
+    <form method="post" action="/notifications/read-all" style="margin:0">
+      <button class="btn sm" type="submit">Прочитать все</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if notifications %}
+<div class="notif-list">
+  {% for n in notifications %}
+  <div class="notif-item{% if not n.read_at %} is-unread{% endif %}">
+    <span class="notif-item__icon" aria-hidden="true">
+      {% if n.type in ('ready','pickup','storage') %}
+        <svg viewBox="0 0 24 24"><path d="M21 8v8a2 2 0 0 1-2 2H7l-4 4V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/><path d="m9 11 2 2 4-4"/></svg>
+      {% elif n.type in ('approve','agree') %}
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      {% elif n.type in ('print','printed') %}
+        <svg viewBox="0 0 24 24"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7z"/></svg>
+      {% else %}
+        <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      {% endif %}
+    </span>
+    <div class="notif-item__body">
+      <div class="notif-item__title">{{ n.title }}</div>
+      {% if n.body %}<div class="notif-item__text">{{ n.body }}</div>{% endif %}
+      <div class="notif-item__meta">{{ n.created_at | date }}{% if n.read_at %} · прочитано{% endif %}</div>
+    </div>
+    <div class="notif-item__actions">
+      {% if not n.read_at %}<span class="notif-dot" title="Новое"></span>{% endif %}
+      {% if n.repair_id %}
+        <form method="post" action="/notifications/{{ n.id }}/read" style="margin:0">
+          <button class="btn sm sec" type="submit">Открыть ремонт →</button>
+        </form>
+      {% elif not n.read_at %}
+        <form method="post" action="/notifications/{{ n.id }}/read" style="margin:0">
+          <button class="btn sm sec" type="submit">Прочитать</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty" style="padding:48px;text-align:center;color:#75808d;border:1px dashed #cbd3db;border-radius:14px;background:#fafbfc">
+  <div style="font-size:34px;margin-bottom:8px">🔔</div>
+  {% if only_unread %}Непрочитанных уведомлений нет.{% else %}Пока нет уведомлений. Здесь появятся напоминания о готовой технике и сроках хранения.{% endif %}
+</div>
+{% endif %}
+{% endblock %}

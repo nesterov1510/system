@@ -144,7 +144,7 @@ printf 'MSB 58x38 test\n' | \
 cd /home/windowrepair-ae/msb
 git pull --ff-only
 sudo bash deploy/update.sh
-sudo systemctl --no-pager --full status msb-api msb-web msb-print-agent
+sudo systemctl --no-pager --full status msb-api msb-print-agent
 ```
 
 Для удалённой CUPS-печати в systemd не нужны новые переменные. Существующий
@@ -199,16 +199,16 @@ A4 не используется.
 QR ведёт на адрес вида:
 
 ```text
-http://192.168.8.81:3030/repairs/UUID-РЕМОНТА
+http://192.168.8.81:8085/repairs/UUID-РЕМОНТА
 ```
 
 Поэтому в `/home/windowrepair-ae/msb/.env` должно быть:
 
 ```ini
-PUBLIC_BASE_URL=http://192.168.8.81:3030
+PUBLIC_BASE_URL=http://192.168.8.81:8085
 ```
 
-Телефон мастера должен видеть `192.168.8.81:3030` по сети. Мастер должен быть
+Телефон мастера должен видеть `192.168.8.81:8085` по сети. Мастер должен быть
 назначен на ремонт — действующие правила MSB не дают мастеру читать чужие
 ремонты.
 
@@ -274,4 +274,4 @@ grep '^PUBLIC_BASE_URL=' /home/windowrepair-ae/msb/.env
 sudo systemctl restart msb-api
 ```
 
-Должно быть `http://192.168.8.81:3030`.
+Должно быть `http://192.168.8.81:8085`.

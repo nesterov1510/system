@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Профиль{% endblock %}
+{% block page_name %}Профиль{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/profile.css">{% endblock %}
+
+{% block topbar_actions %}
+<a class="profile-logout-btn" href="/logout" title="Выйти из программы">
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h5M14 8l4 4-4 4M8 12h10"></path></svg>
+  <span>Выйти</span>
+</a>
+{% endblock %}
+
+{% block content %}
+{% if saved %}<div class="flash ok">✓ Профиль обновлён</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+
+<section class="profile-page">
+  <section class="profile-hero">
+    <div class="profile-identity">
+      <div class="profile-avatar" aria-hidden="true">{{ (user.name or '??')[:2]|upper }}</div>
+      <div class="profile-identity__copy">
+        <div class="profile-eyebrow">Текущий сотрудник</div>
+        <h1>{{ user.name }}</h1>
+        <div class="profile-meta-line">
+          <span class="profile-role">{{ user.roles | join(', ') }}</span>
+          <span class="profile-status profile-status--active"><i></i>Активен</span>
+        </div>
+      </div>
+    </div>
+    <div class="profile-access-summary">
+      <div class="profile-access-summary__value">
+        <strong>{{ user.roles | length }}</strong><span>ролей</span>
+      </div>
+      <div>
+        <span>Учётная запись</span>
+        <small>{{ user.email }}</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="profile-overview-grid">
+    <article class="profile-card">
+      <header class="profile-card__head">
+        <div class="profile-card__icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4.5 3.2-7 8-7s8 2.5 8 7"></path></svg>
+        </div>
+        <div><h2>Личная информация</h2><p>Контактные данные сотрудника</p></div>
+      </header>
+      <form method="post" action="/profile" class="profile-edit-form">
+        <label class="fld"><span class="lbl">Имя</span><input type="text" name="name" value="{{ user.name }}"></label>
+        <label class="fld"><span class="lbl">Email</span><input type="email" value="{{ user.email }}" disabled></label>
+        <label class="fld"><span class="lbl">Телефон</span><input type="tel" name="phone" value="{{ user.phone or '' }}" placeholder="+993 6X XXXXXX"></label>
+        <label class="fld"><span class="lbl">Telegram</span><input type="text" name="telegram" value="{{ user.telegram or '' }}" placeholder="@username"></label>
+        <button class="btn primary" type="submit">Сохранить изменения</button>
+      </form>
+    </article>
+
+    <article class="profile-card">
+      <header class="profile-card__head">
+        <div class="profile-card__icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"></rect><path d="M8 8h8M8 12h5M8 16h6"></path></svg>
+        </div>
+        <div><h2>Учётная запись</h2><p>Роль и доступ к разделам</p></div>
+      </header>
+      <dl class="profile-info-list">
+        <div><dt>Email (логин)</dt><dd>{{ user.email }}</dd></div>
+        <div><dt>Роли</dt><dd><strong>{{ user.roles | join(', ') }}</strong></dd></div>
+        <div><dt>Телефон</dt><dd>{{ user.phone or '—' }}</dd></div>
+        <div><dt>Telegram</dt><dd>{{ user.telegram or '—' }}</dd></div>
+      </dl>
+    </article>
+
+    <article class="profile-card">
+      <header class="profile-card__head">
+        <div class="profile-card__icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+        </div>
+        <div><h2>Смена пароля</h2><p>Обновление пароля входа</p></div>
+      </header>
+      <form method="post" action="/profile-password" class="profile-edit-form">
+        <label class="fld"><span class="lbl">Текущий пароль</span>
+          <input type="password" name="current_password" required autocomplete="current-password"></label>
+        <label class="fld"><span class="lbl">Новый пароль (мин. 6 символов)</span>
+          <input type="password" name="new_password" required minlength="6" autocomplete="new-password"></label>
+        <button class="btn" type="submit">Сменить пароль</button>
+      </form>
+    </article>
+  </section>
+</section>
+{% endblock %}

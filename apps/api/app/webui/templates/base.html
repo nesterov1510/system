@@ -1,0 +1,188 @@
+{% set ep = active or '' %}
+{# ---------- SVG-иконки (как в архиве MSB-CBMRS) ---------- #}
+{% set ico_menu %}<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>{% endset %}
+{% set ico_close %}<svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>{% endset %}
+{% set ico_dashboard %}<svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>{% endset %}
+{% set ico_repairs %}<svg viewBox="0 0 24 24"><path d="M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M9 3v4h6V3M8 11h8M8 15h6"/></svg>{% endset %}
+{% set ico_accept %}<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 3v18M3 12h18"/></svg>{% endset %}
+{% set ico_clients %}<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 2.5-6 6-6s6 2 6 6M16 5.5a3 3 0 0 1 0 5.8M17 14c2.7.4 4 2.2 4 5"/></svg>{% endset %}
+{% set ico_call %}<svg viewBox="0 0 24 24"><path d="M6.6 3.5 9 8l-2 1.8c1.2 2.8 3.4 5 6.2 6.2L15 14l4.5 2.4-.8 4c-.2.9-1 1.6-2 1.6C8.6 22 2 15.4 2 7.3c0-1 .7-1.8 1.6-2Z"/></svg>{% endset %}
+{% set ico_chat %}<svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4Z"/><path d="M8 9h8M8 12h5"/></svg>{% endset %}
+{% set ico_stock %}<svg viewBox="0 0 24 24"><path d="m3 7 9-4 9 4-9 4Z"/><path d="M3 7v10l9 4 9-4V7M12 11v10"/></svg>{% endset %}
+{% set ico_payment %}<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 15h4"/></svg>{% endset %}
+{% set ico_reports %}<svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>{% endset %}
+{% set ico_admin %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a7.8 7.8 0 0 0 .1-6l2-1.5-2-3.4-2.4 1a8 8 0 0 0-5.1-2V1H8v2.1a8 8 0 0 0-3 1.7l-2.4-1-2 3.4 2 1.5a8 8 0 0 0 0 6.5l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 8 20.9V23h4v-2.1a8 8 0 0 0 5.1-2l2.4 1 2-3.4Z"/></svg>{% endset %}
+{% set ico_profile %}<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>{% endset %}
+{% set ico_bell %}<svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>{% endset %}
+{% set ico_price %}<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18M8 15h3"/></svg>{% endset %}
+
+{# Карта иконок по href (значения — SVG-маркеры, объявленные выше) #}
+{% set ICONS = {
+  '/dashboard': ico_dashboard,
+  '/repairs': ico_repairs,
+  '/repairs/new': ico_accept,
+  '/clients': ico_clients,
+  '/callcenter': ico_call,
+  '/chat': ico_chat,
+  '/parts': ico_stock,
+  '/prices': ico_price,
+  '/profile': ico_profile,
+  '/notifications': ico_bell,
+  '/admin/users': ico_admin,
+  '/admin/logs': ico_reports,
+  '/admin/settings': ico_admin,
+} %}
+{% set RAIL_HREFS = ['/dashboard','/repairs','/repairs/new','/clients','/parts','/chat'] %}
+
+{% macro rail_link(href, label, icon) -%}
+<a class="msb-rail-link{% if ep == href or (href=='/repairs' and ep.startswith('/repairs')) %} is-active{% endif %}" href="{{ href }}" title="{{ label }}">{{ icon|safe }}</a>
+{%- endmacro %}
+{% macro nav_item(href, label, icon) -%}
+<a class="msb-nav-item{% if ep == href %} is-active{% endif %}" href="{{ href }}" data-nav-link>
+  <span class="msb-nav-icon">{{ icon|safe }}</span><span class="msb-nav-text">{{ label }}</span>
+  {% if href == '/chat' and unread %}<span class="msb-nav-badge">{{ unread }}</span>{% endif %}
+</a>
+{%- endmacro %}
+
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101820">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="MSB">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>{% block title %}MSB-CBMRS{% endblock %} — MSB-CBMRS</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="manifest" href="/static/manifest.json">
+  <link rel="stylesheet" href="/static/msb/base.css">
+  <link rel="stylesheet" href="/static/msb/forms.css">
+  <link rel="stylesheet" href="/static/msb/pwa.css">
+  {% block page_css %}{% endblock %}
+</head>
+<body>
+{% if user and user.authenticated %}
+  <div class="msb-nav-rail" aria-label="Быстрая навигация">
+    <button class="msb-rail-toggle" type="button" data-sidebar-open aria-label="Открыть меню" aria-expanded="false">{{ ico_menu|safe }}</button>
+    <button class="msb-rail-brand" type="button" data-project-info-open aria-label="О проекте" title="MSB-CBMRS">M</button>
+    <nav class="msb-rail-menu">
+      {% for href, label, emoji in nav if href in RAIL_HREFS %}
+        <a class="msb-rail-link {{ ep | nav_active(href) }}" href="{{ href }}" title="{{ label }}">{{ ICONS.get(href, ico_repairs)|safe }}</a>
+      {% endfor %}
+    </nav>
+    <a class="msb-rail-profile msb-rail-link {{ ep | nav_active('/profile') }}" href="/profile" title="Профиль">{{ ico_profile|safe }}</a>
+  </div>
+
+  <div class="msb-sidebar-backdrop" data-sidebar-backdrop hidden></div>
+
+  <aside class="msb-sidebar-drawer" id="msbSidebar" aria-hidden="true" aria-label="Главное меню">
+    <div class="msb-sidebar-head">
+      <button class="msb-sidebar-brand msb-sidebar-brand--button" type="button" data-project-info-open aria-expanded="false">
+        <span class="msb-sidebar-logo">MSB</span>
+        <span class="msb-sidebar-brand-copy"><strong>MSB-CBMRS</strong><small>M.E.R.Y.O.S.A.B Electronics</small></span>
+      </button>
+      <button class="msb-sidebar-close" type="button" data-sidebar-close aria-label="Закрыть">{{ ico_close|safe }}</button>
+    </div>
+    <div class="msb-sidebar-scroll">
+      <nav class="msb-nav-full">
+        {# Пункты меню, сгруппированные как в эталоне MSB: Работа / Операции / Управление #}
+        {% set SECTIONS = [
+          ('Работа', ['/dashboard', '/repairs', '/repairs/new', '/clients', '/callcenter', '/chat', '/notifications']),
+          ('Операции', ['/parts', '/prices']),
+        ] %}
+        {% set nav_map = {} %}
+        {% for href, label, emoji in nav %}{% set _ = nav_map.update({href: label}) %}{% endfor %}
+        {% for sec_title, sec_hrefs in SECTIONS %}
+          {% set links = [] %}
+          {% for h in sec_hrefs %}{% if h in nav_map %}{% set _ = links.append(h) %}{% endif %}{% endfor %}
+          {% if links %}
+          <div class="msb-nav-section">
+            <div class="msb-nav-label">{{ sec_title }}</div>
+            {% for href in links %}
+              <a class="msb-nav-item{% if ep == href or (href=='/repairs' and ep.startswith('/repairs')) %} is-active{% endif %}" href="{{ href }}" data-nav-link>
+                <span class="msb-nav-icon">{{ ICONS.get(href, ico_repairs)|safe }}</span>
+                <span class="msb-nav-text">{{ nav_map[href] }}</span>
+                {% if href == '/chat' and unread %}<span class="msb-nav-badge">{{ unread }}</span>{% endif %}
+              </a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        {% endfor %}
+
+        {% if admin_nav %}
+        <div class="msb-nav-section">
+          <div class="msb-nav-label">Управление</div>
+          {% for href, label, emoji in admin_nav %}
+            <a class="msb-nav-item{% if ep == href or ep.startswith(href) %} is-active{% endif %}" href="{{ href }}" data-nav-link>
+              <span class="msb-nav-icon">{{ ICONS.get(href, ico_admin)|safe }}</span>
+              <span class="msb-nav-text">{{ label }}</span>
+            </a>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </nav>
+    </div>
+    <div class="msb-sidebar-footer">
+      <a class="msb-nav-item" href="/logout" data-nav-link>
+        <span class="msb-nav-icon">{{ ico_profile|safe }}</span><span class="msb-nav-text">Выйти</span>
+      </a>
+      <div class="msb-sidebar-version"><span class="status-dot"></span><span>MSB-CBMRS</span><small>v0.9.11</small></div>
+    </div>
+  </aside>
+
+  <div class="msb-project-info" data-project-info hidden aria-hidden="true">
+    <div class="msb-project-info__card" role="dialog" aria-label="О программе">
+      <div class="msb-project-info__top">
+        <div class="msb-project-info__logo">MSB</div>
+        <div><strong>MSB-CBMRS</strong><span>Информация о программе</span></div>
+        <button type="button" class="msb-project-info__close" data-project-info-close aria-label="Закрыть">{{ ico_close|safe }}</button>
+      </div>
+      <div class="msb-project-info__body">
+        <div class="msb-project-info__row"><span>Полное название</span><strong>Customer Base Management Repair Services</strong></div>
+        <div class="msb-project-info__row"><span>Разработчик / компания</span><strong>M.E.R.Y.O.S.A.B Electronics</strong></div>
+        <div class="msb-project-info__row msb-project-info__row--version"><span>Версия программы</span><strong>v0.9.11</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <section class="workspace">
+      <header class="topbar">
+        <button class="topbar-menu-button" type="button" data-sidebar-open aria-label="Открыть меню" aria-expanded="false">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="topbar-title">
+          <strong>{% block page_name %}MSB-CBMRS{% endblock %}</strong>
+          <small>M.E.R.Y.O.S.A.B Electronics · Ашхабад</small>
+        </div>
+        <div class="topbar-spacer"></div>
+        {% block topbar_actions %}{% endblock %}
+        <a class="topbar-bell{% if active=='/notifications' %} is-active{% endif %}" href="/notifications" title="Уведомления{% if notif_unread %} ({{ notif_unread }} новых){% endif %}" aria-label="Уведомления">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          {% if notif_unread %}<span class="topbar-bell__badge">{{ notif_unread if notif_unread < 100 else '99+' }}</span>{% endif %}
+        </a>
+        <a class="topbar-user" href="/profile">
+          <span class="topbar-user__avatar">{{ (user.name or '??')[:2]|upper }}</span>
+          <span class="topbar-user__copy"><strong>{{ user.name }}</strong><small>{{ user.roles | join(', ') }}</small></span>
+          <svg class="topbar-user__chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>
+        </a>
+      </header>
+      <main class="content">
+        {% if flash %}<div class="access-flash access-flash--{{ 'ok' if flash.kind=='ok' else 'error' if flash.kind=='err' else 'ok' }}" style="margin-bottom:16px">{{ flash.text }}</div>{% endif %}
+        <div id="flash-slot"></div>
+        {% block content %}{% endblock %}
+      </main>
+    </section>
+  </div>
+
+  <script src="/static/msb/base.js"></script>
+  <script src="/static/msb/pwa.js" defer></script>
+  {% block page_js %}{% endblock %}
+{% else %}
+  {% block anon %}{% endblock %}
+{% endif %}
+</body>
+</html>

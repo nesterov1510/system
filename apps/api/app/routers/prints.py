@@ -8,11 +8,10 @@ configuration (local driver, direct IPP, or remote CUPS).
 import base64
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.core.config import settings
 from app.core.deps import CurrentUser, DbSession
 from app.core.permissions import PRINT_QUEUE_ROLES, can_print
 from app.db.models import (
@@ -35,12 +34,14 @@ from app.services.print import (
     render_repair_label_pdf,
 )
 from app.services import audit
+from app.services.public_url import public_repair_url, public_status_url
 from app.services.settings import (
     get_consent_repair_text,
     get_currency,
     get_label_printer,
     get_legal_text,
     get_printer,
+    get_print_stub,
 )
 
 router = APIRouter(tags=["print"])
@@ -107,11 +108,12 @@ async def get_default_template(db) -> dict:
     return body_to_template(tpl.body) if tpl else body_to_template("")
 
 
-async def build_context(db, repair: Repair) -> dict:
+async def build_context(db, repair: Repair, request: Request | None = None) -> dict:
     city = await db.get(City, repair.city_id)
     branch = await db.get(Branch, repair.branch_id) if repair.branch_id else None
     legal_text = await get_legal_text(db)
     consent_repair_text = await get_consent_repair_text(db)
+    print_stub = await get_print_stub(db)
     device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
     complectation = (
         ", ".join(repair.complectation.get("items", []))
@@ -120,7 +122,7 @@ async def build_context(db, repair: Repair) -> dict:
     )
     accepted_by = repair.accepted_by_user.name if repair.accepted_by_user else "—"
     master = repair.master.name if repair.master else "в очереди"
-    qr_url = f"{settings.PUBLIC_BASE_URL}/r/{repair.public_token}"
+    qr_url = public_status_url(repair.public_token, request)
 
     currency = await get_currency(db)
     symbol = currency.get("symbol", "ман.")
@@ -205,11 +207,17 @@ async def build_context(db, repair: Repair) -> dict:
         "consent_repair": bool(repair.consent_repair_at),
         "storage_until": _fmt(repair.storage_until),
         "qr_url": qr_url,
+        "print_stub": print_stub,
     }
 
 
 @router.post("/repairs/{repair_id}/print")
-async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+async def create_print_job(
+    repair_id: uuid.UUID,
+    db: DbSession,
+    user: CurrentUser,
+    request: Request,
+):
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
@@ -227,7 +235,7 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
         raise HTTPException(403, "Нет доступа к этому ремонту")
 
     template = await get_default_template(db)
-    ctx = await build_context(db, repair)
+    ctx = await build_context(db, repair, request)
     currency = await get_currency(db)
     try:
         pdf = render_blank_pdf(
@@ -247,6 +255,7 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
         payload={
             "pdf_base64": base64.b64encode(pdf).decode("ascii"),
             "printer": printer,
+            "qr_url": ctx["qr_url"],
         },
         status="queued",
         branch_id=repair.branch_id,
@@ -269,12 +278,16 @@ async def create_print_job(repair_id: uuid.UUID, db: DbSession, user: CurrentUse
         "job_id": job.id,
         "status": job.status,
         "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+        "qr_url": ctx["qr_url"],
     }
 
 
 @router.post("/repairs/{repair_id}/print-label")
 async def create_label_print_job(
-    repair_id: uuid.UUID, db: DbSession, user: CurrentUser
+    repair_id: uuid.UUID,
+    db: DbSession,
+    user: CurrentUser,
+    request: Request,
 ):
     """Поставить в очередь этикетку 58×38 с QR на карточку мастера."""
     row = await db.execute(
@@ -297,7 +310,7 @@ async def create_label_print_job(
     if not printer.get("name"):
         raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
 
-    repair_url = f"{settings.PUBLIC_BASE_URL.rstrip('/')}/repairs/{repair.id}"
+    repair_url = public_repair_url(repair.id, request)
     width_mm = printer.get("width_mm", 58)
     height_mm = printer.get("height_mm", 38)
     try:

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники{% endblock %}
+{% block page_name %}Сотрудники{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Сотрудники</h1>
+    <p>Учётные записи мастерской: все поля, роли, город и точка.</p>
+  </div>
+</section>
+<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>➕ Новый сотрудник</h3></div>
+  <form method="post" action="/admin/users/create" class="card-b form-grid">
+    <label class="fld"><span class="lbl">Имя *</span><input type="text" name="name" required></label>
+    <label class="fld"><span class="lbl">Email *</span><input type="email" name="email" required></label>
+    <label class="fld"><span class="lbl">Телефон</span><input type="tel" name="phone"></label>
+    <label class="fld"><span class="lbl">Telegram</span><input type="text" name="telegram" placeholder="@nick"></label>
+    <label class="fld"><span class="lbl">Основная роль</span>
+      <select name="role">
+        {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select></label>
+    <label class="fld"><span class="lbl">Пароль (мин. 6)</span>
+      <input type="text" name="password" value="changeme123"></label>
+    <label class="fld"><span class="lbl">Город</span>
+      <select name="city_id">
+        <option value="">— не указан —</option>
+        {% for c in cities %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select></label>
+    <label class="fld"><span class="lbl">Точка</span>
+      <select name="branch_id">
+        <option value="">— не указана —</option>
+        {% for b in branches %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+      </select></label>
+    <div style="grid-column:1/-1">
+      <span class="lbl">Дополнительные роли</span>
+      <div class="row" style="margin-top:6px;flex-wrap:wrap">
+        {% for r in roles %}
+        <label class="check"><input type="checkbox" name="extra_roles" value="{{ r }}"> {{ r }}</label>
+        {% endfor %}
+      </div>
+    </div>
+    <div style="align-self:end"><button class="btn green" type="submit">Создать</button></div>
+  </form>
+</div>
+
+<div class="card"><div class="table-wrap">
+  <table>
+    <thead><tr><th>Имя</th><th>Email</th><th>Контакты</th><th>Роль</th><th>Статус</th><th>Действия</th></tr></thead>
+    <tbody>
+    {% for u in users %}
+      <tr>
+        <td><b>{{ u.name }}</b></td>
+        <td class="mono">{{ u.email }}</td>
+        <td class="wrap">
+          <div class="mono">{{ u.phone or '—' }}</div>
+          {% if u.telegram %}<div class="muted">{{ u.telegram }}</div>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="/admin/users/{{ u.id }}/role" style="margin:0">
+            <select name="role" onchange="this.form.submit()" style="padding:5px">
+              {% for r in roles %}<option value="{{ r }}" {% if u.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </form>
+          {% if u.extra_roles %}
+          <div class="muted" style="font-size:11px;margin-top:4px">+ {{ u.extra_roles | join(', ') }}</div>
+          {% endif %}
+        </td>
+        <td>{% if u.active %}<span class="chip green">активен</span>{% else %}<span class="chip red">отключён</span>{% endif %}</td>
+        <td class="wrap">
+          <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline"
+                onsubmit="return confirm('{{ 'Отключить' if u.active else 'Включить' }} сотрудника?')">
+            <button class="btn sm sec" type="submit">{{ 'Отключить' if u.active else 'Включить' }}</button>
+          </form>
+          <details style="display:inline">
+            <summary class="btn sm ghost" style="display:inline-block">✏️ Карточка</summary>
+            <form method="post" action="/admin/users/{{ u.id }}/update" class="form-grid"
+                  style="margin-top:8px;background:#fafbfc;border:1px solid #e4e8ed;border-radius:10px;padding:10px 12px;min-width:320px">
+              <label class="fld"><span class="lbl">Имя</span><input type="text" name="name" value="{{ u.name }}" required></label>
+              <label class="fld"><span class="lbl">Email</span><input type="email" name="email" value="{{ u.email }}" required></label>
+              <label class="fld"><span class="lbl">Телефон</span><input type="tel" name="phone" value="{{ u.phone or '' }}"></label>
+              <label class="fld"><span class="lbl">Telegram</span><input type="text" name="telegram" value="{{ u.telegram or '' }}"></label>
+              <label class="fld"><span class="lbl">Основная роль</span>
+                <select name="role">
+                  {% for r in roles %}<option value="{{ r }}" {% if u.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+                </select></label>
+              <label class="fld"><span class="lbl">Город</span>
+                <select name="city_id">
+                  <option value="">— не указан —</option>
+                  {% for c in cities %}<option value="{{ c.id }}" {% if u.city_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+                </select></label>
+              <label class="fld"><span class="lbl">Точка</span>
+                <select name="branch_id">
+                  <option value="">— не указана —</option>
+                  {% for b in branches %}<option value="{{ b.id }}" {% if u.branch_id==b.id %}selected{% endif %}>{{ b.name }}</option>{% endfor %}
+                </select></label>
+              <div style="grid-column:1/-1">
+                <span class="lbl">Дополнительные роли</span>
+                <div class="row" style="margin-top:6px;flex-wrap:wrap">
+                  {% for r in roles %}
+                  <label class="check"><input type="checkbox" name="extra_roles" value="{{ r }}"
+                    {% if u.has_role(r) and u.role != r %}checked{% endif %}> {{ r }}</label>
+                  {% endfor %}
+                </div>
+              </div>
+              <div><button class="btn sm green" type="submit">Сохранить карточку</button></div>
+            </form>
+          </details>
+          <details style="display:inline">
+            <summary class="btn sm ghost" style="display:inline-block">Сбросить пароль</summary>
+            <form method="post" action="/admin/users/{{ u.id }}/reset-password" class="row" style="margin-top:6px">
+              <input type="text" name="new_password" placeholder="новый пароль" style="max-width:160px">
+              <button class="btn sm" type="submit">OK</button>
+            </form>
+          </details>
+          <details style="display:inline">
+            <summary class="btn sm ghost" style="display:inline-block">🔐 Права</summary>
+            {% if u.has_role('admin') %}
+            <div class="muted" style="margin-top:6px;font-size:12px">Администратор имеет все права — настраивать не нужно.</div>
+            {% else %}
+            <form method="post" action="/admin/users/{{ u.id }}/permissions"
+                  style="margin-top:6px;background:#fafbfc;border:1px solid #e4e8ed;border-radius:10px;padding:10px 12px;max-width:360px">
+              <p class="muted" style="font-size:11.5px;margin:0 0 8px">
+                Права, которые даёт роль, отмечены серым — они не снимаются.
+                Остальные можно выдать дополнительно.
+              </p>
+              {% for p in perms_by_user[u.id] %}
+              <label class="check" style="font-size:12.5px;margin-bottom:8px;gap:8px">
+                <input type="checkbox" name="perm" value="{{ p.key }}"
+                       {% if p.by_role %}checked disabled title="Даёт роль — не снимается"{% elif p.granted %}checked{% endif %}>
+                <span style="line-height:1.35">
+                  <b>{{ p.label }}</b>{% if p.by_role %} <span class="muted">(даёт роль)</span>{% endif %}
+                  <br><span class="muted" style="font-size:11px">{{ p.desc }}</span>
+                </span>
+              </label>
+              {% endfor %}
+              <button class="btn sm green" type="submit">✓ Сохранить права</button>
+            </form>
+            {% endif %}
+          </details>
+          {% if u.active %}
+          <form method="post" action="/admin/users/{{ u.id }}/delete" style="display:inline"
+                onsubmit="return confirm('Отключить сотрудника {{ u.name }}? Войти он больше не сможет.')">
+            <button class="btn sm red" type="submit">Удалить</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% endblock %}

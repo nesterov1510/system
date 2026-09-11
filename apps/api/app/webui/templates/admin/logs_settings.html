@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Настройки журнала{% endblock %}
+{% block page_name %}Настройки журнала{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/msb/logs.css">{% endblock %}
+
+{% macro chk(name, label, checked) -%}
+<label class="fld fld--row" style="flex-direction:row;align-items:center;gap:8px">
+  <input type="checkbox" name="{{ name }}" value="1" {% if checked %}checked{% endif %} style="width:auto;accent-color:#ff7a00">
+  <span>{{ label }}</span>
+</label>
+{%- endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">Администрирование</p>
+    <h1>Настройки журнала</h1>
+    <p>Уровни логов, HTTP-журнал, ротация файлов, хранение и уведомления о критических ошибках.</p>
+  </div>
+</div>
+
+<form method="post" action="/admin/logs/settings">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Уровни логов</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+        {{ chk('DEBUG_INFO_MODE', 'INFO — обычные события', debug_settings.DEBUG_INFO_MODE) }}
+        {{ chk('DEBUG_SUCCESS_MODE', 'SUCCESS — успешные действия', debug_settings.DEBUG_SUCCESS_MODE) }}
+        {{ chk('DEBUG_SUCCESS1_MODE', 'SUCCESS1 — внутренние этапы', debug_settings.DEBUG_SUCCESS1_MODE) }}
+        {{ chk('DEBUG_WARNING_MODE', 'WARNING — предупреждения', debug_settings.DEBUG_WARNING_MODE) }}
+        {{ chk('DEBUG_ERROR_MODE', 'ERROR — ошибки операций', debug_settings.DEBUG_ERROR_MODE) }}
+        {{ chk('DEBUG_ERROR1_MODE', 'ERROR1 — внутренние ошибки', debug_settings.DEBUG_ERROR1_MODE) }}
+        {{ chk('DEBUG_CRITICAL_ERROR_MODE', 'CRITICAL — критические', debug_settings.DEBUG_CRITICAL_ERROR_MODE) }}
+      </div>
+      <span class="hint">Выключенный уровень не пишется в файл. В мониторинге все уровни всё равно видны.</span>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>HTTP-журнал запросов</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+        {{ chk('DEBUG_HTTP_LOG_MODE', 'Писать HTTP-запросы в журнал', debug_settings.DEBUG_HTTP_LOG_MODE) }}
+        {{ chk('DEBUG_HTTP_CONSOLE', 'Дублировать запросы в консоль', debug_settings.DEBUG_HTTP_CONSOLE) }}
+      </div>
+      <span class="hint">Отдельный тумблер: не зависит от уровня INFO. Запросы пишутся на уровень INFO (ошибки 5xx — на ERROR).</span>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Ротация файлов</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld"><span class="lbl">Максимальный размер файла (КБ)</span>
+          <input type="number" name="DEBUG_MAX_FILE_KB" min="0" value="{{ debug_settings.DEBUG_MAX_FILE_KB }}">
+          <span class="hint">0 — не ограничивать. По достижении лимита файл переименовывается в *.1, *.2…</span></label>
+        <label class="fld"><span class="lbl">Хранить ротированных копий</span>
+          <input type="number" name="DEBUG_MAX_FILES" min="0" value="{{ debug_settings.DEBUG_MAX_FILES }}">
+          <span class="hint">Сколько файлов-копий держать (не считая текущего).</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Хранение (retention)</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld fld--row" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" name="DEBUG_AUTO_CLEAN_ENABLED" value="1" {% if debug_settings.DEBUG_AUTO_CLEAN_ENABLED %}checked{% endif %} style="width:auto;accent-color:#ff7a00">
+          <span>Автоочистка старых логов</span>
+        </label>
+        <label class="fld"><span class="lbl">Срок хранения</span>
+          <input type="text" name="DEBUG_LOG_RETENTION" value="{{ debug_settings.DEBUG_LOG_RETENTION or '3 months' }}" placeholder="3 months">
+          <span class="hint">Например: 3 months, 14 days, 1 year.</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Уведомления о критических ошибках</h2></div>
+    <div class="msb-form-card__body">
+      <div class="msb-form-grid">
+        <label class="fld fld--row" style="flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" name="DEBUG_CRITICAL_NOTIFY_ENABLED" value="1" {% if debug_settings.DEBUG_CRITICAL_NOTIFY_ENABLED %}checked{% endif %} style="width:auto;accent-color:#ff7a00">
+          <span>Отправлять уведомления</span>
+        </label>
+        <label class="fld"><span class="lbl">Канал уведомлений</span>
+          <select name="DEBUG_CRITICAL_NOTIFY_CHANNEL">
+            {% for val, label in [('all','Все включённые каналы'),('telegram','Только Telegram'),('email','Только Email'),('webhook','Только Webhook'),('none','Отключено')] %}
+            <option value="{{ val }}" {% if debug_settings.DEBUG_CRITICAL_NOTIFY_CHANNEL == val %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <span class="hint">Сами каналы (Telegram/Email/Webhook) настраиваются в файле debug_module.env.</span></label>
+      </div>
+    </div>
+  </div>
+
+  <div class="msb-form-card__foot" style="display:flex;gap:10px;align-items:center">
+    <button class="btn btn-primary" type="submit">Сохранить настройки журнала</button>
+    <a class="btn" href="/admin/logs">← К мониторингу</a>
+  </div>
+</form>
+{% endblock %}
