@@ -75,9 +75,9 @@ ADMIN_NAV = [
 ROLE_SCOPES = {
     "admin": "all",
     "manager": ["/repairs", "/repairs/new", "/clients", "/callcenter",
-                "/chat", "/parts", "/prices", "/dashboard", "/profile",
+                "/chat", "/prices", "/dashboard", "/profile",
                 "/notifications"],
-    # Оператор — всё, кроме аналитики и админ-разделов.
+    # Оператор — всё, кроме аналитики и админ-разделов (склад разбора доступен).
     "operator": ["/repairs", "/repairs/new", "/clients", "/callcenter",
                  "/chat", "/parts", "/prices", "/profile", "/notifications"],
     # Мастер — приёмка, свои ремонты, чат и профиль.
@@ -99,9 +99,10 @@ def _roles_of(user) -> list[str]:
 
 # Индивидуальные гранты (страница «Сотрудники» → «Права доступа») открывают
 # соответствующие разделы навигации даже тем, у кого роль их не видит.
+# Склад разбора (/parts) доступен строго admin/operator: индивидуальный
+# грант его не открывает, поэтому ключа "stock" здесь намеренно нет.
 FEATURE_NAV = {
     "analytics": "/dashboard",
-    "stock": "/parts",
     "callcenter": "/callcenter",
     "logs": "/admin/logs",
 }

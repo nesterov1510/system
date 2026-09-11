@@ -248,3 +248,125 @@ def test_field_endpoint_updates_master_payout(client, admin_headers):
     assert resp.status_code == 303, resp.text
     out = client.get(f"/api/repairs/{rep['id']}", headers=admin_headers).json()
     assert float(out["master_payout"]) == 150.0
+
+
+# ============================================================= новый пакет
+# ------------------------------------------------------------ 1) список
+def test_list_editor_is_floating_popover_and_centered(client, admin_headers):
+    """«Все ремонты»: редактирование по dblclick — во всплывающем окне, текст
+    колонок центрирован, «долг» заменён на «не оплачено»."""
+    cookies = _login(client)
+    _make_repair(client, admin_headers, "popover-1", "Поповер Клиент", "+993 65 000011")
+    page = client.get("/repairs", cookies=cookies)
+    assert page.status_code == 200, page.text
+    html = page.text
+    # Всплывающее окно: scrim + pop есть и в CSS, и в JS (создание элемента).
+    assert ".redit-scrim" in html
+    assert ".redit-pop" in html
+    assert "className = 'redit-scrim'" in html
+    # Инлайн-перестройки ячейки больше нет — таблица не сдвигается.
+    assert "cell.innerHTML = ''" not in html
+    # Текст всех колонок центрирован.
+    assert "#rlist-table th,#rlist-table td{text-align:center}" in html
+    # «долг» → «не оплачено» (чип и подсказка).
+    assert "не оплачено" in html
+    assert "долг" not in html
+
+
+# ------------------------------------------------------------ 2) карточка
+def test_repair_card_chips_no_eta_manual_parts(client, admin_headers):
+    """Карточка: всё в чипах — срока нет, оплата «не оплачено», запчасти
+    вписываются только вручную, мастера выбираются чипами."""
+    rep = _make_repair(client, admin_headers, "cardchips-1", "Чип Клиент", "+993 65 000012")
+    cookies = _login(client)
+    page = client.get(f"/repairs/{rep['id']}", cookies=cookies)
+    assert page.status_code == 200, page.text
+    html = page.text
+    # Срок (eta) из карточки убран.
+    assert "Срок, дней" not in html
+    assert "eta_days" not in html
+    # Оплата — «не оплачено», «долга» нет.
+    assert "не оплачено" in html
+    assert "долг" not in html
+    # Запчасти: селекта каталога нет, только ручной ввод.
+    assert 'name="part_id"' not in html
+    assert "Запчасть (вручную)" in html
+    # Мастера — чип-селект (checkbox-пилюли), не multiselect.
+    assert 'class="mchips"' in html
+    assert 'name="master_ids"' in html
+    assert "<select name=\"master_ids\" multiple" not in html
+
+
+# ------------------------------------------------------------ 3) приёмка
+def test_intake_works_without_consent_checkboxes(client):
+    """Приёмка: галочек согласия в форме больше нет; отправка идёт без них."""
+    cookies = _login(client)
+    page = client.get("/repairs/new?type=Телевизоры", cookies=cookies)
+    assert page.status_code == 200, page.text
+    html = page.text
+    for name in ("consent_pdn", "consent_storage", "consent_repair"):
+        assert name not in html, name
+    assert "Исполнитель и согласия" not in html
+    assert "Согласие на обработку персональных данных" not in html
+    # Раздел назвался теперь просто «Исполнитель».
+    assert "Исполнитель" in html
+    # Отправка формы без единой галочки согласия — тоже валидна.
+    cities = client.get("/api/lookups/cities", cookies=cookies).json()
+    r = client.post("/repairs/new", cookies=cookies, data={
+        "city_id": cities[0]["id"],
+        "full_name": "Без Согласий",
+        "phone": "+993 65 000013",
+        "device_type": "Телевизоры",
+        "brand": "Sony",
+        "model": "KD-50",
+        "fault_client": "нет звука",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+
+
+# ------------------------------------------------------------ 4) склад
+def test_donor_stock_page_access_by_role(client, admin_headers):
+    """Склад разбора: admin и operator — страница открывается, мастер и
+    менеджер получают 403 и не видят раздел в навигации."""
+    cookies = _login(client)
+    r = client.get("/parts", cookies=cookies)
+    assert r.status_code == 200
+    assert "Склад разбора" in r.text
+
+    cookies = _login(client, "operator@msb.local", "operator123")
+    r = client.get("/parts", cookies=cookies)
+    assert r.status_code == 200
+    assert "Склад разбора" in r.text
+
+    cookies = _login(client, "master@msb.local", "master123")
+    r = client.get("/parts", cookies=cookies)
+    assert r.status_code == 403
+    home = client.get("/repairs", cookies=cookies)
+    assert 'href="/parts"' not in home.text
+
+    # Менеджеру остатки тоже закрыты (роль без /parts в ROLE_SCOPES).
+    r = client.post("/api/admin/users", headers=admin_headers, json={
+        "name": "Менеджер Склада", "email": "manager-stock@msb.local",
+        "password": "pass12345", "role": "manager",
+    })
+    assert r.status_code in (200, 201), r.text
+    cookies = _login(client, "manager-stock@msb.local", "pass12345")
+    r = client.get("/parts", cookies=cookies)
+    assert r.status_code == 403
+    home = client.get("/repairs", cookies=cookies)
+    assert 'href="/parts"' not in home.text
+
+
+def test_donor_part_manual_only_in_repair_form(client, admin_headers):
+    """Карточка ремонта: запчасть добавляется ручным вводом — принимается
+    без part_id, создаётся manual-позиция."""
+    rep = _make_repair(client, admin_headers, "manualpart-1", "Ручки Клиент", "+993 65 000014")
+    cookies = _login(client)
+    r = client.post(f"/repairs/{rep['id']}/parts/add", cookies=cookies, data={
+        "name": "Блок питания монолит", "qty": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    out = client.get(f"/api/repairs/{rep['id']}/parts", headers=admin_headers).json()
+    mine = [p for p in out if "Блок питания монолит" in p["part_name"]]
+    assert mine, out
+    assert mine[0]["is_manual"] is True

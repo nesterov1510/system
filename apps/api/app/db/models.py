@@ -449,6 +449,54 @@ class Equipment(Base, TimestampMixin):
 
 
 # --------------------------------------------------------------------------
+# Склад разбора: техника, купленная «на запчасти», и её составные части.
+# Отдельная страница «Склад» (доступна администратору и оператору).
+# --------------------------------------------------------------------------
+class DonorUnit(Base, TimestampMixin):
+    """Единица техники на разборе: марка, модель, опциональный комментарий."""
+
+    __tablename__ = "donor_units"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    brand: Mapped[str] = mapped_column(String(128), index=True)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id"), nullable=True
+    )
+
+    parts: Mapped[list["DonorPart"]] = relationship(
+        back_populates="donor",
+        cascade="all, delete-orphan",
+        order_by="DonorPart.created_at",
+    )
+    created_by: Mapped["User | None"] = relationship(foreign_keys=[created_by_id])
+
+
+class DonorPart(Base, TimestampMixin):
+    """Запчасть внутри техники на разборе.
+
+    Название (напр. «Матрица», «Блок питания»), номер панели, опциональная
+    цена продажи и опциональный комментарий. Количество позиций в технике
+    не ограничено.
+    """
+
+    __tablename__ = "donor_parts"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    donor_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("donor_units.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(255))
+    panel_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # За сколько готовы продать (ман.), опционально.
+    price_sale: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    donor: Mapped["DonorUnit"] = relationship(back_populates="parts")
+
+
+# --------------------------------------------------------------------------
 # Payments / касса
 # --------------------------------------------------------------------------
 class Payment(Base, TimestampMixin):

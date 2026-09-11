@@ -271,7 +271,7 @@ window.msbCapsIdent = (function () {
         </div>
       </div>
 
-      <div class="tv-contact-divider"><span>Исполнитель и согласия</span></div>
+      <div class="tv-contact-divider"><span>Исполнитель</span></div>
       {% if can_assign %}
       <div class="tv-customer-grid">
         <label class="tv-field"><span>Мастер-исполнитель</span>
@@ -284,11 +284,6 @@ window.msbCapsIdent = (function () {
       {% else %}
       <p class="tv-field__hint" style="margin:0 0 4px">Исполнителя на ремонт назначит администратор или оператор — приёмка сохранится новым ремонтом в очереди.</p>
       {% endif %}
-      <div class="tv-check-grid" style="margin-top:12px">
-        <label class="tv-check"><input type="checkbox" name="consent_pdn" required><span class="tv-check__box"></span><span>Согласие на обработку персональных данных *</span></label>
-        <label class="tv-check"><input type="checkbox" name="consent_storage" required><span class="tv-check__box"></span><span>Ознакомлен с условиями хранения техники *</span></label>
-        <label class="tv-check"><input type="checkbox" name="consent_repair"><span class="tv-check__box"></span><span>Согласие на диагностику и ремонт</span></label>
-      </div>
     </section>
 
     <section class="tv-form-card tv-form-card--identity">

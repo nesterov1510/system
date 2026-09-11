@@ -22,7 +22,19 @@ td.rieditable.is-editing, .rieditable.is-editing{outline:none;background:#fff6ec
 .riedit:focus{outline:none;box-shadow:0 0 0 3px rgba(255,122,0,.18)}
 textarea.riedit{min-height:64px;resize:vertical}
 .riedit-pair{display:flex;flex-direction:column;gap:6px}
-.riedit-wait{color:var(--muted,#75808d)}
+.riedit-wait{color:var(--muted,#75808d);font-size:13px;text-align:center}
+/* Всплывающее окно редактирования: таблица под ним не меняет вёрстку. */
+.redit-scrim{position:fixed;inset:0;z-index:420;background:rgba(35,42,52,.14)}
+.redit-pop{position:fixed;background:#fff;border:1px solid #ead9c6;border-radius:14px;box-shadow:0 14px 40px rgba(60,40,10,.20);padding:12px}
+.redit-pop__title{font-size:11.5px;font-weight:800;color:var(--muted,#75808d);text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px;text-align:left}
+.redit-pop__body{display:flex;flex-direction:column;gap:6px}
+.redit-pop__feet{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.redit-btn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line,#dbe2e9);background:#fff;cursor:pointer;font-weight:900;font-size:14px;line-height:1}
+.redit-btn.is-ok{background:var(--accent,#ff6a00);border-color:var(--accent,#ff6a00);color:#fff}
+/* Аккуратное центрирование текста во всех колонках. */
+#rlist-table th,#rlist-table td{text-align:center}
+#rlist-table td .rlist-dev{justify-content:center;align-items:center}
+#rlist-table td>b,#rlist-table td>div:not(.rpop){text-align:center}
 </style>
 {% endblock %}
 {% block topbar_actions %}
@@ -86,7 +98,7 @@ textarea.riedit{min-height:64px;resize:vertical}
   </form>
 </div>
 {% if can_inline %}
-<p class="rlist-edit-hint">✎ Двойной клик по ячейке — быстрое редактирование. Карточка ремонта открывается через меню ⚡.</p>
+<p class="rlist-edit-hint">✎ Двойной клик по ячейке — редактирование во всплывающем окне, таблица не сдвигается. Карточка ремонта открывается через меню ⚡.</p>
 {% endif %}
 
 {% if can_delete %}
@@ -134,7 +146,7 @@ textarea.riedit{min-height:64px;resize:vertical}
               data-hint="Сумма, выплаченная мастерам за этот ремонт. Заполняется при оформлении починки (админ/менеджер/оператор).">?</button></th>
           <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
             <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
-              data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».">?</button></th>
+              data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «не оплачено».">?</button></th>
           <th style="text-transform:none;letter-spacing:0">⚡ Действия
             <button type="button" class="colhint" data-colhint data-title="Действия по ремонту"
               data-hint="Карточка открывается здесь: «Открыть карточку». Плюс бланк, этикетки, «закончен», SMS клиенту и звонок. SMS уходит только по ✉.">?</button></th>
@@ -273,9 +285,9 @@ textarea.riedit{min-height:64px;resize:vertical}
               {% elif pays.get(r.id) %}<span class="chip amber" title="Оплачено частично">частично</span>
               {% else %}
                 {% if can_inline and can_finance %}
-                <span class="chip gray rieditable" data-edit="paid" data-edit-kind="toggle" data-repair-id="{{ r.id }}" data-edit-value="0" title="Ещё не оплачено. Двойной клик — отметить оплаченным">долг</span>
+                <span class="chip gray rieditable" data-edit="paid" data-edit-kind="toggle" data-repair-id="{{ r.id }}" data-edit-value="0" title="Ещё не оплачено. Двойной клик — отметить оплаченным">не оплачено</span>
                 {% else %}
-                <span class="chip gray" title="Ещё не оплачено">долг</span>
+                <span class="chip gray" title="Ещё не оплачено">не оплачено</span>
                 {% endif %}
               {% endif %}
             </div>
@@ -414,32 +426,48 @@ window.MSB_MASTERS = {{ masters_json | tojson }};
 
   function editCell(cell) {
     if (cell.dataset.editing) return;
-    cell.dataset.editing = '1';
-    cell.classList.add('is-editing');
     var rid = cell.getAttribute('data-repair-id');
     var field = cell.dataset.edit;
     var kind = cell.dataset.editKind || 'text';
     var cur1 = cell.getAttribute('data-edit-value') || '';
     var cur2 = cell.getAttribute('data-edit-value2') || '';
 
-    // «Оплачено» — переключатель без ввода: двойной клик меняет значение.
+    // «Оплачено» — переключатель без окна: двойной клик меняет значение.
     if (kind === 'toggle') {
-      cell.classList.remove('is-editing');
-      delete cell.dataset.editing;
       saveField(rid, field, cur1 === '1' ? '0' : '1').catch(fail);
       return;
     }
 
-    var oldHtml = cell.innerHTML;
+    cell.dataset.editing = '1';
+    cell.classList.add('is-editing');
+
+    // Плавающее окно редактора: ячейку не перестраиваем — другие
+    // колонки не разъезжаются ни на пиксель.
+    var scrim = document.createElement('div');
+    scrim.className = 'redit-scrim';
+    var pop = document.createElement('div');
+    pop.className = 'redit-pop';
+
+    var title = document.createElement('div');
+    title.className = 'redit-pop__title';
+    var tdEl = cell.closest('td');
+    var thText = '';
+    if (tdEl) {
+      var th = table.querySelectorAll('thead th')[tdEl.cellIndex];
+      if (th) thText = (th.textContent || '').replace(/\?/g, '').trim();
+    }
+    title.textContent = thText || 'Редактирование';
+    pop.appendChild(title);
+
     var inputs = [];
-    var box = document.createElement('div');
+    var body = document.createElement('div');
+    body.className = 'redit-pop__body';
     if (kind === 'device') {
-      box.className = 'riedit-pair';
       var b = document.createElement('input');
       b.className = 'riedit'; b.placeholder = 'Марка'; b.value = cur1;
       var m = document.createElement('input');
       m.className = 'riedit'; m.placeholder = 'Модель'; m.value = cur2;
-      box.appendChild(b); box.appendChild(m);
+      body.appendChild(b); body.appendChild(m);
       inputs = [b, m];
     } else if (kind === 'master') {
       var sel = document.createElement('select');
@@ -453,58 +481,90 @@ window.MSB_MASTERS = {{ masters_json | tojson }};
         if (mm.id === cur1) o.selected = true;
         sel.appendChild(o);
       });
-      box.appendChild(sel);
+      body.appendChild(sel);
       inputs = [sel];
     } else if (field === 'fault_client') {
       var ta = document.createElement('textarea');
       ta.className = 'riedit'; ta.value = cur1; ta.rows = 3;
-      box.appendChild(ta);
+      body.appendChild(ta);
       inputs = [ta];
     } else {
       var inp = document.createElement('input');
       inp.className = 'riedit'; inp.value = cur1;
       if (kind === 'money') inp.inputMode = 'decimal';
-      box.appendChild(inp);
+      body.appendChild(inp);
       inputs = [inp];
     }
+    pop.appendChild(body);
 
-    cell.innerHTML = '';
-    cell.appendChild(box);
+    var feet = document.createElement('div');
+    feet.className = 'redit-pop__feet';
+    var no = document.createElement('button');
+    no.type = 'button'; no.className = 'redit-btn is-no';
+    no.textContent = '✕'; no.title = 'Отмена (Esc)';
+    var ok = document.createElement('button');
+    ok.type = 'button'; ok.className = 'redit-btn is-ok';
+    ok.textContent = '✓'; ok.title = 'Сохранить (Enter)';
+    feet.appendChild(no); feet.appendChild(ok);
+    pop.appendChild(feet);
+    scrim.appendChild(pop);
+    document.body.appendChild(scrim);
+
+    // Позиция под ячейкой, с клампом, чтобы окно не вылезало за экран.
+    var rect = cell.getBoundingClientRect();
+    var w = Math.max(240, Math.min(320, window.innerWidth - 16));
+    pop.style.width = w + 'px';
+    pop.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2,
+      window.innerWidth - w - 8)) + 'px';
+    var popH = pop.offsetHeight || 170;
+    var top = rect.bottom + 8;
+    if (top + popH > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - popH - 8);
+    }
+    pop.style.top = top + 'px';
+
     inputs[0].focus();
     if (inputs[0].select) inputs[0].select();
 
     var done = false;
-    function restore() {
-      cell.innerHTML = oldHtml;
+    function closeEditor() {
+      document.removeEventListener('keydown', escDoc, true);
+      if (scrim.parentNode) scrim.parentNode.removeChild(scrim);
       cell.classList.remove('is-editing');
       delete cell.dataset.editing;
+    }
+    function escDoc(e) {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     }
     function finish(save) {
       if (done) return;
       done = true;
-      if (!save) { restore(); return; }
+      if (!save) { closeEditor(); return; }
       var v1 = inputs[0].value.trim();
       if (kind === 'device') {
         var v2 = inputs[1].value.trim();
-        if (v1 === cur1 && v2 === cur2) { restore(); return; }
-        cell.innerHTML = '<span class="riedit-wait">Сохранение…</span>';
+        if (v1 === cur1 && v2 === cur2) { closeEditor(); return; }
+        body.innerHTML = '<div class="riedit-wait">Сохранение…</div>';
         var p = Promise.resolve();
         if (v1 !== cur1) p = p.then(function () { return saveField(rid, 'brand', v1); });
         if (v2 !== cur2) p = p.then(function () { return saveField(rid, 'model', v2); });
         p.catch(fail);
-        if (v1 === cur1 && v2 === cur2) restore();
         return;
       }
-      if (kind === 'master') {
-        if (v1 === cur1) { restore(); return; }
-        cell.innerHTML = '<span class="riedit-wait">Сохранение…</span>';
-        saveAssign(rid, v1).catch(fail);
-        return;
-      }
-      if (v1 === cur1) { restore(); return; }
-      cell.innerHTML = '<span class="riedit-wait">Сохранение…</span>';
-      saveField(rid, field, v1).catch(fail);
+      if (v1 === cur1) { closeEditor(); return; }
+      body.innerHTML = '<div class="riedit-wait">Сохранение…</div>';
+      if (kind === 'master') saveAssign(rid, v1).catch(fail);
+      else saveField(rid, field, v1).catch(fail);
     }
+
+    ok.addEventListener('click', function (e) { e.stopPropagation(); finish(true); });
+    no.addEventListener('click', function (e) { e.stopPropagation(); finish(false); });
+    scrim.addEventListener('mousedown', function (e) {
+      if (e.target === scrim) finish(false);
+    });
+    pop.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    pop.addEventListener('dblclick', function (e) { e.stopPropagation(); });
+    document.addEventListener('keydown', escDoc, true);
 
     inputs.forEach(function (inp, idx) {
       inp.addEventListener('click', function (e) { e.stopPropagation(); });
@@ -516,13 +576,6 @@ window.MSB_MASTERS = {{ masters_json | tojson }};
           if (kind === 'device' && idx === 0) { inputs[1].focus(); return; }
           finish(true);
         }
-      });
-      inp.addEventListener('blur', function () {
-        // blur между двумя полями «Марка/Модель» не должен закрывать редактор.
-        setTimeout(function () {
-          if (box.contains(document.activeElement)) return;
-          finish(true);
-        }, 60);
       });
       if (kind === 'master') inp.addEventListener('change', function () { finish(true); });
     });

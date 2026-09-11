@@ -14,6 +14,8 @@ from app.core.permissions import (
 )
 from app.db.models import (
     Client,
+    DonorPart,
+    DonorUnit,
     Equipment,
     Notification,
     Part,
@@ -26,6 +28,7 @@ from app.routers import equipment as equipment_api
 from app.routers import callcenter as callcenter_api
 from app.schemas.parts import PartCreate, PartUpdate
 from app.schemas.equipment import EquipmentCreate, EquipmentUpdate
+from app.services.settings import get_currency
 from app.webui.catalog import DEVICE_CLASSES
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
@@ -213,32 +216,142 @@ async def callcenter_page(request: Request, kind: str = "all"):
 
 
 # --------------------------------------------------------------------------
-# Склад: запчасти + купленная техника
+# Склад разбора: техника, купленная на запчасти (только admin и operator).
+# Каталожный склад запчастей из интерфейса убран: в ремонт запчасти
+# вписываются вручную (см. карточку ремонта).
 # --------------------------------------------------------------------------
+def _can_donor_stock(user) -> bool:
+    return has_any_role(user, "admin", "operator")
+
+
 @router.get("/parts", response_class=HTMLResponse)
-async def parts_page(request: Request, q: str | None = None, low: str | None = None):
+async def parts_page(request: Request, q: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
     try:
-        stmt = select(Part).where(Part.active.is_(True)).order_by(Part.name)
-        if q:
-            stmt = stmt.where(Part.name.ilike(f"%{q.strip()}%"))
-        if low:
-            stmt = stmt.where(Part.stock_qty <= Part.min_stock)
-        parts = (await db.execute(stmt)).scalars().all()
-
-        eq = (await db.execute(
-            select(Equipment).where(Equipment.active.is_(True)).order_by(Equipment.purchased_at.desc())
+        if not _can_donor_stock(user):
+            return HTMLResponse(
+                "Склад разбора доступен администратору и оператору", status_code=403
+            )
+        donors = (await db.execute(
+            select(DonorUnit)
+            .options(selectinload(DonorUnit.parts))
+            .order_by(DonorUnit.created_at.desc())
         )).scalars().all()
-
+        if q:
+            needle = q.strip().lower()
+            if needle:
+                donors = [
+                    d for d in donors
+                    if needle in f"{d.brand} {d.model} {d.comment or ''}".lower()
+                    or any(
+                        needle in (p.name or "").lower()
+                        or needle in (p.panel_number or "").lower()
+                        for p in d.parts
+                    )
+                ]
         ctx = await base_context(
             request, await get_web_user(request), active="/parts",
-            parts=parts, equipment=eq, q=q or "", low=low,
-            can_catalog=can_edit_stock_catalog(user),
+            donors=donors, q=q or "", currency=await get_currency(db),
         )
         html = await render_async("parts.html", **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.post("/parts/donors/create")
+async def parts_donor_create(request: Request):
+    """Добавить технику на разбор: марка, модель и опциональный комментарий."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not _can_donor_stock(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        f = await request.form()
+        brand = (f.get("brand") or "").strip()
+        if not brand:
+            return HTMLResponse("Укажите марку техники", status_code=400)
+        db.add(DonorUnit(
+            brand=brand,
+            model=(f.get("model") or "").strip(),
+            comment=(f.get("comment") or "").strip() or None,
+            created_by_id=user.id,
+        ))
+        await db.commit()
+        return RedirectResponse("/parts", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/parts/donors/{donor_id}/delete")
+async def parts_donor_delete(request: Request, donor_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not _can_donor_stock(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        donor = await db.get(DonorUnit, donor_id)
+        if donor is not None:
+            await db.delete(donor)  # запчасти уйдут каскадом
+            await db.commit()
+        return RedirectResponse("/parts", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/parts/donors/{donor_id}/parts/add")
+async def parts_donor_part_add(request: Request, donor_id: uuid.UUID):
+    """Вписать запчасть внутрь техники. Позиций в одной технике — без лимита."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not _can_donor_stock(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        donor = await db.get(DonorUnit, donor_id)
+        if donor is None:
+            return HTMLResponse("Техника не найдена", status_code=404)
+        f = await request.form()
+        name = (f.get("name") or "").strip()
+        if not name:
+            return HTMLResponse("Укажите название запчасти", status_code=400)
+        raw_price = (f.get("price_sale") or "").strip().replace(",", ".")
+        try:
+            price_sale = float(raw_price) if raw_price else None
+        except ValueError:
+            return HTMLResponse("Некорректная цена", status_code=400)
+        db.add(DonorPart(
+            donor_id=donor.id,
+            name=name,
+            panel_number=(f.get("panel_number") or "").strip() or None,
+            price_sale=price_sale,
+            comment=(f.get("comment") or "").strip() or None,
+        ))
+        await db.commit()
+        return RedirectResponse(f"/parts#donor-{donor_id}", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/parts/donor-parts/{part_id}/delete")
+async def parts_donor_part_delete(request: Request, part_id: uuid.UUID):
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        if not _can_donor_stock(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
+        part = await db.get(DonorPart, part_id)
+        if part is None:
+            return RedirectResponse("/parts", status_code=303)
+        donor_id = part.donor_id
+        await db.delete(part)
+        await db.commit()
+        return RedirectResponse(f"/parts#donor-{donor_id}", status_code=303)
     finally:
         await db.close()
 

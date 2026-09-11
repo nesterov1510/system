@@ -28,7 +28,6 @@ from app.core.permissions import (
 from app.db.models import (
     Client,
     ComplectationItem,
-    Part,
     Payment,
     Repair,
     RepairMaster,
@@ -529,9 +528,6 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         photos = (await db.execute(
             select(RepairPhoto).where(RepairPhoto.repair_id == repair_id)
         )).scalars().all()
-        catalog = (await db.execute(
-            select(Part).where(Part.active.is_(True), Part.stock_qty > 0).order_by(Part.name)
-        )).scalars().all()
         currency = await get_currency(db)
         statuses = await get_repair_statuses(db)
         masters = await _masters_list(db)
@@ -543,7 +539,7 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repair=repair, parts=parts, payments=payments, photos=photos,
-            catalog=catalog, currency=currency, statuses=statuses, masters=masters,
+            currency=currency, statuses=statuses, masters=masters,
             just=just, sms=sms, sms_detail=sms_detail, printed=printed,
             parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
