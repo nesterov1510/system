@@ -41,6 +41,7 @@ async def fetch_repairs(
     master_id: uuid.UUID | None = None,
     unassigned: bool = False,
     dash_filter: str | None = None,
+    exclude_statuses: list[str] | None = None,
     page: int = 1,
     page_size: int = 50,
 ):
@@ -53,6 +54,9 @@ async def fetch_repairs(
         filters.append(Repair.status.in_(STAGE_STATUSES[stage]))
     if status:
         filters.append(Repair.status == status)
+    if exclude_statuses:
+        # Доска «Все ремонты»: показываем только «живые» (без завершённых).
+        filters.append(Repair.status.not_in(exclude_statuses))
     if master_id:
         filters.append(Repair.master_id == master_id)
     if unassigned:

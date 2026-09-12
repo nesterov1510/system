@@ -7,8 +7,8 @@ import uuid
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.permissions import (
@@ -26,8 +26,8 @@ from app.core.permissions import (
     is_master_only,
 )
 from app.db.models import (
+    Client,
     ComplectationItem,
-    Part,
     Payment,
     Repair,
     RepairMaster,
@@ -91,26 +91,56 @@ async def _cities(db):
 # --------------------------------------------------------------------------
 # Список / доска ремонтов
 # --------------------------------------------------------------------------
+# Размеры страницы, доступные в селекторе «на странице» вкладки «Все ремонты».
+PER_PAGE_OPTIONS = (20, 50, 100, 200)
+DEFAULT_PER_PAGE = 50
+# Доска не пейджится: на ней только «живые» ремонты.
+BOARD_LIMIT = 300
+
+
 @router.get("/repairs", response_class=HTMLResponse)
 async def repairs_list(request: Request, stage: str | None = None, q: str | None = None,
                        status: str | None = None, view: str = "table", page: int = 1,
+                       per_page: int = DEFAULT_PER_PAGE,
                        just: str | None = None, printed: str | None = None,
                        filter: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
     try:
+        from app.services.stats import DASHBOARD_FILTER_LABELS
         from app.webui.data import (
+            STAGE_STATUSES,
             fetch_repairs,
+            master_scope,
             repair_parts_cost,
             repair_parts_lines,
             repair_parts_names,
             repair_payments_total,
         )
-        repairs, total = await fetch_repairs(
-            db, user, stage=stage, status=status, q=q, page=page, page_size=50,
-            dash_filter=filter,
-        )
+        per_page = per_page if per_page in PER_PAGE_OPTIONS else DEFAULT_PER_PAGE
+        page = max(int(page or 1), 1)
+
+        if view == "board":
+            # Доска: только незавершённые ремонты, без фильтров этапов/статусов
+            # и панели — все подряд по приёмке от новых к старым.
+            repairs, total = await fetch_repairs(
+                db, user, q=q, page=1, page_size=BOARD_LIMIT,
+                exclude_statuses=STAGE_STATUSES["done"],
+            )
+            pages = 1
+        else:
+            repairs, total = await fetch_repairs(
+                db, user, stage=stage, status=status, q=q, page=page,
+                page_size=per_page, dash_filter=filter,
+            )
+            pages = max(1, (total + per_page - 1) // per_page)
+            if page > pages:
+                page = pages
+                repairs, total = await fetch_repairs(
+                    db, user, stage=stage, status=status, q=q, page=page,
+                    page_size=per_page, dash_filter=filter,
+                )
         ids = [r.id for r in repairs]
         parts_cost = await repair_parts_cost(db, ids)
         parts_lines = await repair_parts_lines(db, ids)
@@ -122,8 +152,6 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         # Счётчики этапов для бейджей (агрегат COUNT, без загрузки строк).
         from sqlalchemy import func as _func
 
-        from app.services.stats import DASHBOARD_FILTER_LABELS
-        from app.webui.data import STAGE_STATUSES, master_scope
         counts = {"all": 0}
 
         async def _count(*where):
@@ -140,20 +168,33 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
 
         stage_labels = [("new", "Новые"), ("diag", "Диагностика"),
                         ("work", "В работе"), ("done", "Завершены")]
+        # На доске колонки «Завершены» нет: «законченные» сюда не попадают.
+        board_labels = [item for item in stage_labels if item[0] != "done"]
 
+        master_only = is_master_only(user)
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repairs=repairs, total=total, stage=stage or "all", q=q or "",
-            status=status, view=view, page=page, parts_cost=parts_cost,
+            status=status, view=view, page=page, pages=pages,
+            per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
+            parts_cost=parts_cost,
             parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
-            counts=counts, stages=stage_labels,
+            masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
+            counts=counts, stages=board_labels if view == "board" else stage_labels,
             just=just, printed=printed,
             sms=request.query_params.get("sms"),
             sms_detail=request.query_params.get("sms_detail"),
             can_finish=can_finish_repair(user),
-            can_print_any=not is_master_only(user),
+            can_print_any=not master_only,
             can_delete=can_delete_repair(user),
+            # Инлайн-редактирование ячеек в таблице (двойной клик) — для
+            # старших ролей; мастеру список только на чтение + меню действий.
+            can_inline=not master_only,
+            can_finance=can_edit_finances(user),
+            can_device=can_edit_device_info(user),
+            can_assign=can_assign_masters(user),
+            can_client=user.has_role("admin", "manager", "operator"),
             dash_filter=filter or "",
             dash_filter_label=DASHBOARD_FILTER_LABELS.get(filter or ""),
         )
@@ -203,14 +244,51 @@ async def repair_new_form(request: Request, type: str | None = None):
         return redir
     try:
         sel = normalize_class(type) if type else None
+        # Мастера и помощника назначают только администратор и оператор:
+        # поле выбора мастера остальным (в т.ч. мастерам) не показываем вовсе.
+        can_assign = can_assign_masters(_user)
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs/new",
-            cities=await _cities(db), masters=await _masters_list(db),
+            cities=await _cities(db),
+            masters=await _masters_list(db) if can_assign else [],
             complectation=await _complectation(db), device_classes=DEVICE_CLASSES,
             brands=[], error=None, form={}, sel_type=sel,
+            can_assign=can_assign,
         )
         html = await render_async("repairs/new.html", **ctx)
         return HTMLResponse(html)
+    finally:
+        await db.close()
+
+
+@router.get("/web/clients-suggest")
+async def clients_suggest(request: Request, q: str = ""):
+    """Автокомплит заказчика в приёмке: поиск клиента по телефону или имени.
+
+    Доступен любому авторизованному сотруднику, который открывает приёмку.
+    """
+    webuser = await get_web_user(request)
+    if not webuser.authenticated:
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    q = (q or "").strip()
+    if len(q) < 2:
+        return []
+    db = _db()
+    try:
+        digits = "".join(ch for ch in q if ch.isdigit())
+        like_txt = f"%{q}%"
+        conds = [Client.full_name.ilike(like_txt), Client.phone.ilike(like_txt)]
+        if len(digits) >= 3:
+            conds.append(Client.phone_norm.contains(digits))
+        rows = (
+            await db.execute(
+                select(Client)
+                .where(Client.deleted_at.is_(None), or_(*conds))
+                .order_by(Client.full_name)
+                .limit(8)
+            )
+        ).scalars().all()
+        return [{"name": c.full_name, "phone": c.phone} for c in rows]
     finally:
         await db.close()
 
@@ -268,6 +346,11 @@ async def repair_create(request: Request):
         serial = _caps_ident(form.get("serial_manual") or form.get("serial"))
         if not brand and not model and not serial:
             brand, model, serial = _parse_identity(form.get("identity_raw"))
+        # Мастера назначают только администратор/оператор. Мастер, принявший
+        # технику, себя не назначает: ремонт сохраняется новым, без исполнителя.
+        master_id = None
+        if can_assign_masters(user) and form.get("master_id"):
+            master_id = uuid.UUID(form["master_id"])
         payload = RepairCreate(
             city_id=uuid.UUID(form["city_id"]),
             client=ClientCreate(
@@ -286,7 +369,7 @@ async def repair_create(request: Request):
             complectation=comp or None,
             fault_client=(form.get("fault_client") or "").strip() or None,
             condition_notes=condition_notes,
-            master_id=uuid.UUID(form["master_id"]) if form.get("master_id") else None,
+            master_id=master_id,
             consent_repair=bool(form.get("consent_repair")),
             is_delivery=is_delivery,
             delivery_district=(form.get("delivery_district") or "").strip() or None
@@ -321,9 +404,11 @@ async def repair_create(request: Request):
             pass  # фото не должны ломать приёмку
 
         # --- Автопечать при приёмке ---
-        # По умолчанию печатается этикетка 58×38 (её клеят на технику при
-        # клиенте). Что печатать — этикетка / бланк / оба / ничего — выбирается
-        # в админке «Настройки → Печать → Автопечать при приёмке».
+        # По умолчанию печатаются ДВЕ этикетки 58×38: одна на технику (№,
+        # клиент, комплектация, QR для мастера), вторая клиенту (QR на
+        # публичную страницу со статусом, условиями хранения и юр. информацией).
+        # Что печатать — этикетки / бланк / всё / ничего — выбирается в админке
+        # «Настройки → Печать → Автопечать при приёмке».
         label_printed = False
         try:
             from app.services import settings as settings_svc
@@ -332,6 +417,9 @@ async def repair_create(request: Request):
                 auto = await settings_svc.get_intake_auto_print(db)
                 if auto in ("label", "both"):
                     await prints_api.create_label_print_job(
+                        repair_id=rid, db=db, user=user, request=request
+                    )
+                    await prints_api.create_client_label_print_job(
                         repair_id=rid, db=db, user=user, request=request
                     )
                     label_printed = True
@@ -348,12 +436,15 @@ async def repair_create(request: Request):
         )
     except Exception as e:
         _submitted = dict(await request.form())
+        can_assign = can_assign_masters(user)
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs/new",
-            cities=await _cities(db), masters=await _masters_list(db),
+            cities=await _cities(db),
+            masters=await _masters_list(db) if can_assign else [],
             complectation=await _complectation(db), device_classes=DEVICE_CLASSES,
             brands=[], error=str(getattr(e, "detail", e)), form=_submitted,
             sel_type=normalize_class(_submitted.get("device_type")) if _submitted.get("device_type") else None,
+            can_assign=can_assign,
         )
         html = await render_async("repairs/new.html", **ctx)
         return HTMLResponse(html, status_code=400)
@@ -437,9 +528,6 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         photos = (await db.execute(
             select(RepairPhoto).where(RepairPhoto.repair_id == repair_id)
         )).scalars().all()
-        catalog = (await db.execute(
-            select(Part).where(Part.active.is_(True), Part.stock_qty > 0).order_by(Part.name)
-        )).scalars().all()
         currency = await get_currency(db)
         statuses = await get_repair_statuses(db)
         masters = await _masters_list(db)
@@ -451,7 +539,7 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repair=repair, parts=parts, payments=payments, photos=photos,
-            catalog=catalog, currency=currency, statuses=statuses, masters=masters,
+            currency=currency, statuses=statuses, masters=masters,
             just=just, sms=sms, sms_detail=sms_detail, printed=printed,
             parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
@@ -556,7 +644,7 @@ async def repair_patch_field(request: Request, repair_id: uuid.UUID):
             "brand", "model", "serial", "fault_client", "fault_master",
             "condition_notes", "work_done", "warranty_text", "status",
         }
-        if field not in text_fields | {"eta_days", "price_final", "paid", "client_name", "client_phone"}:
+        if field not in text_fields | {"eta_days", "price_final", "master_payout", "paid", "client_name", "client_phone"}:
             return HTMLResponse("Неизвестное поле", status_code=400)
 
         try:
@@ -581,6 +669,10 @@ async def repair_patch_field(request: Request, repair_id: uuid.UUID):
                 elif field == "price_final":
                     payload = RepairUpdate(
                         price_final=float(value.replace(",", ".")) if value else None
+                    )
+                elif field == "master_payout":
+                    payload = RepairUpdate(
+                        master_payout=float(value.replace(",", ".")) if value else None
                     )
                 else:
                     payload = RepairUpdate(**{field: value or None})
@@ -874,6 +966,24 @@ async def repair_print_label(request: Request, repair_id: uuid.UUID):
         )
         sep = "&" if "?" in nxt else "?"
         return RedirectResponse(f"{nxt}{sep}printed=label", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/print-client-label")
+async def repair_print_client_label(request: Request, repair_id: uuid.UUID):
+    """Клиентская этикетка с QR на публичный статус (для выдачи клиенту)."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        await prints_api.create_client_label_print_job(
+            repair_id=repair_id, db=db, user=user, request=request
+        )
+        sep = "&" if "?" in nxt else "?"
+        return RedirectResponse(f"{nxt}{sep}printed=client-label", status_code=303)
     finally:
         await db.close()
 

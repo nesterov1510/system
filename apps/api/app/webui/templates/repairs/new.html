@@ -5,6 +5,20 @@
 <link rel="stylesheet" href="/static/msb/priemka/priemka.css">
 <link rel="stylesheet" href="/static/msb/priemka/televisions.css?v=caps2">
 <style>
+/* Автозаполнение клиента из списка контактов + кнопка телефонной книги */
+.tv-ac-wrap{position:relative}
+.tv-ac{position:absolute;z-index:60;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid #dbe2e9;border-radius:12px;box-shadow:0 14px 34px rgba(10,20,30,.16);overflow:hidden;max-height:264px;overflow-y:auto}
+.tv-ac__item{display:flex;flex-direction:column;gap:2px;width:100%;text-align:left;padding:10px 13px;border:0;background:#fff;cursor:pointer;font-size:14px}
+.tv-ac__item b{font-weight:700}
+.tv-ac__item span{color:#7d8a96;font-size:12.5px;font-variant-numeric:tabular-nums}
+.tv-ac__item:hover,.tv-ac__item.is-cur{background:#fff3e8}
+.tv-ac__empty{padding:10px 13px;color:#7d8a96;font-size:13px}
+.tv-phone-row{display:flex;gap:8px;align-items:stretch}
+.tv-phone-row>input{flex:1;min-width:0}
+.tv-phonebook-btn{flex:0 0 auto;border:1.5px solid #ffd9b0;background:#fff6ec;color:#c45f00;border-radius:12px;padding:0 14px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+.tv-phonebook-btn:hover{background:#ffedd9}
+</style>
+<style>
 #tvIdentity,
 input[name="brand_manual"],
 input[name="model_manual"],
@@ -185,150 +199,28 @@ window.msbCapsIdent = (function () {
     <input type="hidden" name="delivery_district" value="{{ form.get('delivery_district','') }}" data-delivery-district-input>
     <input type="hidden" name="city_id" value="{{ cities[0].id if cities else '' }}">
 
-    <section class="tv-form-card tv-form-card--identity">
+    <section class="tv-form-card">
       <header class="tv-form-card__head">
         <div class="tv-form-card__number">01</div>
         <div>
-          <h2>{{ sel_type }}</h2>
-          <p>Марка, модель и серийный номер одной строкой.</p>
-        </div>
-      </header>
-
-      <div class="tv-field">
-        <label for="tvIdentity">Марка — Модель — SN</label>
-        <div class="tv-identity-input-wrap">
-          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG-QE55Q70-SN123456" data-tv-identity style="text-transform:uppercase" oninput="msbCapsIdent.fromLine(this)" onblur="msbCapsIdent.fromLine(this)">
-          <span class="tv-identity-input-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 21h8M12 19v2"></path></svg>
-          </span>
-        </div>
-        <p class="tv-field__hint">Пример: <b>Samsung-QE55Q70-SN123456</b>. Если внутри модели/SN есть дефисы: <b>Samsung - QE55-Q70 - SN-12-345</b>. Можно заполнить поля ниже вручную.</p>
-
-        <input type="hidden" name="brand" data-tv-brand-input value="{{ form.get('brand','') }}">
-        <input type="hidden" name="model" data-tv-model-input value="{{ form.get('model','') }}">
-        <input type="hidden" name="serial" data-tv-sn-input value="{{ form.get('serial','') }}">
-
-        <div class="tv-identity-result" aria-live="polite">
-          <div class="tv-identity-part" data-tv-identity-part="brand">
-            <span>Марка</span><strong data-tv-brand>{% if form.get('brand') %}{{ form.get('brand') }}{% else %}Не указана{% endif %}</strong>
-          </div>
-          <div class="tv-identity-separator" aria-hidden="true">→</div>
-          <div class="tv-identity-part" data-tv-identity-part="model">
-            <span>Модель</span><strong data-tv-model>{% if form.get('model') %}{{ form.get('model') }}{% else %}Не указана{% endif %}</strong>
-          </div>
-          <div class="tv-identity-separator" aria-hidden="true">→</div>
-          <div class="tv-identity-part" data-tv-identity-part="sn">
-            <span>SN</span><strong data-tv-sn>{% if form.get('serial') %}{{ form.get('serial') }}{% else %}Не указан{% endif %}</strong>
-          </div>
-        </div>
-
-        <details style="margin-top:12px">
-          <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
-          <div class="tv-customer-grid" style="margin-top:10px">
-            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
-            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="QE55Q70" value="{{ form.get('model','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
-            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SN123456" value="{{ form.get('serial','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
-          </div>
-        </details>
-      </div>
-    </section>
-
-    <section class="tv-form-card">
-      <header class="tv-form-card__head">
-        <div class="tv-form-card__number">02</div>
-        <div>
-          <h2>Комплектация</h2>
-          <p>Что клиент передал вместе с техникой.</p>
-        </div>
-      </header>
-
-      <div class="tv-check-grid" role="group" aria-label="Комплектация">
-        <label class="tv-check"><input type="checkbox" name="equipment" value="remote"><span class="tv-check__box"></span><span>Пульт</span></label>
-        <label class="tv-check"><input type="checkbox" name="equipment" value="power_cable"><span class="tv-check__box"></span><span>Шнур питания</span></label>
-        <label class="tv-check"><input type="checkbox" name="equipment" value="legs"><span class="tv-check__box"></span><span>Ножки / подставка</span></label>
-        <label class="tv-check"><input type="checkbox" name="equipment" value="wall_mount"><span class="tv-check__box"></span><span>Настенное крепление</span></label>
-        <label class="tv-check"><input type="checkbox" name="equipment" value="box_ir_eye"><span class="tv-check__box"></span><span>Глазок / ИК-приёмник</span></label>
-        <label class="tv-check"><input type="checkbox" name="equipment" value="box"><span class="tv-check__box"></span><span>Коробка</span></label>
-        <label class="tv-check tv-check--complete-box"><input type="checkbox" name="equipment" value="all_in_box"><span class="tv-check__box"></span><span>Всё в комплекте в коробке</span></label>
-      </div>
-
-      <div class="tv-field tv-field--spaced">
-        <label for="tvEquipmentOther">Другое в комплекте</label>
-        <input id="tvEquipmentOther" name="equipment_other" type="text" placeholder="Например: HDMI-кабель, приставка, документы…">
-      </div>
-    </section>
-
-    <section class="tv-form-card">
-      <header class="tv-form-card__head tv-form-card__head--photo">
-        <div class="tv-form-card__number">03</div>
-        <div>
-          <h2>Состояние при приёмке</h2>
-          <p>Зафиксируйте внешнее состояние до начала ремонта.</p>
-        </div>
-        <div class="tv-photo-actions">
-          <button class="tv-camera-btn" type="button" data-camera-open>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"></path><circle cx="12" cy="13" r="4"></circle></svg>
-            Сфотографировать
-          </button>
-          <button class="tv-gallery-btn" type="button" data-gallery-open>＋ Из файлов</button>
-        </div>
-      </header>
-
-      <input class="tv-photo-input" type="file" accept="image/*" capture="environment" data-camera-input name="photo_camera" aria-label="Сфотографировать состояние">
-      <input class="tv-photo-input" type="file" accept="image/*" multiple data-gallery-input name="photos" aria-label="Добавить фотографии из файлов">
-
-      <div class="tv-check-grid tv-check-grid--condition" role="group" aria-label="Состояние техники">
-        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="screen_scratches"><span class="tv-check__box"></span><span>Царапины на экране</span></label>
-        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="body_scratches"><span class="tv-check__box"></span><span>Царапины на корпусе</span></label>
-        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="broken_parts"><span class="tv-check__box"></span><span>Есть сломанные места</span></label>
-        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="other_service"><span class="tv-check__box"></span><span>Был в другом сервисе</span></label>
-      </div>
-
-      <div class="tv-field tv-field--spaced">
-        <label for="tvConditionOther">Дополнительное описание состояния</label>
-        <textarea id="tvConditionOther" name="condition_other" rows="3" placeholder="Например: трещина снизу корпуса, отсутствует винт, следы вскрытия…">{{ form.get('condition_other','') }}</textarea>
-      </div>
-
-      <div class="tv-photo-list" data-photo-list hidden>
-        <div class="tv-photo-list__head">
-          <strong>Фото при приёмке</strong>
-          <span data-photo-count>0 фото</span>
-        </div>
-        <div class="tv-photo-grid" data-photo-grid></div>
-      </div>
-    </section>
-
-    <section class="tv-form-card">
-      <header class="tv-form-card__head">
-        <div class="tv-form-card__number">04</div>
-        <div>
-          <h2>Что не работает</h2>
-          <p>Не диагноз мастера — только описание со слов заказчика.</p>
-        </div>
-      </header>
-      <div class="tv-field">
-        <label for="tvCustomerComplaint">Неисправность по словам заказчика</label>
-        <textarea id="tvCustomerComplaint" name="fault_client" rows="5" placeholder="Например: включается, есть звук, но нет изображения. Иногда перезагружается…">{{ form.get('fault_client','') }}</textarea>
-      </div>
-    </section>
-
-    <section class="tv-form-card">
-      <header class="tv-form-card__head">
-        <div class="tv-form-card__number">05</div>
-        <div>
           <h2>Заказчик</h2>
-          <p>Основной владелец или человек, который сдаёт технику.</p>
+          <p>Начните набирать телефон или имя — если клиент уже был у нас, данные подставятся автоматически.</p>
         </div>
       </header>
 
       <div class="tv-customer-grid">
-        <div class="tv-field">
-          <label for="tvCustomerName">Имя заказчика *</label>
-          <input id="tvCustomerName" name="full_name" type="text" autocomplete="name" placeholder="Имя и фамилия" value="{{ form.get('full_name','') }}" required>
-        </div>
-        <div class="tv-field">
+        <div class="tv-field tv-ac-wrap">
           <label for="tvCustomerPhone">Номер телефона *</label>
-          <input id="tvCustomerPhone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+993 6X XX XX XX" value="{{ form.get('phone','') }}" required>
+          <div class="tv-phone-row">
+            <input id="tvCustomerPhone" name="phone" type="tel" inputmode="tel" autocomplete="off" placeholder="+993 6X XX XX XX" value="{{ form.get('phone','') }}" required data-client-phone>
+            <button class="tv-phonebook-btn" type="button" data-phonebook hidden title="Выбрать контакт из телефонной книги телефона">📇 Из телефонной книги</button>
+          </div>
+          <div class="tv-ac" data-ac="phone" hidden></div>
+        </div>
+        <div class="tv-field tv-ac-wrap">
+          <label for="tvCustomerName">Имя заказчика *</label>
+          <input id="tvCustomerName" name="full_name" type="text" autocomplete="off" placeholder="Имя и фамилия" value="{{ form.get('full_name','') }}" required data-client-name>
+          <div class="tv-ac" data-ac="name" hidden></div>
         </div>
       </div>
 
@@ -379,24 +271,145 @@ window.msbCapsIdent = (function () {
         </div>
       </div>
 
-      <div class="tv-contact-divider"><span>Организация и согласия</span></div>
+      <div class="tv-contact-divider"><span>Исполнитель</span></div>
+      {% if can_assign %}
       <div class="tv-customer-grid">
-        <label class="tv-field"><span>Город / филиал</span>
-          <select name="city_id_select" disabled>
-            {% for c in cities %}<option>{{ c.name }}</option>{% endfor %}
-          </select>
-        </label>
         <label class="tv-field"><span>Мастер-исполнитель</span>
           <select name="master_id">
             <option value="">— в очередь (не назначен) —</option>
-            {% for m in masters %}<option value="{{ m.id }}">{{ m.name }}</option>{% endfor %}
+            {% for m in masters %}<option value="{{ m.id }}" {% if form.get('master_id') == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>{% endfor %}
           </select>
         </label>
       </div>
-      <div class="tv-check-grid" style="margin-top:12px">
-        <label class="tv-check"><input type="checkbox" name="consent_pdn" required><span class="tv-check__box"></span><span>Согласие на обработку персональных данных *</span></label>
-        <label class="tv-check"><input type="checkbox" name="consent_storage" required><span class="tv-check__box"></span><span>Ознакомлен с условиями хранения техники *</span></label>
-        <label class="tv-check"><input type="checkbox" name="consent_repair"><span class="tv-check__box"></span><span>Согласие на диагностику и ремонт</span></label>
+      {% else %}
+      <p class="tv-field__hint" style="margin:0 0 4px">Исполнителя на ремонт назначит администратор или оператор — приёмка сохранится новым ремонтом в очереди.</p>
+      {% endif %}
+    </section>
+
+    <section class="tv-form-card tv-form-card--identity">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">02</div>
+        <div>
+          <h2>{{ sel_type }}</h2>
+          <p>Марка, модель и серийный номер одной строкой.</p>
+        </div>
+      </header>
+
+      <div class="tv-field">
+        <label for="tvIdentity">Марка — Модель — SN</label>
+        <div class="tv-identity-input-wrap">
+          <input id="tvIdentity" name="identity_raw" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG-QE55Q70-SN123456" data-tv-identity style="text-transform:uppercase" oninput="msbCapsIdent.fromLine(this)" onblur="msbCapsIdent.fromLine(this)">
+          <span class="tv-identity-input-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M8 21h8M12 19v2"></path></svg>
+          </span>
+        </div>
+        <p class="tv-field__hint">Пример: <b>Samsung-QE55Q70-SN123456</b>. Если внутри модели/SN есть дефисы: <b>Samsung - QE55-Q70 - SN-12-345</b>. Можно заполнить поля ниже вручную.</p>
+
+        <input type="hidden" name="brand" data-tv-brand-input value="{{ form.get('brand','') }}">
+        <input type="hidden" name="model" data-tv-model-input value="{{ form.get('model','') }}">
+        <input type="hidden" name="serial" data-tv-sn-input value="{{ form.get('serial','') }}">
+
+        <div class="tv-identity-result" aria-live="polite">
+          <div class="tv-identity-part" data-tv-identity-part="brand">
+            <span>Марка</span><strong data-tv-brand>{% if form.get('brand') %}{{ form.get('brand') }}{% else %}Не указана{% endif %}</strong>
+          </div>
+          <div class="tv-identity-separator" aria-hidden="true">→</div>
+          <div class="tv-identity-part" data-tv-identity-part="model">
+            <span>Модель</span><strong data-tv-model>{% if form.get('model') %}{{ form.get('model') }}{% else %}Не указана{% endif %}</strong>
+          </div>
+          <div class="tv-identity-separator" aria-hidden="true">→</div>
+          <div class="tv-identity-part" data-tv-identity-part="sn">
+            <span>SN</span><strong data-tv-sn>{% if form.get('serial') %}{{ form.get('serial') }}{% else %}Не указан{% endif %}</strong>
+          </div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary style="cursor:pointer;color:var(--muted);font-size:13px">Ввести марку / модель / SN вручную</summary>
+          <div class="tv-customer-grid" style="margin-top:10px">
+            <label class="tv-field"><span>Марка</span><input type="text" name="brand_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SAMSUNG" value="{{ form.get('brand','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
+            <label class="tv-field"><span>Модель</span><input type="text" name="model_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="QE55Q70" value="{{ form.get('model','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
+            <label class="tv-field"><span>Серийный номер</span><input type="text" name="serial_manual" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="SN123456" value="{{ form.get('serial','') }}" style="text-transform:uppercase" oninput="msbCapsIdent.fromPart(this)" onblur="msbCapsIdent.fromPart(this)"></label>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">03</div>
+        <div>
+          <h2>Комплектация</h2>
+          <p>Что клиент передал вместе с техникой.</p>
+        </div>
+      </header>
+
+      <div class="tv-check-grid" role="group" aria-label="Комплектация">
+        <label class="tv-check"><input type="checkbox" name="equipment" value="remote"><span class="tv-check__box"></span><span>Пульт</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="power_cable"><span class="tv-check__box"></span><span>Шнур питания</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="legs"><span class="tv-check__box"></span><span>Ножки / подставка</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="wall_mount"><span class="tv-check__box"></span><span>Настенное крепление</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="box_ir_eye"><span class="tv-check__box"></span><span>Глазок / ИК-приёмник</span></label>
+        <label class="tv-check"><input type="checkbox" name="equipment" value="box"><span class="tv-check__box"></span><span>Коробка</span></label>
+        <label class="tv-check tv-check--complete-box"><input type="checkbox" name="equipment" value="all_in_box"><span class="tv-check__box"></span><span>Всё в комплекте в коробке</span></label>
+      </div>
+
+      <div class="tv-field tv-field--spaced">
+        <label for="tvEquipmentOther">Другое в комплекте</label>
+        <input id="tvEquipmentOther" name="equipment_other" type="text" placeholder="Например: HDMI-кабель, приставка, документы…">
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head tv-form-card__head--photo">
+        <div class="tv-form-card__number">04</div>
+        <div>
+          <h2>Состояние при приёмке</h2>
+          <p>Зафиксируйте внешнее состояние до начала ремонта.</p>
+        </div>
+        <div class="tv-photo-actions">
+          <button class="tv-camera-btn" type="button" data-camera-open>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+            Сфотографировать
+          </button>
+          <button class="tv-gallery-btn" type="button" data-gallery-open>＋ Из файлов</button>
+        </div>
+      </header>
+
+      <input class="tv-photo-input" type="file" accept="image/*" capture="environment" data-camera-input name="photo_camera" aria-label="Сфотографировать состояние">
+      <input class="tv-photo-input" type="file" accept="image/*" multiple data-gallery-input name="photos" aria-label="Добавить фотографии из файлов">
+
+      <div class="tv-check-grid tv-check-grid--condition" role="group" aria-label="Состояние техники">
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="screen_scratches"><span class="tv-check__box"></span><span>Царапины на экране</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="body_scratches"><span class="tv-check__box"></span><span>Царапины на корпусе</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="broken_parts"><span class="tv-check__box"></span><span>Есть сломанные места</span></label>
+        <label class="tv-check tv-check--warning"><input type="checkbox" name="condition" value="other_service"><span class="tv-check__box"></span><span>Был в другом сервисе</span></label>
+      </div>
+
+      <div class="tv-field tv-field--spaced">
+        <label for="tvConditionOther">Дополнительное описание состояния</label>
+        <textarea id="tvConditionOther" name="condition_other" rows="3" placeholder="Например: трещина снизу корпуса, отсутствует винт, следы вскрытия…">{{ form.get('condition_other','') }}</textarea>
+      </div>
+
+      <div class="tv-photo-list" data-photo-list hidden>
+        <div class="tv-photo-list__head">
+          <strong>Фото при приёмке</strong>
+          <span data-photo-count>0 фото</span>
+        </div>
+        <div class="tv-photo-grid" data-photo-grid></div>
+      </div>
+    </section>
+
+    <section class="tv-form-card">
+      <header class="tv-form-card__head">
+        <div class="tv-form-card__number">05</div>
+        <div>
+          <h2>Что не работает</h2>
+          <p>Не диагноз мастера — только описание со слов заказчика.</p>
+        </div>
+      </header>
+      <div class="tv-field">
+        <label for="tvCustomerComplaint">Неисправность по словам заказчика</label>
+        <textarea id="tvCustomerComplaint" name="fault_client" rows="5" placeholder="Например: включается, есть звук, но нет изображения. Иногда перезагружается…">{{ form.get('fault_client','') }}</textarea>
       </div>
     </section>
 
@@ -413,6 +426,109 @@ window.msbCapsIdent = (function () {
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/priemka/televisions.js?v=caps3"></script>
+<script>
+// --- Автозаполнение заказчика из списка контактов сервиса + телефонная книга ---
+(function () {
+  function ready(fn) {
+    if (document.readyState !== 'loading') fn();
+    else document.addEventListener('DOMContentLoaded', fn);
+  }
+  ready(function () {
+    var phoneEl = document.querySelector('[data-client-phone]');
+    var nameEl = document.querySelector('[data-client-name]');
+    if (!phoneEl || !nameEl) return;
+
+    // ---------- Автозаполнение из списка контактов ----------
+    var boxes = {
+      phone: document.querySelector('[data-ac="phone"]'),
+      name: document.querySelector('[data-ac="name"]')
+    };
+    var acTimer = null, acSeq = 0;
+
+    function hideBox(box) { if (box) { box.hidden = true; box.innerHTML = ''; } }
+    function hideAll() { hideBox(boxes.phone); hideBox(boxes.name); }
+
+    function pick(item) {
+      nameEl.value = item.name || nameEl.value;
+      phoneEl.value = item.phone || phoneEl.value;
+      nameEl.dispatchEvent(new Event('input', { bubbles: true }));
+      hideAll();
+      phoneEl.focus();
+    }
+
+    function render(box, items, q) {
+      box.innerHTML = '';
+      if (!items.length) {
+        box.innerHTML = '<div class="tv-ac__empty">Клиент не найден — сохранится как новый контакт.</div>';
+      } else {
+        items.forEach(function (item) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'tv-ac__item';
+          var b = document.createElement('b'); b.textContent = item.name || '—';
+          var s = document.createElement('span'); s.textContent = item.phone || '';
+          btn.appendChild(b); btn.appendChild(s);
+          btn.addEventListener('mousedown', function (e) { e.preventDefault(); pick(item); });
+          box.appendChild(btn);
+        });
+      }
+      box.hidden = false;
+    }
+
+    function query(box, q) {
+      var my = ++acSeq;
+      fetch('/web/clients-suggest?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (items) {
+          if (my !== acSeq) return;
+          render(box, items || [], q);
+        })
+        .catch(function () { hideBox(box); });
+    }
+
+    function watch(input, box, minLen, transform) {
+      input.addEventListener('input', function () {
+        var q = (transform ? transform(input.value) : input.value.trim());
+        clearTimeout(acTimer);
+        if (q.length < minLen) { hideBox(box); return; }
+        acTimer = setTimeout(function () { query(box, q); }, 250);
+      });
+      input.addEventListener('blur', function () { setTimeout(hideAll, 160); });
+      input.addEventListener('focus', function () {
+        var q = (transform ? transform(input.value) : input.value.trim());
+        if (q.length >= minLen && box.innerHTML) box.hidden = false;
+      });
+    }
+
+    // Телефон: ищем по цифрам (независимо от пробелов/скобок).
+    watch(phoneEl, boxes.phone, 3, function (v) { return v.replace(/\D/g, ''); });
+    // Имя: ищем по подстроке от двух букв.
+    watch(nameEl, boxes.name, 2, null);
+
+    document.addEventListener('click', function (e) {
+      if (!e.target.closest('.tv-ac-wrap')) hideAll();
+    });
+
+    // ---------- Кнопка «Из телефонной книги» (Contact Picker API) ----------
+    var pbBtn = document.querySelector('[data-phonebook]');
+    var supported = 'contacts' in navigator && 'select' in navigator.contacts;
+    if (pbBtn && supported) {
+      pbBtn.hidden = false;
+      pbBtn.addEventListener('click', function () {
+        navigator.contacts.select(['name', 'tel'], { multiple: false })
+          .then(function (contacts) {
+            if (!contacts || !contacts.length) return;
+            var c = contacts[0];
+            if (c.name && c.name.length) nameEl.value = c.name[0];
+            if (c.tel && c.tel.length) phoneEl.value = c.tel[0];
+            phoneEl.dispatchEvent(new Event('input', { bubbles: true }));
+          })
+          .catch(function () { /* пользователь отменил выбор — ничего не делаем */ });
+      });
+    }
+  });
+})();
+</script>
 <script>
 // Ручные поля марки/модели/SN приоритетны над разбором строки identity.
 document.addEventListener('DOMContentLoaded', () => {

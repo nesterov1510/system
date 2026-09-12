@@ -10,9 +10,13 @@
 {% if just == 'accepted' %}
 <div class="flash ok">
   <b>✓ Сохранено — техника принята.</b>
-  {% if printed == '1' %}🏷 Этикетка отправлена на печать.{% else %}⚠ Этикетка не напечатана: проверьте принтер этикеток в настройках.{% endif %}
+  {% if printed == '1' %}🏷 Этикетки отправлены на печать: на технику и клиенту (QR).{% else %}⚠ Этикетки не напечатаны: проверьте принтер этикеток в настройках.{% endif %}
 </div>
 {% endif %}
+
+<div class="rlist-head" style="margin-bottom:10px">
+  <p class="muted" style="margin:0">На доске — только активные ремонты (без завершённых), по приёмке от новых к старым. Завершённые — в таблице на этапе «Завершены».</p>
+</div>
 
 <form class="row" method="get" action="/repairs" style="margin-bottom:14px">
   <input type="hidden" name="view" value="board">
@@ -20,24 +24,23 @@
   <button class="btn sm" type="submit">Найти</button>
 </form>
 
-{# Группируем ремонты по этапам в шаблоне #}
-{% set columns = {'new': [], 'diag': [], 'work': [], 'done': []} %}
+{# Доска: активные ремонты (завершённые сервер уже исключил). Карточки
+   внутри каждой колонки идут по дате приёмки — от новых к старым. #}
+{% set ns = {'new': [], 'diag': [], 'work': []} %}
 {% for r in repairs %}
   {% set st = r.status | stage_label %}
-  {% if st == 'Новые' %}{% set _ = columns['new'].append(r) %}
-  {% elif st == 'Диагностика' %}{% set _ = columns['diag'].append(r) %}
-  {% elif st == 'Завершены' %}{% set _ = columns['done'].append(r) %}
-  {% else %}{% set _ = columns['work'].append(r) %}{% endif %}
+  {% if st == 'Новые' %}{% set _ = ns['new'].append(r) %}
+  {% elif st == 'Диагностика' %}{% set _ = ns['diag'].append(r) %}
+  {% else %}{% set _ = ns['work'].append(r) %}{% endif %}
 {% endfor %}
 
 <div class="kanban">
   {% for key, label in stages %}
   <div class="kcol">
-    <h4>{{ label }} <span class="chip">{{ columns[key] | length }}</span></h4>
-    {% for r in columns[key] %}
+    <h4>{{ label }} <span class="chip">{{ ns[key] | length }}</span></h4>
+    {% for r in ns[key] %}
     <div class="kcard" onclick="location.href='/repairs/{{ r.id }}'">
-      <div class="num mono">{{ r.number }}</div>
-      <div style="margin:4px 0">{{ r.device_type | class_icon }} <b>{{ r.brand or '' }}</b> {{ r.model or '' }}</div>
+      <div>{{ r.device_type | class_icon }} <b>{{ r.brand or '' }}</b> {{ r.model or '' }}</div>
       <div class="muted" style="font-size:12.5px">{{ r.client.full_name }}</div>
       <div class="row" style="margin-top:6px;justify-content:space-between">
         <span class="chip {{ r.status | status_chip }}" style="font-size:11px">{{ r.status }}</span>

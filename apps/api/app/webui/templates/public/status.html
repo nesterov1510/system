@@ -58,8 +58,16 @@
       {% endif %}
 
       {% if d.storage_text %}
-      <div class="pub-legal">⚠ {{ d.storage_text }}</div>
+      <div class="pub-legal"><b>📦 Условия хранения.</b> {{ d.storage_text }}</div>
       {% endif %}
+
+      <div class="pub-legal">
+        <b>⚖ Юридическая информация.</b>
+        MERYOSAB electronics{% if d.branch_name %} · филиал «{{ d.branch_name }}»{% endif %}{% if d.branch_phone %} · тел. {{ d.branch_phone }}{% endif %}.
+        Техника принимается в ремонт и на хранение с согласия клиента. Отметка
+        «Согласие на диагностику и ремонт» зафиксирована при приёмке. По всем
+        вопросам по этому ремонту называйте его номер: <b class="mono">{{ d.number }}</b>.
+      </div>
 
       {% if d.city_stats and d.city_stats.n and d.city_stats.n >= 3 %}
       <p class="pub-stats">Как обычно у нас в городе: {{ d.device_type }} — около {{ d.city_stats.median_days }} дн. (по {{ d.city_stats.n }} завершенным ремонтам).</p>

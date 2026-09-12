@@ -4,11 +4,23 @@
 {% block page_css %}
 <link rel="stylesheet" href="/static/msb/forms.css">
 <link rel="stylesheet" href="/static/msb/repair.css">
+<style>
+  /* Чип-селект мастеров: кликабельные пилюли вместо multiselect */
+  .mchips{display:flex;flex-wrap:wrap;gap:7px}
+  .mchip{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:16px;
+         border:1px solid var(--line,#e5e7eb);background:var(--bg1,#fff);cursor:pointer;
+         font-size:13px;user-select:none;transition:all .15s}
+  .mchip input{display:none}
+  .mchip.on{border-color:#2563eb;background:#2563eb;color:#fff}
+  label.mchip:hover{border-color:#2563eb}
+  .mchips-form{margin-top:6px}
+</style>
 {% endblock %}
 {% block topbar_actions %}
   {% if can.print %}
     <form method="post" action="/repairs/{{ repair.id }}/print" style="margin:0"><button class="btn sm sec" type="submit">🖨 Бланк</button></form>
     <form method="post" action="/repairs/{{ repair.id }}/print-label" style="margin:0"><button class="btn sm sec" type="submit">🏷 Этикетка</button></form>
+    <form method="post" action="/repairs/{{ repair.id }}/print-client-label" style="margin:0"><button class="btn sm sec" type="submit" title="Этикетка для клиента: QR на публичную страницу статуса, условия хранения и юр. информация">🏷 Клиенту (QR)</button></form>
   {% endif %}
   {% if can.finish and repair.status not in ['Выдано','Архив','Отказ'] %}
     <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
@@ -52,7 +64,7 @@
 <div class="flash ok">✓ Техника принята. Номер <b>{{ repair.number }}</b>.</div>
 {% endif %}
 {% if printed %}
-<div class="flash ok">🖨 {{ 'Этикетка' if printed=='label' else 'Бланк' }} в очереди печати.</div>
+<div class="flash ok">🖨 {% if printed == 'label' %}Этикетка{% elif printed == 'client-label' %}Клиентская этикетка (QR){% else %}Бланк{% endif %} в очереди печати.</div>
 {% endif %}
 {% if just == 'notified' %}
   {% if sms == '1' %}<div class="flash ok">✓ SMS клиенту отправлено.</div>
@@ -94,7 +106,6 @@
           <span class="ichip-view is-static">{{ repair.client.phone }}</span>
         </a>
       {% endif %}
-      {{ chip('eta_days', 'Срок, дней', repair.eta_days, can.device or can.admin, 'number') }}
       {{ chip('price_final', 'Цена', repair.price_final, can.finance, 'text') }}
       {{ chip('warranty_text', 'Гарантия', repair.warranty_text, can.finance) }}
       <form class="ifield" method="post" action="/repairs/{{ repair.id }}/field" data-ichip-auto>
@@ -103,11 +114,11 @@
         <span class="ichip-k">Оплата</span>
         {% if can.finance %}
         <select class="ichip-edit" name="value">
-          <option value="0" {% if not repair.paid %}selected{% endif %}>долг</option>
+          <option value="0" {% if not repair.paid %}selected{% endif %}>не оплачено</option>
           <option value="1" {% if repair.paid %}selected{% endif %}>оплачено</option>
         </select>
         {% else %}
-        <span class="ichip-view is-static">{{ 'оплачено' if repair.paid else 'долг' }}</span>
+        <span class="ichip-view is-static">{{ 'оплачено' if repair.paid else 'не оплачено' }}</span>
         {% endif %}
       </form>
     </div>
@@ -129,16 +140,28 @@
       </div>
       <h3 style="margin-top:18px">Мастера</h3>
       {% set mnames = [] %}{% for m in repair.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
-      <p class="rcard-note">{{ mnames | join(', ') if mnames else (repair.master.name if repair.master else 'Не назначен') }}</p>
       {% if can.assign %}
-      <form method="post" action="/repairs/{{ repair.id }}/assign" class="row rcard-add">
-        <select name="master_ids" multiple size="3" style="max-width:100%;min-width:180px">
+      <form method="post" action="/repairs/{{ repair.id }}/assign" class="mchips-form">
+        <div class="mchips">
           {% for m in masters %}
-          <option value="{{ m.id }}" {% if m.id in master_ids %}selected{% endif %}>{{ m.name }}</option>
+          <label class="mchip {% if m.id in master_ids %}on{% endif %}">
+            <input type="checkbox" name="master_ids" value="{{ m.id }}" {% if m.id in master_ids %}checked{% endif %}>
+            <span>{{ m.name }}</span>
+          </label>
           {% endfor %}
-        </select>
-        <button class="btn sm" type="submit">Назначить</button>
+        </div>
+        <div style="margin-top:8px"><button class="btn sm" type="submit">Назначить</button></div>
       </form>
+      {% else %}
+      <div class="mchips">
+        {% if mnames %}
+          {% for n in mnames %}<span class="mchip on"><span>{{ n }}</span></span>{% endfor %}
+        {% elif repair.master %}
+          <span class="mchip on"><span>{{ repair.master.name }}</span></span>
+        {% else %}
+          <span class="mchip"><span>Не назначен</span></span>
+        {% endif %}
+      </div>
       {% endif %}
     </section>
 
@@ -160,11 +183,7 @@
       {% else %}<p class="muted">Нет запчастей</p>{% endfor %}
       {% if can.addpart %}
       <form method="post" action="/repairs/{{ repair.id }}/parts/add" class="row rcard-add">
-        <select name="part_id" style="max-width:200px">
-          <option value="">со склада</option>
-          {% for part in catalog %}<option value="{{ part.id }}">{{ part.name }}</option>{% endfor %}
-        </select>
-        <input type="text" name="name" placeholder="или вручную" style="max-width:140px">
+        <input type="text" name="name" placeholder="Запчасть (вручную)" style="max-width:180px" required>
         <input type="number" name="qty" value="1" min="1" style="max-width:64px">
         {% if can.setpartprice %}<input type="text" name="price" placeholder="цена" style="max-width:90px">{% endif %}
         <button class="btn sm green" type="submit">+</button>

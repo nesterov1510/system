@@ -251,10 +251,11 @@ def test_repairs_table_compact_columns_and_hints(client):
     assert "msbRpop(this)" in html
     assert "Открыть карточку" in html
     assert "/static/msb/repair-list.js" in html
-    # Данные созданного ремонта и бейдж оплаты «долг» (не оплачен).
+    # Данные созданного ремонта и бейдж оплаты «не оплачено».
     assert "LG" in html
     assert "Колонка Клиент" in html
-    assert "долг" in html
+    assert "не оплачено" in html
+    assert "долг" not in html
     assert "/notify-client" in html
     assert "/print-label" in html
     assert "/finish" in html
@@ -458,17 +459,39 @@ def test_notifications_page_renders_and_mark_read(client):
     assert rr.headers["location"] == "/notifications"
 
 
-def test_parts_page_has_equipment_section(client):
-    """Склад показывает блок купленной техники (доноров)."""
+def test_parts_page_is_donor_stock_for_admin(client):
+    """«Склад» — страница разбора: техника-донор с запчастями внутри, каталога нет."""
     cookies = _login(client)
-    r = client.post("/equipment/create", cookies=cookies, data={
-        "name": "LG 32 — донор", "brand": "LG", "purchase_price": "120",
-        "storage_place": "Полка 1",
+    r = client.post("/parts/donors/create", cookies=cookies, data={
+        "brand": "LG", "model": "32LH570", "comment": "куплена с разборки",
     }, follow_redirects=False)
     assert r.status_code == 303
     page = client.get("/parts", cookies=cookies)
     assert page.status_code == 200
-    assert "LG 32" in page.text
+    assert "Склад разбора" in page.text
+    assert "LG" in page.text and "32LH570" in page.text
+    assert "куплена с разборки" in page.text
+    # Старого каталожного склада на странице нет.
+    assert "Низкий остаток" not in page.text
+    assert "/equipment/create" not in page.text
+    assert "/parts/create" not in page.text
+
+    # Вписываем запчасть внутрь техники — позиция видна на странице.
+    # Id — ближайший якорь карточки выше модели в HTML.
+    import re
+    pos = page.text.find("32LH570")
+    assert pos > 0, "модель 32LH570 не найдена на странице склада"
+    ids = re.findall(r'id="donor-([0-9a-f-]+)"', page.text[:pos])
+    donor_id = ids[-1]
+    r = client.post(f"/parts/donors/{donor_id}/parts/add", cookies=cookies, data={
+        "name": "Матрица BOE", "panel_number": "HV320WHB", "price_sale": "150",
+        "comment": "рабочая",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    page = client.get("/parts", cookies=cookies)
+    assert "Матрица BOE" in page.text
+    assert "HV320WHB" in page.text
+    assert "150.00" in page.text
 
 
 def test_prices_page_and_create(client):

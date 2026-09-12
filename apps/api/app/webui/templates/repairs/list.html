@@ -1,7 +1,42 @@
 {% extends "base.html" %}
 {% block title %}Все ремонты{% endblock %}
 {% block page_name %}Все ремонты{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/msb/repair.css">{% endblock %}
+{% block page_css %}
+<link rel="stylesheet" href="/static/msb/repair.css">
+<style>
+/* Выбор размера страницы + пагинация */
+.rlist-pp{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted,#75808d);white-space:nowrap}
+.rlist-pp select{max-width:90px}
+.rlist-edit-hint{margin:2px 2px 10px;font-size:12px;color:var(--muted,#75808d)}
+.rlist-pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;margin:14px 0 6px}
+.rlist-pager__num,.rlist-pager__btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 10px;border:1px solid var(--line,#dbe2e9);border-radius:9px;background:#fff;font-size:13px;font-weight:700;text-decoration:none;color:inherit}
+.rlist-pager__num:hover,.rlist-pager__btn:hover{background:#fff3e8;border-color:#ffd9b0}
+.rlist-pager__num.is-current{background:var(--accent,#ff6a00);border-color:var(--accent,#ff6a00);color:#fff}
+.rlist-pager__btn.is-disabled{opacity:.4;pointer-events:none}
+.rlist-pager__dots{padding:0 2px;color:var(--muted,#75808d)}
+/* Инлайн-редактирование ячеек (двойной клик) */
+.rieditable{cursor:text;border-radius:6px;transition:background .12s ease}
+.rieditable:hover{background:rgba(255,122,0,.09);outline:1.5px dashed #ffd9b0;outline-offset:2px}
+td.rieditable.is-editing, .rieditable.is-editing{outline:none;background:#fff6ec}
+.riedit{width:100%;box-sizing:border-box;border:1.5px solid var(--accent,#ff6a00);border-radius:8px;padding:6px 8px;font:inherit;background:#fff}
+.riedit:focus{outline:none;box-shadow:0 0 0 3px rgba(255,122,0,.18)}
+textarea.riedit{min-height:64px;resize:vertical}
+.riedit-pair{display:flex;flex-direction:column;gap:6px}
+.riedit-wait{color:var(--muted,#75808d);font-size:13px;text-align:center}
+/* Всплывающее окно редактирования: таблица под ним не меняет вёрстку. */
+.redit-scrim{position:fixed;inset:0;z-index:420;background:rgba(35,42,52,.14)}
+.redit-pop{position:fixed;background:#fff;border:1px solid #ead9c6;border-radius:14px;box-shadow:0 14px 40px rgba(60,40,10,.20);padding:12px}
+.redit-pop__title{font-size:11.5px;font-weight:800;color:var(--muted,#75808d);text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px;text-align:left}
+.redit-pop__body{display:flex;flex-direction:column;gap:6px}
+.redit-pop__feet{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
+.redit-btn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line,#dbe2e9);background:#fff;cursor:pointer;font-weight:900;font-size:14px;line-height:1}
+.redit-btn.is-ok{background:var(--accent,#ff6a00);border-color:var(--accent,#ff6a00);color:#fff}
+/* Аккуратное центрирование текста во всех колонках. */
+#rlist-table th,#rlist-table td{text-align:center}
+#rlist-table td .rlist-dev{justify-content:center;align-items:center}
+#rlist-table td>b,#rlist-table td>div:not(.rpop){text-align:center}
+</style>
+{% endblock %}
 {% block topbar_actions %}
   <a class="btn sm sec" href="/repairs?view=board">Доска</a>
   <a class="btn sm" href="/repairs/new">➕ Приёмка</a>
@@ -11,7 +46,7 @@
 {% if just == 'accepted' %}
 <div class="flash ok">
   <b>✓ Сохранено — техника принята.</b>
-  {% if printed == '1' %}🏷 Этикетка отправлена на печать.{% else %}⚠ Этикетка не напечатана: проверьте принтер этикеток в настройках.{% endif %}
+  {% if printed == '1' %}🏷 Этикетки отправлены на печать: на технику и клиенту (QR).{% else %}⚠ Этикетки не напечатаны: проверьте принтер этикеток в настройках.{% endif %}
 </div>
 {% endif %}
 {% if just == 'notified' %}
@@ -33,9 +68,9 @@
 
 <div class="rlist-toolbar">
   <div class="tabs">
-    <a href="/repairs?stage=all" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
+    <a href="/repairs?stage=all&per_page={{ per_page }}" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
     {% for key, label in stages %}
-      <a href="/repairs?stage={{ key }}" class="{% if stage==key %}active{% endif %}">
+      <a href="/repairs?stage={{ key }}&per_page={{ per_page }}" class="{% if stage==key %}active{% endif %}">
         {{ label }} <span class="chip">{{ counts[key] }}</span>
       </a>
     {% endfor %}
@@ -52,8 +87,19 @@
       {% endfor %}
     </select>
     <button class="btn sm" type="submit">Найти</button>
+    <label class="rlist-pp" title="Сколько ремонтов показывать на одной странице">
+      <span>На странице:</span>
+      <select name="per_page" onchange="this.form.submit()">
+        {% for n in per_page_options %}
+          <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </label>
   </form>
 </div>
+{% if can_inline %}
+<p class="rlist-edit-hint">✎ Двойной клик по ячейке — редактирование во всплывающем окне, таблица не сдвигается. Карточка ремонта открывается через меню ⚡.</p>
+{% endif %}
 
 {% if can_delete %}
 <form id="bulk-repairs" class="bulk-bar" method="post" action="/repairs/bulk-delete"
@@ -65,16 +111,16 @@
 
 <div class="rlist-card">
   <div class="table-wrap">
-    <table>
+    <table id="rlist-table">
       <thead>
         <tr>
           {% if can_delete %}<th class="bulk-col"><span class="sr-only">Отметить</span></th>{% endif %}
           <th style="text-transform:none;letter-spacing:0">📅 Дата
             <button type="button" class="colhint" data-colhint data-title="Дата"
-              data-hint="Дата приёма техники в сервис. Если сверху выбран срез «по закрытию» — дата, когда ремонт перевели в «Готово к выдаче».">?</button></th>
+              data-hint="Дата и время, когда технику приняли в сервис.">?</button></th>
           <th style="text-transform:none;letter-spacing:0">📺 Техника
             <button type="button" class="colhint" data-colhint data-title="Название техники"
-              data-hint="Класс техники, марка и модель. Клик открывает карточку ремонта."
+              data-hint="Класс техники, марка и модель. Карточка открывается через меню ⚡ в последней колонке."
               data-details="🚚 — заказ с доставкой (курьер или забрали с адреса)">?</button></th>
           <th style="text-transform:none;letter-spacing:0">🧾 Принял
             <button type="button" class="colhint" data-colhint data-title="Кто принял технику"
@@ -90,34 +136,33 @@
               data-hint="Сумма списанных под ремонт запчастей и сами позиции (название ×кол-во).">?</button></th>
           <th style="text-transform:none;letter-spacing:0">👤 Клиент
             <button type="button" class="colhint" data-colhint data-title="Имя и номер клиента"
-              data-hint="Кто владелец ремонта. Номер кликабельный — на телефоне сразу набирается.">?</button></th>
+              data-hint="Кто владелец ремонта. Позвонить можно из меню ⚡.">?</button></th>
           <th style="text-transform:none;letter-spacing:0">👷 Мастера
             <button type="button" class="colhint" data-colhint data-title="Мастер(а) и помощники"
-              data-hint="Кто ведёт ремонт: сначала основные мастера, ниже строчкой помощники (kömekçi)."
+              data-hint="Кто ведёт ремонт: сначала основные мастера, ниже строчкой помощники (kömekçi). Назначают администратор и оператор."
               data-details="«Не назначен» — у ремонта ещё нет исполнителя">?</button></th>
           <th class="num" style="text-transform:none;letter-spacing:0">💰 Выплата
             <button type="button" class="colhint" data-colhint data-title="Сколько оплачено мастерам"
               data-hint="Сумма, выплаченная мастерам за этот ремонт. Заполняется при оформлении починки (админ/менеджер/оператор).">?</button></th>
           <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
             <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
-              data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «долг».">?</button></th>
+              data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «не оплачено».">?</button></th>
           <th style="text-transform:none;letter-spacing:0">⚡ Действия
             <button type="button" class="colhint" data-colhint data-title="Действия по ремонту"
-              data-hint="Карточка, бланк, этикетка, «закончен», SMS клиенту и звонок. SMS уходит только по ✉.">?</button></th>
+              data-hint="Карточка открывается здесь: «Открыть карточку». Плюс бланк, этикетки, «закончен», SMS клиенту и звонок. SMS уходит только по ✉.">?</button></th>
         </tr>
       </thead>
       <tbody>
       {% for r in repairs %}
-        <tr class="clickable" onclick="location.href='/repairs/{{ r.id }}'">
+        <tr>
           {% if can_delete %}
-          <td class="bulk-col" onclick="event.stopPropagation()">
-            <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить {{ r.number }}">
+          <td class="bulk-col">
+            <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить ремонт клиента {{ r.client.full_name }}">
           </td>
           {% endif %}
-          <td>
+          <td title="Принято {{ r.accepted_at | dt }}">
             <div class="rlist-date">
-              <b>{{ r.accepted_at | date }}</b>
-              <span class="code">{{ r.number }}</span>
+              <b>{{ r.accepted_at | dt }}</b>
             </div>
           </td>
           <td class="wrap">
@@ -125,18 +170,39 @@
               <span class="rlist-dev__ico">{{ r.device_type | class_icon }}</span>
               <span>
                 <span class="rlist-dev__meta">{{ r.device_type | device_class }}{% if r.is_delivery %} · 🚚{% endif %}</span>
+                {% if can_inline and can_device %}
+                <span class="rlist-dev__name rieditable" data-edit="device" data-edit-kind="device" data-repair-id="{{ r.id }}"
+                      data-edit-value="{{ r.brand or '' }}" data-edit-value2="{{ r.model or '' }}"
+                      title="Двойной клик — изменить марку и модель">{{ r.brand or '' }} {{ r.model or '' }}{% if not (r.brand or r.model) %}Без модели{% endif %}</span>
+                {% else %}
                 <span class="rlist-dev__name">{{ r.brand or '' }} {{ r.model or '' }}{% if not (r.brand or r.model) %}Без модели{% endif %}</span>
+                {% endif %}
                 <span class="chip {{ r.status | status_chip }}">{{ r.status }}</span>
               </span>
             </div>
           </td>
           <td>{{ r.accepted_by_user.name if r.accepted_by_user else '—' }}</td>
+          {% if can_inline %}
+          <td class="wrap muted rieditable" style="max-width:200px" data-edit="fault_client" data-repair-id="{{ r.id }}"
+              data-edit-value="{{ r.fault_client or r.fault_master or '' }}"
+              title="Двойной клик — изменить неисправность">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
+          {% else %}
           <td class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
+          {% endif %}
+          {% if can_inline and can_finance %}
+          <td class="num rieditable" data-edit="price_final" data-edit-kind="money" data-repair-id="{{ r.id }}"
+              data-edit-value="{{ r.price_final if r.price_final is not none else '' }}"
+              title="Двойной клик — изменить итоговую цену">
+            {% set sum = r.price_final if r.price_final is not none else r.price_max %}
+            {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          {% else %}
           <td class="num">
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
           </td>
-          <td class="num rpop-cell" onclick="event.stopPropagation()">
+          {% endif %}
+          <td class="num rpop-cell">
             {% set pc = parts_cost.get(r.id) %}
             {% set lines = parts_lines.get(r.id) if parts_lines is defined else none %}
             {% if pc %}
@@ -165,14 +231,29 @@
             {% else %}<span class="muted">—</span>{% endif %}
           </td>
           <td class="wrap">
+            {% if can_inline and can_client %}
+            <b class="rieditable" data-edit="client_name" data-repair-id="{{ r.id }}"
+               data-edit-value="{{ r.client.full_name or '' }}"
+               title="Двойной клик — изменить имя клиента">{{ r.client.full_name }}</b>
+            <div class="muted rieditable" style="font-size:12px" data-edit="client_phone" data-repair-id="{{ r.id }}"
+                 data-edit-value="{{ r.client.phone or '' }}"
+                 title="Двойной клик — изменить телефон клиента">{{ r.client.phone or '—' }}</div>
+            {% else %}
             <b>{{ r.client.full_name }}</b>
             {% if r.client.phone %}<div><a href="tel:{{ r.client.phone }}" class="muted" style="font-size:12px">{{ r.client.phone }}</a></div>{% endif %}
+            {% endif %}
           </td>
+          {% set mnames = [] %}
+          {% for m in r.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
+          {% set hnames = [] %}
+          {% for m in r.masters %}{% if (m.kind or 'master') == 'helper' %}{% set _ = hnames.append(m.user.name) %}{% endif %}{% endfor %}
+          {% if can_inline and can_assign %}
+          <td class="wrap rieditable" data-edit="masters" data-edit-kind="master" data-repair-id="{{ r.id }}"
+              data-edit-value="{{ r.master_id or '' }}"
+              title="Двойной клик — назначить мастера (только основной; помощники — в карточке)">
+          {% else %}
           <td class="wrap">
-            {% set mnames = [] %}
-            {% for m in r.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
-            {% set hnames = [] %}
-            {% for m in r.masters %}{% if (m.kind or 'master') == 'helper' %}{% set _ = hnames.append(m.user.name) %}{% endif %}{% endfor %}
+          {% endif %}
             {% if mnames %}
               <div>{{ mnames | join(', ') }}</div>
               {% if hnames %}<div class="muted" style="font-size:11px">пом. {{ hnames | join(', ') }}</div>{% endif %}
@@ -180,19 +261,38 @@
               {{ r.master.name }}
             {% else %}<span class="chip gray">Не назначен</span>{% endif %}
           </td>
+          {% if can_inline and can_finance %}
+          <td class="num rieditable" data-edit="master_payout" data-edit-kind="money" data-repair-id="{{ r.id }}"
+              data-edit-value="{{ r.master_payout if r.master_payout is not none else '' }}"
+              title="Двойной клик — изменить выплату мастерам">
+            {% if r.master_payout is not none %}<span style="color:#b06b00;font-weight:700">{{ r.master_payout | money(currency.symbol) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          {% else %}
           <td class="num">
             {% if r.master_payout is not none %}<span style="color:#b06b00;font-weight:700">{{ r.master_payout | money(currency.symbol) }}</span>{% else %}<span class="muted">—</span>{% endif %}
           </td>
+          {% endif %}
           <td class="num">
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
             <div style="margin-top:3px">
-              {% if r.paid %}<span class="chip green" title="Отмечено как оплаченное">✓ оплачено</span>
+              {% if r.paid %}
+                {% if can_inline and can_finance %}
+                <span class="chip green rieditable" data-edit="paid" data-edit-kind="toggle" data-repair-id="{{ r.id }}" data-edit-value="1" title="Отмечено как оплаченное. Двойной клик — снять отметку">✓ оплачено</span>
+                {% else %}
+                <span class="chip green" title="Отмечено как оплаченное">✓ оплачено</span>
+                {% endif %}
               {% elif pays.get(r.id) %}<span class="chip amber" title="Оплачено частично">частично</span>
-              {% else %}<span class="chip gray" title="Ещё не оплачено">долг</span>{% endif %}
+              {% else %}
+                {% if can_inline and can_finance %}
+                <span class="chip gray rieditable" data-edit="paid" data-edit-kind="toggle" data-repair-id="{{ r.id }}" data-edit-value="0" title="Ещё не оплачено. Двойной клик — отметить оплаченным">не оплачено</span>
+                {% else %}
+                <span class="chip gray" title="Ещё не оплачено">не оплачено</span>
+                {% endif %}
+              {% endif %}
             </div>
           </td>
-          <td class="row-actions rpop-cell" onclick="event.stopPropagation()">
+          <td class="row-actions rpop-cell">
             <button type="button" class="rpop-trigger" data-pop
                     onclick="event.preventDefault();event.stopPropagation();return msbRpop(this)"
                     aria-expanded="false" aria-haspopup="menu" title="Действия">⚡</button>
@@ -206,7 +306,11 @@
               </form>
               <form method="post" action="/repairs/{{ r.id }}/print-label">
                 <input type="hidden" name="next" value="/repairs">
-                <button class="rpop-act" type="submit">🏷 Печать этикетки</button>
+                <button class="rpop-act" type="submit">🏷 Этикетка на технику</button>
+              </form>
+              <form method="post" action="/repairs/{{ r.id }}/print-client-label">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act" type="submit" title="Этикетка для клиента: QR на публичную страницу статуса, условия хранения и юр. информация">🏷 Этикетка клиенту (QR)</button>
               </form>
               {% endif %}
               {% if can_finish and r.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
@@ -228,7 +332,7 @@
               {% endif %}
               {% if can_delete %}
               <form method="post" action="/repairs/{{ r.id }}/delete"
-                    onsubmit="return confirm('Удалить ремонт {{ r.number }}?')">
+                    onsubmit="return confirm('Удалить ремонт: {{ r.client.full_name }} · {{ r.brand or '' }} {{ r.model or '' }}?')">
                 <button class="rpop-act is-danger" type="submit">🗑 Удалить</button>
               </form>
               {% endif %}
@@ -242,11 +346,250 @@
     </table>
   </div>
 </div>
-<p class="rlist-foot">Всего: {{ total }}. Показаны последние 50.</p>
+
+{% set qs = 'stage=' ~ stage ~ '&q=' ~ (q | urlencode) ~ '&status=' ~ ((status or '') | urlencode) ~ '&per_page=' ~ per_page ~ ('&filter=' ~ (dash_filter | urlencode) if dash_filter else '') %}
+{% if pages > 1 %}
+<nav class="rlist-pager" aria-label="Страницы">
+  {% if page > 1 %}
+    <a class="rlist-pager__btn" href="/repairs?page={{ page - 1 }}&{{ qs }}">← Назад</a>
+  {% else %}
+    <span class="rlist-pager__btn is-disabled">← Назад</span>
+  {% endif %}
+
+  {% set win_start = [1, page - 3] | max %}
+  {% set win_end = [pages, page + 3] | min %}
+  {% if win_start > 1 %}
+    <a class="rlist-pager__num" href="/repairs?page=1&{{ qs }}">1</a>
+    {% if win_start > 2 %}<span class="rlist-pager__dots">…</span>{% endif %}
+  {% endif %}
+  {% for p in range(win_start, win_end + 1) %}
+    {% if p == page %}
+      <span class="rlist-pager__num is-current">{{ p }}</span>
+    {% else %}
+      <a class="rlist-pager__num" href="/repairs?page={{ p }}&{{ qs }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+  {% if win_end < pages %}
+    {% if win_end < pages - 1 %}<span class="rlist-pager__dots">…</span>{% endif %}
+    <a class="rlist-pager__num" href="/repairs?page={{ pages }}&{{ qs }}">{{ pages }}</a>
+  {% endif %}
+
+  {% if page < pages %}
+    <a class="rlist-pager__btn" href="/repairs?page={{ page + 1 }}&{{ qs }}">Вперёд →</a>
+  {% else %}
+    <span class="rlist-pager__btn is-disabled">Вперёд →</span>
+  {% endif %}
+</nav>
+{% endif %}
+
+<p class="rlist-foot">Всего: {{ total }} · на странице {{ repairs | length }} · страница {{ page }} из {{ pages }} (по {{ per_page }})</p>
 </div>
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/repair-list.js?v=4"></script>
+{% if can_inline %}
+<script>
+// --- Инлайн-редактирование ячеек таблицы по двойному клику. ---
+// Сохранение идёт через тот же серверный маршрут, что и правки чипов
+// карточки (/repairs/{id}/field); права проверяются на сервере.
+window.MSB_MASTERS = {{ masters_json | tojson }};
+(function () {
+  var table = document.getElementById('rlist-table');
+  if (!table) return;
+
+  function afterPost(r) {
+    if (r.ok || r.redirected) { location.reload(); return null; }
+    return r.text().then(function (t) {
+      throw new Error((t || '').trim() || ('Ошибка ' + r.status));
+    });
+  }
+  function saveField(rid, field, value) {
+    var fd = new FormData();
+    fd.append('field', field);
+    fd.append('value', value);
+    fd.append('next', window.location.pathname + window.location.search);
+    return fetch('/repairs/' + rid + '/field', {
+      method: 'POST', body: fd, credentials: 'same-origin'
+    }).then(afterPost);
+  }
+  function saveAssign(rid, masterId) {
+    var fd = new FormData();
+    if (masterId) fd.append('master_ids', masterId);
+    return fetch('/repairs/' + rid + '/assign', {
+      method: 'POST', body: fd, credentials: 'same-origin'
+    }).then(afterPost);
+  }
+  function fail(err) {
+    alert('Не сохранилось: ' + err.message);
+    location.reload();
+  }
+
+  function editCell(cell) {
+    if (cell.dataset.editing) return;
+    var rid = cell.getAttribute('data-repair-id');
+    var field = cell.dataset.edit;
+    var kind = cell.dataset.editKind || 'text';
+    var cur1 = cell.getAttribute('data-edit-value') || '';
+    var cur2 = cell.getAttribute('data-edit-value2') || '';
+
+    // «Оплачено» — переключатель без окна: двойной клик меняет значение.
+    if (kind === 'toggle') {
+      saveField(rid, field, cur1 === '1' ? '0' : '1').catch(fail);
+      return;
+    }
+
+    cell.dataset.editing = '1';
+    cell.classList.add('is-editing');
+
+    // Плавающее окно редактора: ячейку не перестраиваем — другие
+    // колонки не разъезжаются ни на пиксель.
+    var scrim = document.createElement('div');
+    scrim.className = 'redit-scrim';
+    var pop = document.createElement('div');
+    pop.className = 'redit-pop';
+
+    var title = document.createElement('div');
+    title.className = 'redit-pop__title';
+    var tdEl = cell.closest('td');
+    var thText = '';
+    if (tdEl) {
+      var th = table.querySelectorAll('thead th')[tdEl.cellIndex];
+      if (th) thText = (th.textContent || '').replace(/\?/g, '').trim();
+    }
+    title.textContent = thText || 'Редактирование';
+    pop.appendChild(title);
+
+    var inputs = [];
+    var body = document.createElement('div');
+    body.className = 'redit-pop__body';
+    if (kind === 'device') {
+      var b = document.createElement('input');
+      b.className = 'riedit'; b.placeholder = 'Марка'; b.value = cur1;
+      var m = document.createElement('input');
+      m.className = 'riedit'; m.placeholder = 'Модель'; m.value = cur2;
+      body.appendChild(b); body.appendChild(m);
+      inputs = [b, m];
+    } else if (kind === 'master') {
+      var sel = document.createElement('select');
+      sel.className = 'riedit';
+      var o0 = document.createElement('option');
+      o0.value = ''; o0.textContent = '— не назначен —';
+      sel.appendChild(o0);
+      (window.MSB_MASTERS || []).forEach(function (mm) {
+        var o = document.createElement('option');
+        o.value = mm.id; o.textContent = mm.name;
+        if (mm.id === cur1) o.selected = true;
+        sel.appendChild(o);
+      });
+      body.appendChild(sel);
+      inputs = [sel];
+    } else if (field === 'fault_client') {
+      var ta = document.createElement('textarea');
+      ta.className = 'riedit'; ta.value = cur1; ta.rows = 3;
+      body.appendChild(ta);
+      inputs = [ta];
+    } else {
+      var inp = document.createElement('input');
+      inp.className = 'riedit'; inp.value = cur1;
+      if (kind === 'money') inp.inputMode = 'decimal';
+      body.appendChild(inp);
+      inputs = [inp];
+    }
+    pop.appendChild(body);
+
+    var feet = document.createElement('div');
+    feet.className = 'redit-pop__feet';
+    var no = document.createElement('button');
+    no.type = 'button'; no.className = 'redit-btn is-no';
+    no.textContent = '✕'; no.title = 'Отмена (Esc)';
+    var ok = document.createElement('button');
+    ok.type = 'button'; ok.className = 'redit-btn is-ok';
+    ok.textContent = '✓'; ok.title = 'Сохранить (Enter)';
+    feet.appendChild(no); feet.appendChild(ok);
+    pop.appendChild(feet);
+    scrim.appendChild(pop);
+    document.body.appendChild(scrim);
+
+    // Позиция под ячейкой, с клампом, чтобы окно не вылезало за экран.
+    var rect = cell.getBoundingClientRect();
+    var w = Math.max(240, Math.min(320, window.innerWidth - 16));
+    pop.style.width = w + 'px';
+    pop.style.left = Math.max(8, Math.min(rect.left + rect.width / 2 - w / 2,
+      window.innerWidth - w - 8)) + 'px';
+    var popH = pop.offsetHeight || 170;
+    var top = rect.bottom + 8;
+    if (top + popH > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - popH - 8);
+    }
+    pop.style.top = top + 'px';
+
+    inputs[0].focus();
+    if (inputs[0].select) inputs[0].select();
+
+    var done = false;
+    function closeEditor() {
+      document.removeEventListener('keydown', escDoc, true);
+      if (scrim.parentNode) scrim.parentNode.removeChild(scrim);
+      cell.classList.remove('is-editing');
+      delete cell.dataset.editing;
+    }
+    function escDoc(e) {
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    }
+    function finish(save) {
+      if (done) return;
+      done = true;
+      if (!save) { closeEditor(); return; }
+      var v1 = inputs[0].value.trim();
+      if (kind === 'device') {
+        var v2 = inputs[1].value.trim();
+        if (v1 === cur1 && v2 === cur2) { closeEditor(); return; }
+        body.innerHTML = '<div class="riedit-wait">Сохранение…</div>';
+        var p = Promise.resolve();
+        if (v1 !== cur1) p = p.then(function () { return saveField(rid, 'brand', v1); });
+        if (v2 !== cur2) p = p.then(function () { return saveField(rid, 'model', v2); });
+        p.catch(fail);
+        return;
+      }
+      if (v1 === cur1) { closeEditor(); return; }
+      body.innerHTML = '<div class="riedit-wait">Сохранение…</div>';
+      if (kind === 'master') saveAssign(rid, v1).catch(fail);
+      else saveField(rid, field, v1).catch(fail);
+    }
+
+    ok.addEventListener('click', function (e) { e.stopPropagation(); finish(true); });
+    no.addEventListener('click', function (e) { e.stopPropagation(); finish(false); });
+    scrim.addEventListener('mousedown', function (e) {
+      if (e.target === scrim) finish(false);
+    });
+    pop.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+    pop.addEventListener('dblclick', function (e) { e.stopPropagation(); });
+    document.addEventListener('keydown', escDoc, true);
+
+    inputs.forEach(function (inp, idx) {
+      inp.addEventListener('click', function (e) { e.stopPropagation(); });
+      inp.addEventListener('dblclick', function (e) { e.stopPropagation(); });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        if (e.key === 'Enter' && inp.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          if (kind === 'device' && idx === 0) { inputs[1].focus(); return; }
+          finish(true);
+        }
+      });
+      if (kind === 'master') inp.addEventListener('change', function () { finish(true); });
+    });
+  }
+
+  table.addEventListener('dblclick', function (e) {
+    var cell = e.target.closest('[data-edit]');
+    if (!cell || !table.contains(cell)) return;
+    e.preventDefault();
+    editCell(cell);
+  });
+})();
+</script>
+{% endif %}
 <script>
 window.msbRpopClose = function () {
   document.querySelectorAll(".rpop.is-open").forEach(function (el) {
