@@ -68,6 +68,8 @@ class RepairCreate(BaseModel):
     is_delivery: bool = False
     # Район доставки (вместе с is_delivery).
     delivery_district: str | None = None
+    # Необязательный комментарий к доставке (окно «Доставка» в приёмке).
+    delivery_comment: str | None = None
 
 
 class RepairUpdate(BaseModel):
@@ -77,6 +79,7 @@ class RepairUpdate(BaseModel):
     condition_notes: str | None = None
     contact2_relation: str | None = None
     delivery_district: str | None = None
+    delivery_comment: str | None = None
     complectation: dict | None = None
     master_id: uuid.UUID | None = None
     # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
@@ -184,6 +187,7 @@ class RepairOut(BaseModel):
     contact2_relation: str | None = None
     is_delivery: bool = False
     delivery_district: str | None = None
+    delivery_comment: str | None = None
 
     # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
     reminder_next_at: datetime | None = None

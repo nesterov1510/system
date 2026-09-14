@@ -75,12 +75,16 @@ def test_intake_form_has_master_select_for_admin(client):
     assert "data-phonebook" in page.text
 
 
-def test_intake_form_hides_master_select_for_master(client):
+def test_intake_form_lets_master_pick_himself(client):
+    """Мастер на приёмке выбирает себя или оставляет очередь — других мастеров нет."""
     cookies = _login(client, "master@msb.local", "master123")
     page = client.get("/repairs/new?type=Телевизоры", cookies=cookies)
     assert page.status_code == 200, page.text
-    assert 'name="master_id"' not in page.text
-    assert "назначит администратор или оператор" in page.text
+    assert 'name="master_id"' in page.text
+    assert "в очередь (не назначен)" in page.text
+    assert "Тестовый мастер (я)" in page.text
+    # Чужих мастеров в списке исполнителя у мастера быть не должно.
+    assert "оператор" not in page.text.split('name="master_id"')[1].split("</select>")[0]
 
 
 def test_intake_by_master_ignores_master_id_in_form(client, admin_headers):
@@ -107,17 +111,50 @@ def test_intake_by_master_ignores_master_id_in_form(client, admin_headers):
         follow_redirects=False,
     )
     assert r.status_code == 303, r.text
-    # Ремонт создан НОВЫМ (статус «Принято») и без исполнителя.
+    # Мастер подставил в форму СЕБЯ — это разрешено, ремонт сразу в диагностике.
     items = client.get(
         "/api/repairs?q=Клиент Без Назначения", headers=admin_headers
     ).json()["items"]
     assert items, "ремонт не создан"
     rep = items[0]
-    assert rep["status"] == "Принято", rep
-    assert rep["master_id"] is None, rep
-    # В списке мастера этот ремонт не виден (он ему не назначен).
+    assert rep["status"] == "На диагностике", rep
+    assert rep["master_id"] == master["id"], rep
+    # Список у мастера общий — своя приёмка в нём видна.
     master_page = client.get("/repairs", cookies=cookies)
-    assert "Клиент Без Назначения" not in master_page.text
+    assert "Клиент Без Назначения" in master_page.text
+
+
+def test_intake_by_master_ignores_foreign_master_id(client, admin_headers):
+    """Чужого мастера из формы приёмки мастер себе не подставит."""
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    operator = next(u for u in users if u["email"] == "operator@msb.local")
+
+    cookies = _login(client, "master@msb.local", "master123")
+    page = client.get("/repairs/new?type=Телевизоры", cookies=cookies)
+    cid = re.search(r'name="city_id" value="([0-9a-f-]+)"', page.text).group(1)
+    r = client.post(
+        "/repairs/new",
+        cookies=cookies,
+        data={
+            "city_id": cid,
+            "device_type": "Телевизоры",
+            "identity_raw": "LG-43UP-SN778",
+            "full_name": "Клиент Чужой Мастер",
+            "phone": "+993 61 000 222",
+            "master_id": str(operator["id"]),  # не мастер и не он сам
+            "fault_client": "нет звука",
+            "consent_pdn": "on",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    items = client.get(
+        "/api/repairs?q=Клиент Чужой Мастер", headers=admin_headers
+    ).json()["items"]
+    assert items, "ремонт не создан"
+    rep = items[0]
+    assert rep["master_id"] is None, rep
+    assert rep["status"] == "Новый", rep
 
 
 # ------------------------------------------------------- автокомплит клиента
@@ -152,14 +189,18 @@ def test_list_has_perpage_selector_and_no_number_anywhere(client, admin_headers)
 
 
 def test_list_inline_edit_marks_for_admin_and_not_for_master(client):
+    """Админу — все ячейки; мастеру — только колонка «Мастера» (взять заказ)."""
     admin_page = client.get("/repairs", cookies=_login(client))
     assert "data-edit=" in admin_page.text
     assert "MSB_MASTERS" in admin_page.text
     master_page = client.get(
         "/repairs", cookies=_login(client, "master@msb.local", "master123")
     )
-    assert "data-edit=" not in master_page.text
-    assert "MSB_MASTERS" not in master_page.text
+    assert 'data-edit="masters"' in master_page.text
+    assert "MSB_MASTERS" in master_page.text
+    # Деньги и паспорт техники мастеру в списке не редактируются.
+    assert 'data-edit="price_final"' not in master_page.text
+    assert 'data-edit="client_name"' not in master_page.text
 
 
 def test_list_row_does_not_navigate_on_single_click(client):
@@ -173,7 +214,7 @@ def test_board_excludes_finished_and_keeps_three_columns(client, admin_headers):
     rep = _make_repair(client, admin_headers, "board-done-1", "Доска Готовый", "+993 61 555000")
     client.patch(
         f"/api/repairs/{rep['id']}", headers=admin_headers,
-        json={"status": "Готово к выдаче"},
+        json={"status": "Завершён"},
     )
     cookies = _login(client)
     board = client.get("/repairs?view=board", cookies=cookies)

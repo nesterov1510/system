@@ -83,7 +83,7 @@ def test_finish_repair_marks_ready_and_returns_sms(
     r = client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["repair"]["status"] == "Готово к выдаче"
+    assert body["repair"]["status"] == "Завершён"
     assert body["repair"]["ready_at"] is not None
     assert body["sms"]["to"] == "+993 71 111222"
     assert repair["number"] in body["sms"]["text"]
@@ -204,7 +204,7 @@ def test_auto_sms_to_master_on_intake_with_master(
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["status"] == "Диагностика"
+    assert r.json()["status"] == "На диагностике"
     assert (master["id"], r.json()["id"]) in calls
 
 

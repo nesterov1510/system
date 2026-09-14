@@ -12,11 +12,13 @@ from app.core.deps import CurrentUser, DbSession
 from app.core.permissions import (
     can_access_repair,
     can_assign_masters,
+    can_assign_repair_masters,
     can_delete_client,
     can_delete_repair,
     can_edit_device_info,
     can_edit_finances,
     can_finish_repair,
+    can_view_repair,
     is_master_only,
 )
 from app.db.conflicts import CLIENT_PHONE, NUMBER, OTHER, classify, constraint_name
@@ -32,6 +34,7 @@ from app.db.models import (
     RepairPart,
     RepairPartOrder,
     RepairPhoto,
+    RepairStatus,
     User,
     UserRole,
 )
@@ -55,8 +58,6 @@ from app.services.sms import (
     send_sms,
 )
 from app.services.reminders import (
-    REMINDER_STATUSES,
-    STOP_STATUSES,
     cancel_reminders,
     schedule_reminders,
 )
@@ -84,8 +85,13 @@ def _is_master_only(user) -> bool:
 
 
 def _can_access(user, repair: Repair) -> bool:
-    """Мастера видят только свои ремонты; остальные роли — все."""
+    """Мутации: мастер меняет только свои ремонты; остальные роли — все."""
     return can_access_repair(user, repair)
+
+
+def _can_view(user, repair: Repair) -> bool:
+    """Чтение: мастера видят в списке все ремонты (свободные берут себе)."""
+    return can_view_repair(user, repair)
 
 
 def _is_assigner(user) -> bool:
@@ -196,6 +202,7 @@ def _serialize(repair: Repair) -> RepairOut:
         contact2_relation=repair.contact2_relation,
         is_delivery=repair.is_delivery,
         delivery_district=repair.delivery_district,
+        delivery_comment=repair.delivery_comment,
         reminder_next_at=repair.reminder_next_at,
         reminder_last_at=repair.reminder_last_at,
         reminder_count=repair.reminder_count or 0,
@@ -612,10 +619,12 @@ async def create_repair(
     if not phone_norm:
         raise HTTPException(400, "В телефоне клиента нет ни одной цифры")
 
-    # Мастера назначает только администратор или оператор. Мастер, принявший
-    # технику, себя НЕ назначает автоматически — «Мастер» остаётся пустым.
+    # Мастера назначает администратор или оператор. Мастер на приёмке вправе
+    # назначить только самого себя (или оставить поле пустым — тогда ремонт
+    # уходит в общую очередь).
     if payload.master_id is not None and not _can_assign_masters(user):
-        raise HTTPException(403, "Мастера назначает администратор или оператор")
+        if not (_is_master_only(user) and payload.master_id == user.id):
+            raise HTTPException(403, "Мастера назначает администратор или оператор")
 
     # Повтор идёт после rollback(), который «протухает» (expire) все объекты
     # сессии: чтение `user.id` или `city.slug` внутри async-кода падало с
@@ -764,8 +773,10 @@ async def _persist_repair(
 
     master_id = payload.master_id
     # Как только у ремонта есть основной мастер — он сразу начинает работу,
-    # поэтому создаём ремонт сразу в «Диагностика», а не в «Принято».
-    initial_status = "Диагностика" if master_id else "Принято"
+    # поэтому создаём ремонт сразу в «На диагностике», а не в «Новый».
+    initial_status = (
+        RepairStatus.DIAGNOSTICS if master_id else RepairStatus.NEW
+    )
 
     repair = Repair(
         number=number,
@@ -785,6 +796,7 @@ async def _persist_repair(
         contact2_relation=payload.contact2_relation,
         is_delivery=payload.is_delivery,
         delivery_district=payload.delivery_district,
+        delivery_comment=payload.delivery_comment,
         consent_repair_at=now if payload.consent_repair else None,
         accepted_by=user_id,
         master_id=master_id,
@@ -804,16 +816,16 @@ async def _persist_repair(
             repair_id=repair.id,
             type="status_change",
             actor_id=user_id,
-            data={"to": "Принято", "from": None},
+            data={"to": RepairStatus.NEW, "from": None},
         )
     )
-    if initial_status != "Принято":
+    if initial_status != RepairStatus.NEW:
         db.add(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
                 actor_id=user_id,
-                data={"to": initial_status, "from": "Принято"},
+                data={"to": initial_status, "from": RepairStatus.NEW},
             )
         )
     if master_id:
@@ -843,12 +855,12 @@ def _intake_conflict_message(conflict: str) -> str:
     )
 
 
-# Группы-этапы для страницы «Все ремонты» (вкладки).
+# Группы-этапы для страницы «Все ремонты» и доски (колонки).
 STAGE_STATUSES: dict[str, list[str]] = {
-    "new": ["Принято"],
-    "diag": ["Диагностика"],
-    "work": ["Согласование", "Ожидание запчастей", "В ремонте"],
-    "done": ["Готово к выдаче", "Выдано", "Не забрано", "Архив", "Отказ"],
+    "new": [RepairStatus.NEW],
+    "diag": [RepairStatus.DIAGNOSTICS],
+    "work": [RepairStatus.IN_WORK, RepairStatus.WAITING_PARTS],
+    "done": [RepairStatus.DONE],
 }
 
 
@@ -914,9 +926,9 @@ def _repairs_filters(
                 Repair.model.ilike(like),
             )
         )
-    # Мастера видят только свои ремонты (назначен напрямую или через список).
-    if _is_master_only(user):
-        filters.append(_master_scope(user.id))
+    # Список видят все роли целиком: мастеру нужно находить свободные ремонты
+    # (без исполнителя) и брать их себе. Права на изменения проверяются
+    # отдельно — см. `can_access_repair` / `can_assign_repair_masters`.
     return filters
 
 
@@ -1103,7 +1115,7 @@ async def get_by_number(number: str, db: DbSession, user: CurrentUser):
 @router.get("/{repair_id}", response_model=RepairOut)
 async def get_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     repair = await _get_repair_or_404(db, repair_id)
-    if not _can_access(user, repair):
+    if not _can_view(user, repair):
         raise HTTPException(403, "Нет доступа к этому ремонту")
     return _serialize(repair)
 
@@ -1113,8 +1125,6 @@ async def update_repair(
     repair_id: uuid.UUID, payload: RepairUpdate, db: DbSession, user: CurrentUser
 ):
     repair = await _get_repair_or_404(db, repair_id)
-    if not _can_access(user, repair):
-        raise HTTPException(403, "Нет доступа к этому ремонту")
 
     from app.db.base import utcnow
 
@@ -1123,14 +1133,27 @@ async def update_repair(
     data = payload.model_dump(exclude_unset=True)
     master_ids = data.pop("master_ids", None)
     helper_ids = data.pop("helper_ids", None)
-    # Назначение мастеров/помощников — только admin и operator (проверка на
-    # сервере, не только скрытие в UI).
-    if (
-        master_ids is not None
-        or helper_ids is not None
-        or "master_id" in data
-    ) and not _can_assign_masters(user):
-        raise HTTPException(403, "Мастера назначает администратор или оператор")
+    touches_masters = (
+        master_ids is not None or helper_ids is not None or "master_id" in data
+    )
+
+    # Назначение мастеров/помощников: admin и operator — всегда; мастер — на
+    # свободный ремонт (берёт себе) или на свой (добавляет напарников).
+    if touches_masters and not can_assign_repair_masters(user, repair):
+        raise HTTPException(
+            403,
+            "Этот ремонт занят другим мастером: состав исполнителей меняет "
+            "администратор или оператор",
+        )
+    # Остальные поля — только своему ремонту. Мастер может взять свободный
+    # заказ, поэтому запрос «только назначение» проходит и без назначения.
+    if not _can_access(user, repair) and not (touches_masters and not data):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    # Статус чужого ремонта мастер не меняет: список он видит целиком, но
+    # распоряжается только своими заказами.
+    if data.get("status") and _is_master_only(user) and not _can_access(user, repair):
+        raise HTTPException(403, "Статус чужого ремонта меняет оператор")
 
     # Финансовые поля (цена, себестоимость, выплата мастерам, «оплачено») —
     # только старшие роли. Иначе мастер, ведущий ремонт, может сам назначить
@@ -1246,6 +1269,19 @@ async def update_repair(
             if missing:
                 raise HTTPException(404, f"Помощник не найден: {', '.join(missing)}")
 
+        # Тот же человек не может быть и мастером, и помощником одного
+        # ремонта: в таблице один уникальный ключ (repair_id, user_id), поэтому
+        # уже назначенных мастеров из списка помощников просто исключаем
+        # (иначе запрос падал в IntegrityError вместо внятного ответа).
+        linked_masters = {
+            m.user_id for m in repair.masters if (m.kind or "master") != "helper"
+        }
+        if repair.master_id:
+            linked_masters.add(repair.master_id)
+        ordered_helper_ids = [
+            hid for hid in ordered_helper_ids if hid not in linked_masters
+        ]
+
         existing_helpers = {
             m.user_id: m for m in repair.masters if (m.kind or "master") == "helper"
         }
@@ -1282,17 +1318,22 @@ async def update_repair(
                 )
             )
 
+    # Если вместе с назначением пришли и другие поля — проверяем права уже
+    # по новому составу исполнителей (мастер стал своим — правки разрешены).
+    if data and not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
     # Как только у ремонта появился основной мастер — он сам начинает работу,
-    # поэтому «Принято» автоматически переходит в «Диагностика» (если статус
+    # поэтому «Новый» автоматически переходит в «На диагностике» (если статус
     # не задан явно в этом же запросе и мастер назначается впервые).
     had_master_before = bool(old_master_id)
     if (
         payload.status is None
-        and old_status == "Принято"
+        and old_status == RepairStatus.NEW
         and repair.master_id
         and not had_master_before
     ):
-        repair.status = "Диагностика"
+        repair.status = RepairStatus.DIAGNOSTICS
 
     if repair.status != old_status:
         repair.events.append(
@@ -1303,16 +1344,14 @@ async def update_repair(
                 data={"from": old_status, "to": repair.status},
             )
         )
-        if repair.status == "Готово к выдаче":
+        if repair.status == RepairStatus.DONE and repair.ready_at is None:
             repair.ready_at = utcnow()
-        if repair.status == "Выдано":
-            repair.issued_at = utcnow()
-        # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
-        # готов к выдаче, и снимаются, как только технику выдали/закрыли.
-        # SMS клиенту и очередь напоминаний — только по кнопке «Уведомить»,
-        # не при смене статуса. Выдача по-прежнему снимает очередь.
-        if repair.status in STOP_STATUSES:
-            cancel_reminders(repair)
+    # Ежедневные SMS-напоминания «заберите технику»: заводятся, когда ремонт
+    # завершён, и снимаются, как только технику выдали клиенту (`issued_at`).
+    # SMS клиенту и очередь напоминаний — только по кнопке «Уведомить»,
+    # не при смене статуса. Выдача по-прежнему снимает очередь.
+    if repair.issued_at is not None:
+        cancel_reminders(repair)
 
     # Правка паспорта техники видна в ленте: кто и что именно поменял.
     if device_changes:
@@ -1435,8 +1474,6 @@ async def update_repair(
 
 # Кнопка «Ремонт закончен» доступна админу и оператору
 # (см. app.core.permissions.FINISH_ROLES).
-# Статусы, «после» готовности — назад в «Готово к выдаче» не переводим.
-_FINISH_TERMINAL = {"Выдано", "Не забрано", "Архив", "Отказ"}
 
 
 def _require_finisher(user) -> None:
@@ -1450,7 +1487,7 @@ class ReadySmsSend(BaseModel):
 
 @router.post("/{repair_id}/finish")
 async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    """«Ремонт закончен»: переводит в «Готово к выдаче» и возвращает шаблон SMS клиенту.
+    """«Ремонт закончен»: переводит в «Завершён» и возвращает шаблон SMS клиенту.
 
     Отправка SMS — по желанию (следующим запросом /finish-sms или пропустить).
     """
@@ -1462,15 +1499,16 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     from app.db.base import utcnow
 
     old_status = repair.status
-    if repair.status != "Готово к выдаче" and repair.status not in _FINISH_TERMINAL:
-        repair.status = "Готово к выдаче"
-        repair.ready_at = utcnow()
+    if repair.status != RepairStatus.DONE:
+        repair.status = RepairStatus.DONE
+        if repair.ready_at is None:
+            repair.ready_at = utcnow()
         repair.events.append(
             RepairEvent(
                 repair_id=repair.id,
                 type="status_change",
                 actor_id=user.id,
-                data={"from": old_status, "to": "Готово к выдаче"},
+                data={"from": old_status, "to": RepairStatus.DONE},
             )
         )
         await db.commit()
@@ -1479,7 +1517,7 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
         await manager.broadcast(
             {
                 "type": "repair.status_changed",
-                "repair": {"number": repair.number, "status": "Готово к выдаче"},
+                "repair": {"number": repair.number, "status": RepairStatus.DONE},
             }
         )
 
@@ -1523,6 +1561,54 @@ async def finish_repair_send_sms(
     )
     await db.commit()
     return {"ok": True, "to": repair.client.phone}
+
+
+@router.post("/{repair_id}/issue", response_model=RepairOut)
+async def issue_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
+    """Отметить, что клиент забрал технику.
+
+    Отдельного статуса «Выдано» больше нет: факт выдачи хранится в
+    `issued_at`. Именно по нему список подсвечивает ремонты «забрал, но не
+    оплатил» и перестаёт считать технику стоящей в сервисе.
+    """
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    from app.db.base import utcnow
+
+    if repair.issued_at is None:
+        repair.issued_at = utcnow()
+        if repair.ready_at is None:
+            repair.ready_at = repair.issued_at
+        if repair.status != RepairStatus.DONE:
+            old_status = repair.status
+            repair.status = RepairStatus.DONE
+            repair.events.append(
+                RepairEvent(
+                    repair_id=repair.id,
+                    type="status_change",
+                    actor_id=user.id,
+                    data={"from": old_status, "to": RepairStatus.DONE},
+                )
+            )
+        repair.events.append(
+            RepairEvent(
+                repair_id=repair.id,
+                type="comment",
+                actor_id=user.id,
+                data={"message": "Технику выдали клиенту"},
+            )
+        )
+        cancel_reminders(repair)
+        await db.commit()
+        await manager.broadcast(
+            {
+                "type": "repair.issued",
+                "repair": {"number": repair.number, "paid": bool(repair.paid)},
+            }
+        )
+    return _serialize(await _get_repair_or_404(db, repair_id))
 
 
 async def notify_client_ready(repair_id: uuid.UUID, db, user) -> dict:

@@ -7,7 +7,6 @@
 /* Выбор размера страницы + пагинация */
 .rlist-pp{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted,#75808d);white-space:nowrap}
 .rlist-pp select{max-width:90px}
-.rlist-edit-hint{margin:2px 2px 10px;font-size:12px;color:var(--muted,#75808d)}
 .rlist-pager{display:flex;flex-wrap:wrap;gap:6px;align-items:center;justify-content:center;margin:14px 0 6px}
 .rlist-pager__num,.rlist-pager__btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:32px;padding:0 10px;border:1px solid var(--line,#dbe2e9);border-radius:9px;background:#fff;font-size:13px;font-weight:700;text-decoration:none;color:inherit}
 .rlist-pager__num:hover,.rlist-pager__btn:hover{background:#fff3e8;border-color:#ffd9b0}
@@ -31,6 +30,24 @@ textarea.riedit{min-height:64px;resize:vertical}
 .redit-pop__feet{display:flex;justify-content:flex-end;gap:6px;margin-top:10px}
 .redit-btn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line,#dbe2e9);background:#fff;cursor:pointer;font-weight:900;font-size:14px;line-height:1}
 .redit-btn.is-ok{background:var(--accent,#ff6a00);border-color:var(--accent,#ff6a00);color:#fff}
+/* Подсветка строк.
+   Красная — клиент забрал технику, но не рассчитался (видна всегда).
+   Жёлтая — ремонт готов, а техника до сих пор стоит в сервисе: включается
+   кнопкой «Готово, но в сервисе» над таблицей. */
+#rlist-table tr.is-unpaid>td{background:#fff0ee}
+#rlist-table tr.is-unpaid:hover>td{background:#ffe3e0}
+#rlist-table tr.is-unpaid .rlist-flag{color:#b3261e}
+#rlist-table.is-hl-ready tr.is-ready>td{background:#fff8e3}
+#rlist-table.is-hl-ready tr.is-ready:hover>td{background:#ffefc6}
+#rlist-table.is-hl-ready tr:not(.is-ready){opacity:.5}
+.rlist-flag{display:block;margin-top:2px;font-size:11px;font-weight:800;color:#8a6d1a}
+.rlist-hl{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--line,#dbe2e9);
+          border-radius:10px;background:#fff;font-size:12.5px;font-weight:700;text-decoration:none;color:inherit;white-space:nowrap}
+.rlist-hl:hover{border-color:#ffd9b0;background:#fff3e8}
+.rlist-hl.is-on{border-color:#f0b429;background:#fff4d6;color:#7a5a00}
+.rlist-legend{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 2px 10px;font-size:12px;color:var(--muted,#75808d)}
+.rlist-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:5px;vertical-align:-2px}
+.rlist-dashfilter{margin:0 2px 10px;font-size:13px}
 /* Аккуратное центрирование текста во всех колонках. */
 #rlist-table th,#rlist-table td{text-align:center}
 #rlist-table td .rlist-dev{justify-content:center;align-items:center}
@@ -61,20 +78,11 @@ textarea.riedit{min-height:64px;resize:vertical}
 {% endif %}
 
 <div class="rlist-page">
-<section class="rlist-head">
-  <h1>Все ремонты</h1>
-  <p>{% if dash_filter_label %}Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a>{% else %}Реестр по этапам — статус, клиент и действия в одной строке.{% endif %}</p>
-</section>
+{% if dash_filter_label %}
+<p class="rlist-dashfilter">Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a></p>
+{% endif %}
 
 <div class="rlist-toolbar">
-  <div class="tabs">
-    <a href="/repairs?stage=all&per_page={{ per_page }}" class="{% if stage=='all' %}active{% endif %}">Все <span class="chip">{{ counts.all }}</span></a>
-    {% for key, label in stages %}
-      <a href="/repairs?stage={{ key }}&per_page={{ per_page }}" class="{% if stage==key %}active{% endif %}">
-        {{ label }} <span class="chip">{{ counts[key] }}</span>
-      </a>
-    {% endfor %}
-  </div>
   <form class="row" method="get" action="/repairs">
     <input type="hidden" name="stage" value="{{ stage }}">
     {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
@@ -95,11 +103,20 @@ textarea.riedit{min-height:64px;resize:vertical}
         {% endfor %}
       </select>
     </label>
+    {% set hl_qs = 'stage=' ~ stage ~ '&q=' ~ (q | urlencode) ~ '&status=' ~ ((status or '') | urlencode)
+                   ~ '&per_page=' ~ per_page
+                   ~ (('&filter=' ~ (dash_filter | urlencode)) if dash_filter else '') %}
+    <a class="rlist-hl{% if hl_ready %} is-on{% endif %}"
+       href="/repairs?{{ hl_qs }}{% if not hl_ready %}&hl=ready{% endif %}"
+       title="Подсветить ремонты, которые уже готовы, но техника до сих пор не выдана клиенту">
+      ⏳ Готово, но в сервисе{% if hl_ready %} ✓{% endif %}
+    </a>
   </form>
 </div>
-{% if can_inline %}
-<p class="rlist-edit-hint">✎ Двойной клик по ячейке — редактирование во всплывающем окне, таблица не сдвигается. Карточка ремонта открывается через меню ⚡.</p>
-{% endif %}
+<p class="rlist-legend">
+  <span title="Клиент забрал технику, но ремонт не оплачен"><i style="background:#ffd9d4"></i>забрал, не оплатил</span>
+  <span title="Ремонт завершён, техника ждёт клиента в сервисе"><i style="background:#ffe9a8"></i>готово, ждёт выдачи</span>
+</p>
 
 {% if can_delete %}
 <form id="bulk-repairs" class="bulk-bar" method="post" action="/repairs/bulk-delete"
@@ -111,7 +128,7 @@ textarea.riedit{min-height:64px;resize:vertical}
 
 <div class="rlist-card">
   <div class="table-wrap">
-    <table id="rlist-table">
+    <table id="rlist-table" class="{% if hl_ready %}is-hl-ready{% endif %}">
       <thead>
         <tr>
           {% if can_delete %}<th class="bulk-col"><span class="sr-only">Отметить</span></th>{% endif %}
@@ -128,6 +145,9 @@ textarea.riedit{min-height:64px;resize:vertical}
           <th style="text-transform:none;letter-spacing:0">🔧 Причина
             <button type="button" class="colhint" data-colhint data-title="Причина поломки"
               data-hint="Неисправность со слов клиента. Если жалоба пустая — показывается диагноз мастера.">?</button></th>
+          <th style="text-transform:none;letter-spacing:0">🛠 Что починили
+            <button type="button" class="colhint" data-colhint data-title="Что починили"
+              data-hint="Что именно сделали — со слов мастера (поле «Что сделано» в карточке ремонта). Печатается в бланке.">?</button></th>
           <th class="num" style="text-transform:none;letter-spacing:0">💵 Сумма
             <button type="button" class="colhint" data-colhint data-title="Общая сумма ремонта"
               data-hint="Сколько стоит ремонт: итоговая цена, если она уже указана, иначе верхняя граница вилки из прайса.">?</button></th>
@@ -154,7 +174,14 @@ textarea.riedit{min-height:64px;resize:vertical}
       </thead>
       <tbody>
       {% for r in repairs %}
-        <tr>
+        {# Забрал, но не оплатил: техника выдана, а отметки об оплате нет. #}
+        {% set unpaid = r.issued_at and not r.paid and not pays.get(r.id) %}
+        {# Готово, но всё ещё в сервисе: ремонт завершён, технику не забрали. #}
+        {% set ready_waiting = r.ready_at and not r.issued_at %}
+        {% set row_flags = [] %}
+        {% if unpaid %}{% set _ = row_flags.append('is-unpaid') %}{% endif %}
+        {% if ready_waiting %}{% set _ = row_flags.append('is-ready') %}{% endif %}
+        <tr class="{{ row_flags | join(' ') }}">
           {% if can_delete %}
           <td class="bulk-col">
             <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить ремонт клиента {{ r.client.full_name }}">
@@ -188,6 +215,13 @@ textarea.riedit{min-height:64px;resize:vertical}
               title="Двойной клик — изменить неисправность">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
           {% else %}
           <td class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
+          {% endif %}
+          {% if can_inline %}
+          <td class="wrap rieditable" style="max-width:220px" data-edit="work_done" data-repair-id="{{ r.id }}"
+              data-edit-value="{{ r.work_done or '' }}"
+              title="Двойной клик — изменить «что починили» (со слов мастера)">{{ (r.work_done or '—') | truncate(60) }}</td>
+          {% else %}
+          <td class="wrap" style="max-width:220px">{{ (r.work_done or '—') | truncate(60) }}</td>
           {% endif %}
           {% if can_inline and can_finance %}
           <td class="num rieditable" data-edit="price_final" data-edit-kind="money" data-repair-id="{{ r.id }}"
@@ -247,10 +281,10 @@ textarea.riedit{min-height:64px;resize:vertical}
           {% for m in r.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
           {% set hnames = [] %}
           {% for m in r.masters %}{% if (m.kind or 'master') == 'helper' %}{% set _ = hnames.append(m.user.name) %}{% endif %}{% endfor %}
-          {% if can_inline and can_assign %}
+          {% if can_assign %}
           <td class="wrap rieditable" data-edit="masters" data-edit-kind="master" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.master_id or '' }}"
-              title="Двойной клик — назначить мастера (только основной; помощники — в карточке)">
+              title="Двойной клик — назначить мастера (помощники — в карточке ремонта)">
           {% else %}
           <td class="wrap">
           {% endif %}
@@ -276,6 +310,14 @@ textarea.riedit{min-height:64px;resize:vertical}
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
             <div style="margin-top:3px">
+              {% if r.issued_at %}
+              <span class="chip {% if unpaid %}red{% else %}green{% endif %}"
+                    title="Технику выдали клиенту {{ r.issued_at | dt }}">{{ '⚠ выдано, не оплачено' if unpaid else '✓ выдано' }}</span>
+              {% elif r.ready_at %}
+              <span class="chip amber" title="Готово, ждёт выдачи клиенту">готово, в сервисе</span>
+              {% endif %}
+            </div>
+            <div style="margin-top:3px">
               {% if r.paid %}
                 {% if can_inline and can_finance %}
                 <span class="chip green rieditable" data-edit="paid" data-edit-kind="toggle" data-repair-id="{{ r.id }}" data-edit-value="1" title="Отмечено как оплаченное. Двойной клик — снять отметку">✓ оплачено</span>
@@ -299,6 +341,13 @@ textarea.riedit{min-height:64px;resize:vertical}
             <div class="rpop rpop--actions" role="menu" aria-label="Действия">
               <p class="rpop__title">Действия</p>
               <a class="rpop-act" href="/repairs/{{ r.id }}">↗ Открыть карточку</a>
+              {% if can_assign and not r.master_id and not r.masters %}
+              <form method="post" action="/repairs/{{ r.id }}/assign">
+                <input type="hidden" name="master_ids" value="{{ me_id }}">
+                <input type="hidden" name="next" value="/repairs{{ ('?' ~ request.query_string.decode()) if request.query_string else '' }}">
+                <button class="rpop-act is-green" type="submit">🙋 Взять себе</button>
+              </form>
+              {% endif %}
               {% if can_print_any %}
               <form method="post" action="/repairs/{{ r.id }}/print">
                 <input type="hidden" name="next" value="/repairs">
@@ -313,14 +362,21 @@ textarea.riedit{min-height:64px;resize:vertical}
                 <button class="rpop-act" type="submit" title="Этикетка для клиента: QR на публичную страницу статуса, условия хранения и юр. информация">🏷 Этикетка клиенту (QR)</button>
               </form>
               {% endif %}
-              {% if can_finish and r.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
+              {% if can_finish and r.status != 'Завершён' %}
               <form method="post" action="/repairs/{{ r.id }}/finish"
-                    onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по ✉.')">
+                    onsubmit="return confirm('Перевести в «Завершён»? SMS уйдёт только по ✉.')">
                 <input type="hidden" name="next" value="/repairs">
                 <button class="rpop-act" type="submit">✓ Ремонт закончен</button>
               </form>
               {% endif %}
-              {% if can_finish and r.status not in ['Выдано', 'Архив', 'Отказ'] %}
+              {% if can_issue and not r.issued_at %}
+              <form method="post" action="/repairs/{{ r.id }}/issue"
+                    onsubmit="return confirm('Отметить, что клиент забрал технику?')">
+                <input type="hidden" name="next" value="/repairs">
+                <button class="rpop-act" type="submit">📦 Выдать клиенту</button>
+              </form>
+              {% endif %}
+              {% if can_finish and not r.issued_at %}
               <form method="post" action="/repairs/{{ r.id }}/notify-client"
                     onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен? После этого три дня будут приходить напоминания забрать технику.')">
                 <input type="hidden" name="next" value="/repairs">
@@ -340,7 +396,7 @@ textarea.riedit{min-height:64px;resize:vertical}
           </td>
         </tr>
       {% else %}
-        <tr><td colspan="{{ 12 if can_delete else 11 }}" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
+        <tr><td colspan="{{ 13 if can_delete else 12 }}" class="muted" style="text-align:center;padding:30px">Ремонты не найдены</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -387,7 +443,7 @@ textarea.riedit{min-height:64px;resize:vertical}
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/repair-list.js?v=4"></script>
-{% if can_inline %}
+{% if can_inline or can_assign %}
 <script>
 // --- Инлайн-редактирование ячеек таблицы по двойному клику. ---
 // Сохранение идёт через тот же серверный маршрут, что и правки чипов
@@ -415,6 +471,8 @@ window.MSB_MASTERS = {{ masters_json | tojson }};
   function saveAssign(rid, masterId) {
     var fd = new FormData();
     if (masterId) fd.append('master_ids', masterId);
+    // Остаёмся в списке: после назначения страница просто обновляется.
+    fd.append('next', window.location.pathname + window.location.search);
     return fetch('/repairs/' + rid + '/assign', {
       method: 'POST', body: fd, credentials: 'same-origin'
     }).then(afterPost);

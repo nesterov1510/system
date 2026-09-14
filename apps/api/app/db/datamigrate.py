@@ -15,7 +15,14 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Client, Setting
+from app.db.models import (
+    LEGACY_ISSUED_STATUSES,
+    LEGACY_STATUS_MAP,
+    Client,
+    Repair,
+    RepairStatus,
+    Setting,
+)
 from app.services.numbering import normalize_phone
 from app.services.settings import get_setting, set_setting
 
@@ -93,9 +100,67 @@ async def reindex_client_phones(db: AsyncSession) -> dict:
     return {"recalculated": recalculated, "merged": merged, "name_conflicts": kept_names}
 
 
+async def migrate_repair_statuses(db: AsyncSession) -> dict:
+    """Перевести ремонты на пять актуальных статусов.
+
+    Раньше статусов было десять, и часть из них описывала не этап работы, а
+    факт: «Выдано» (клиент забрал технику), «Не забрано», «Архив», «Отказ».
+    Теперь статус один из пяти (`RepairStatus`), а факты живут в полях:
+    выдачу фиксирует `issued_at`, готовность — `ready_at`.
+
+    Заодно:
+    * у ремонтов со старым статусом «Выдано» проставляем `issued_at`
+      (иначе подсветка «забрал, но не оплатил» потеряла бы историю);
+    * у завершённых без `ready_at` проставляем дату приёмки — иначе полоска
+      «готово, но всё ещё в сервисе» не знала бы, с какого дня считать;
+    * сохранённый в настройках список статусов приводим к актуальному.
+    """
+    rows = await db.execute(select(Repair))
+    repairs = list(rows.scalars().all())
+
+    renamed = 0
+    issued_backfilled = 0
+    ready_backfilled = 0
+    for repair in repairs:
+        old_status = repair.status
+        new_status = LEGACY_STATUS_MAP.get(old_status)
+        if new_status is None:
+            continue
+        repair.status = new_status
+        renamed += 1
+        if old_status in LEGACY_ISSUED_STATUSES and repair.issued_at is None:
+            repair.issued_at = repair.ready_at or repair.accepted_at
+            issued_backfilled += 1
+        if new_status == RepairStatus.DONE and repair.ready_at is None:
+            repair.ready_at = repair.accepted_at
+            ready_backfilled += 1
+
+    # Список статусов в настройках: если там ещё старые значения — заменяем.
+    statuses_reset = False
+    row = await db.execute(select(Setting).where(Setting.key == "repair_statuses"))
+    setting = row.scalars().first()
+    if setting is not None:
+        items = (setting.value or {}).get("items")
+        if isinstance(items, list) and any(
+            str(x) not in RepairStatus.ALL for x in items
+        ):
+            setting.value = {"items": list(RepairStatus.ALL)}
+            statuses_reset = True
+
+    await db.flush()
+    return {
+        "renamed": renamed,
+        "issued_backfilled": issued_backfilled,
+        "ready_backfilled": ready_backfilled,
+        "settings_reset": statuses_reset,
+        "statuses": list(RepairStatus.ALL),
+    }
+
+
 # Реестр миграций: имя -> функция. Порядок не важен (каждая идемпотентна).
 MIGRATIONS = {
     "client_phone_norm_v2": reindex_client_phones,
+    "repair_statuses_v2": migrate_repair_statuses,
 }
 
 

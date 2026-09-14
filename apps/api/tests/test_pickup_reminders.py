@@ -236,7 +236,7 @@ def test_notify_schedules_reminder_for_next_day(client, operator_headers, city_i
     repair = _mk_repair(client, operator_headers, city_id, "rem-finish-1")
     client.post(f"/api/repairs/{repair['id']}/finish", headers=operator_headers)
     row = _load_repair(repair["id"])
-    assert row.status == "Готово к выдаче"
+    assert row.status == "Завершён"
     assert row.reminder_next_at is None
 
     _notify_client(client, operator_headers, repair, monkeypatch)
@@ -250,28 +250,26 @@ def test_notify_schedules_reminder_for_next_day(client, operator_headers, city_i
 
 
 def test_status_change_to_ready_does_not_send_sms(client, operator_headers, city_id):
-    """Смена статуса на «Готово» не шлёт SMS и не ставит напоминания."""
+    """Смена статуса на «Завершён» не шлёт SMS и не ставит напоминания."""
     repair = _mk_repair(client, operator_headers, city_id, "rem-status-1")
     r = client.patch(
         f"/api/repairs/{repair['id']}",
         headers=operator_headers,
-        json={"status": "Готово к выдаче"},
+        json={"status": "Завершён"},
     )
     assert r.status_code == 200, r.text
     assert r.json()["reminder_next_at"] is None
 
 
 def test_issuing_repair_stops_reminders(client, operator_headers, city_id, monkeypatch):
+    """Клиент забрал технику — напоминания снимаются (статуса «Выдано» больше нет)."""
     repair = _mk_repair(client, operator_headers, city_id, "rem-stop-1")
     _notify_client(client, operator_headers, repair, monkeypatch)
     assert _load_repair(repair["id"]).reminder_next_at is not None
 
-    r = client.patch(
-        f"/api/repairs/{repair['id']}",
-        headers=operator_headers,
-        json={"status": "Выдано"},
-    )
+    r = client.post(f"/api/repairs/{repair['id']}/issue", headers=operator_headers)
     assert r.status_code == 200, r.text
+    assert r.json()["issued_at"] is not None
     assert r.json()["reminder_next_at"] is None, "после выдачи напоминания должны прекратиться"
 
 

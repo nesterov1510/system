@@ -182,7 +182,8 @@ window.msbCapsIdent = (function () {
       </header>
       <div class="tv-delivery-modal__body">
         <label class="tv-field" for="tvDeliveryDistrict"><span>Район доставки *</span><input id="tvDeliveryDistrict" type="text" autocomplete="off" placeholder="Например: Парахат 3/2" data-delivery-district value="{{ form.get('delivery_district','') }}"></label>
-        <p>После сохранения возле доставки появится галочка, а район будет виден прямо на странице приёмки.</p>
+        <label class="tv-field" for="tvDeliveryComment" style="margin-top:10px"><span>Комментарий к доставке (необязательно)</span><textarea id="tvDeliveryComment" rows="2" placeholder="Например: позвонить за час, 3 этаж, вход со двора" data-delivery-comment>{{ form.get('delivery_comment','') }}</textarea></label>
+        <p>Доставка отмечается только здесь: если окно не заполнено, заказ считается принятым лично в сервисе.</p>
       </div>
       <footer>
         <button type="button" class="tv-delivery-remove" data-delivery-remove hidden>Убрать доставку</button>
@@ -195,8 +196,9 @@ window.msbCapsIdent = (function () {
 
   <form class="tv-intake-form" method="post" action="/repairs/new" enctype="multipart/form-data" data-tv-intake-form novalidate>
     <input type="hidden" name="device_type" value="{{ form.get('device_type', sel_type) }}">
-    <input type="hidden" name="is_delivery" value="0" data-delivery-enabled>
+    <input type="hidden" name="is_delivery" value="{{ '1' if form.get('is_delivery') in ('1','true','on') else '0' }}" data-delivery-enabled>
     <input type="hidden" name="delivery_district" value="{{ form.get('delivery_district','') }}" data-delivery-district-input>
+    <input type="hidden" name="delivery_comment" value="{{ form.get('delivery_comment','') }}" data-delivery-comment-input>
     <input type="hidden" name="city_id" value="{{ cities[0].id if cities else '' }}">
 
     <section class="tv-form-card">
@@ -272,15 +274,18 @@ window.msbCapsIdent = (function () {
       </div>
 
       <div class="tv-contact-divider"><span>Исполнитель</span></div>
-      {% if can_assign %}
+      {% if can_assign or can_self_assign %}
       <div class="tv-customer-grid">
         <label class="tv-field"><span>Мастер-исполнитель</span>
           <select name="master_id">
             <option value="">— в очередь (не назначен) —</option>
-            {% for m in masters %}<option value="{{ m.id }}" {% if form.get('master_id') == (m.id|string) %}selected{% endif %}>{{ m.name }}</option>{% endfor %}
+            {% for m in masters %}<option value="{{ m.id }}" {% if form.get('master_id') == (m.id|string) %}selected{% endif %}>{{ m.name }}{% if can_self_assign %} (я){% endif %}</option>{% endfor %}
           </select>
         </label>
       </div>
+      {% if can_self_assign %}
+      <p class="tv-field__hint" style="margin:6px 0 0">Можно назначить себя или оставить поле пустым — тогда ремонт попадёт в общую очередь и его возьмёт свободный мастер.</p>
+      {% endif %}
       {% else %}
       <p class="tv-field__hint" style="margin:0 0 4px">Исполнителя на ремонт назначит администратор или оператор — приёмка сохранится новым ремонтом в очереди.</p>
       {% endif %}

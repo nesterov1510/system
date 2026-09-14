@@ -471,6 +471,7 @@ def _render_turkmen_form(
     client_name: str,
     client_phone: str,
     device: str,
+    device_type: str = "",
     serial: str,
     complectation: str,
     fault: str,
@@ -494,6 +495,7 @@ def _render_turkmen_form(
     payment_text: str = "",
     issued_at: str = "",
     ready_at: str = "",
+    delivery_text: str = "",
     print_stub: dict | None = None,
 ) -> bytes:
     _register_fonts()
@@ -550,6 +552,23 @@ def _render_turkmen_form(
     # заказчика). QR-код печатается только в отрывной части для клиента (внизу).
     y = h - 8 * mm
     draw(f"№ {number}", left_margin, y, 11, bold=True)
+
+    # Тип техники (выбранный при приёмке) — в правом верхнем углу бланка, а не
+    # в поле «M_Model»: так мастер сразу видит, что за техника, не читая строк.
+    if device_type:
+        type_size = 11.0
+        type_text = str(device_type)
+        max_type_w = content_w * 0.45
+        while type_size > 7 and c.stringWidth(type_text, FONT_BOLD, type_size) > max_type_w:
+            type_size -= 0.5
+        type_w = c.stringWidth(type_text, FONT_BOLD, type_size)
+        pad_x, pad_y = 2.2 * mm, 1.1 * mm
+        box_w = type_w + 2 * pad_x
+        box_h = type_size * 0.42 * mm + 2 * pad_y
+        c.setStrokeColorRGB(0.25, 0.25, 0.25)
+        c.setLineWidth(0.6)
+        c.rect(right_margin - box_w, y - pad_y, box_w, box_h)
+        draw(type_text, right_margin - pad_x, y, type_size, bold=True, align="right")
     y -= 6 * mm
 
     draw("Gelen wagty:", left_margin, y, 7, bold=True)
@@ -597,6 +616,9 @@ def _render_turkmen_form(
         gorkezme.append(f"Toplum: {complectation}")
     if condition and condition != "—":
         gorkezme.append(f"Daşky görnüşi: {condition}")
+    # Заказ с доставкой: район и необязательный комментарий из приёмки.
+    if delivery_text:
+        gorkezme.append(f"Eltip bermeli: {delivery_text}")
     gorkezme_lines: list[str] = []
     for item in gorkezme:
         gorkezme_lines += simpleSplit(item, FONT, 7, content_w - 2 * mm)
@@ -769,6 +791,7 @@ def render_blank_pdf(
     client_name: str,
     client_phone: str,
     device: str,
+    device_type: str = "",
     serial: str,
     complectation: str,
     fault: str,
@@ -792,6 +815,7 @@ def render_blank_pdf(
     payment_text: str = "",
     issued_at: str = "",
     ready_at: str = "",
+    delivery_text: str = "",
     print_stub: dict | None = None,
 ) -> bytes:
     t = normalize_template(template)
@@ -803,7 +827,7 @@ def render_blank_pdf(
         return _render_turkmen_form(
             t=t, number=number, accepted_at=accepted_at, city_name=city_name,
             branch_name=branch_name, client_name=client_name, client_phone=client_phone,
-            device=device, serial=serial, complectation=complectation,
+            device=device, device_type=device_type, serial=serial, complectation=complectation,
             fault=fault, condition=condition, accepted_by=accepted_by,
             master=master, eta_days=eta_days, legal_text=legal_text,
             storage_until=storage_until, qr_url=qr_url,
@@ -815,6 +839,7 @@ def render_blank_pdf(
             work_done=work_done, warranty_text=warranty_text,
             repair_price=repair_price, payment_text=payment_text,
             issued_at=issued_at, ready_at=ready_at,
+            delivery_text=delivery_text,
             print_stub=print_stub,
         )
 
@@ -853,6 +878,10 @@ def render_blank_pdf(
         if label:
             draw(label, w - left, y, 8 * s, bold=True, align="right")
             y -= 7 * mm * s
+        # Тип техники — в правом верхнем углу экземпляра (не в полях бланка).
+        if device_type:
+            draw(str(device_type), w - left, y, 10 * s, bold=True, align="right")
+            y -= 6 * mm * s
 
         draw(brand.upper(), left, y, 15 * s, bold=True)
         y -= 7 * mm * s

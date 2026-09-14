@@ -116,7 +116,16 @@ async def build_context(db, repair: Repair, request: Request | None = None) -> d
     legal_text = await get_legal_text(db)
     consent_repair_text = await get_consent_repair_text(db)
     print_stub = await get_print_stub(db)
-    device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
+    # Тип техники печатается в правом верхнем углу бланка, поэтому в поле
+    # «M_Model» остаются только марка и модель.
+    device = " ".join(filter(None, [repair.brand, repair.model]))
+    # Доставка: район + необязательный комментарий из приёмки.
+    if repair.is_delivery:
+        delivery_text = " · ".join(
+            filter(None, [repair.delivery_district, repair.delivery_comment])
+        ) or "доставка"
+    else:
+        delivery_text = ""
     complectation = (
         ", ".join(repair.complectation.get("items", []))
         if repair.complectation
@@ -186,6 +195,8 @@ async def build_context(db, repair: Repair, request: Request | None = None) -> d
         "client_name": repair.client.full_name,
         "client_phone": repair.client.phone,
         "device": device,
+        "device_type": repair.device_type or "",
+        "delivery_text": delivery_text,
         "serial": repair.serial or "—",
         "complectation": complectation,
         "fault": repair.fault_client or "—",

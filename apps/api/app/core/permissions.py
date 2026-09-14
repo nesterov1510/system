@@ -84,7 +84,7 @@ FEATURES: list[dict] = [
     {
         "key": "finish",
         "label": "Закрытие ремонтов",
-        "desc": "Переводить ремонт в «Готово к выдаче» и отправлять клиенту SMS.",
+        "desc": "Переводить ремонт в «Завершён» и отправлять клиенту SMS.",
         "roles": FINISH_ROLES,
     },
     {
@@ -218,12 +218,36 @@ def can_edit_device_info(user) -> bool:
 
 
 def can_assign_masters(user) -> bool:
-    """Назначать/менять мастеров и помощников на ремонт."""
+    """Назначать/менять мастеров и помощников на ЛЮБОЙ ремонт (админ/оператор)."""
     return has_any_role(user, *ASSIGN_ROLES) or has_feature(user, "assign")
 
 
+def can_assign_repair_masters(user, repair) -> bool:
+    """Может ли пользователь менять состав мастеров ЭТОГО ремонта.
+
+    Администратор и оператор — всегда. Мастер — в двух случаях:
+
+    * ремонт ещё никому не назначен: тогда он берёт его себе (и может сразу
+      добавить себе помощника);
+    * ремонт уже его (назначен напрямую или через список мастеров): тогда он
+      добирает дополнительных мастеров и помощников.
+
+    Чужой занятый ремонт мастер себе не забирает.
+    """
+    if can_assign_masters(user):
+        return True
+    if not has_any_role(user, MASTER):
+        return False
+    links = list(getattr(repair, "masters", None) or [])
+    if not repair.master_id and not links:
+        return True
+    if repair.master_id == user.id:
+        return True
+    return any(link.user_id == user.id for link in links)
+
+
 def can_finish_repair(user) -> bool:
-    """Перевести в «Готово к выдаче» и отправить клиенту SMS."""
+    """Перевести в «Завершён» и отправить клиенту SMS."""
     return has_any_role(user, *FINISH_ROLES) or has_feature(user, "finish")
 
 
@@ -254,11 +278,11 @@ def can_print(user, repair) -> bool:
 
 
 def can_access_repair(user, repair) -> bool:
-    """Мастера видят только назначенные им ремонты; остальные роли — все.
+    """Может ли пользователь ИЗМЕНЯТЬ этот ремонт.
 
-    Намеренно строго: своя приёмка без назначения в карточку не пускает —
-    иначе у мастера в списке висят заказы, которые ему не отдавали. Этикетка
-    при этом печатается (см. `can_print`).
+    Мастер — только свои заказы (назначен напрямую или через список
+    мастеров); старшие роли — любые. Проверка используется мутациями:
+    смена статуса, финансы, запчасти, комментарии.
     """
     if not is_master_only(user):
         return True
@@ -266,6 +290,18 @@ def can_access_repair(user, repair) -> bool:
         return True
     # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
     return any(m.user_id == user.id for m in repair.masters)
+
+
+def can_view_repair(user, repair) -> bool:
+    """Может ли пользователь ОТКРЫТЬ ремонт (только чтение).
+
+    Мастера видят в списке все ремонты — в том числе свободные, без
+    исполнителя, чтобы взять заказ себе (см. `can_assign_repair_masters`).
+    Карточку для этого открываем любому сотруднику, а вот менять чужой
+    ремонт по-прежнему нельзя: мутации проверяются `can_access_repair`,
+    а деньги/статусы/назначения — своими функциями прав.
+    """
+    return True
 
 
 def can_delete_repair(user) -> bool:

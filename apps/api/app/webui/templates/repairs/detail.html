@@ -22,16 +22,23 @@
     <form method="post" action="/repairs/{{ repair.id }}/print-label" style="margin:0"><button class="btn sm sec" type="submit">🏷 Этикетка</button></form>
     <form method="post" action="/repairs/{{ repair.id }}/print-client-label" style="margin:0"><button class="btn sm sec" type="submit" title="Этикетка для клиента: QR на публичную страницу статуса, условия хранения и юр. информация">🏷 Клиенту (QR)</button></form>
   {% endif %}
-  {% if can.finish and repair.status not in ['Выдано','Архив','Отказ'] %}
+  {% if can.finish and not repair.issued_at %}
     <form method="post" action="/repairs/{{ repair.id }}/notify-client" style="margin:0"
           onsubmit="return confirm('Отправить клиенту SMS, что ремонт закончен?')">
       <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
       <button class="btn sm green" type="submit">✉ Уведомить</button>
     </form>
   {% endif %}
-  {% if can.finish and repair.status not in ['Готово к выдаче','Выдано','Не забрано','Архив','Отказ'] %}
+  {% if can.issue %}
+    <form method="post" action="/repairs/{{ repair.id }}/issue" style="margin:0"
+          onsubmit="return confirm('Отметить, что клиент забрал технику?')">
+      <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+      <button class="btn sm sec" type="submit" title="Техника больше не стоит в сервисе">📦 Выдано клиенту</button>
+    </form>
+  {% endif %}
+  {% if can.finish and repair.status != 'Завершён' %}
     <form method="post" action="/repairs/{{ repair.id }}/finish" style="margin:0"
-          onsubmit="return confirm('Перевести в «Готово к выдаче»? SMS уйдёт только по «Уведомить».')">
+          onsubmit="return confirm('Перевести в «Завершён»? SMS уйдёт только по «Уведомить».')">
       <button class="btn sm" type="submit">✓ Закончен</button>
     </form>
   {% endif %}
@@ -83,11 +90,19 @@
       <p class="rcard-sub">
         Принято {{ repair.accepted_at | date }}
         {% if repair.storage_until %} · хранение до {{ repair.storage_until | date }}{% endif %}
-        {% if repair.is_delivery %} · доставка{% if repair.delivery_district %} ({{ repair.delivery_district }}){% endif %}{% endif %}
+        {% if repair.is_delivery %} · 🚚 доставка{% if repair.delivery_district %} ({{ repair.delivery_district }}){% endif %}{% if repair.delivery_comment %} — {{ repair.delivery_comment }}{% endif %}{% endif %}
         · <a href="/repairs">к списку</a>
       </p>
     </div>
     <span class="chip {{ repair.status | status_chip }}">{{ repair.status }}</span>
+    {% if repair.issued_at %}
+      <span class="chip {% if not repair.paid %}red{% else %}green{% endif %}"
+            title="Технику выдали клиенту {{ repair.issued_at | dt }}">
+        {{ '⚠ выдано, не оплачено' if not repair.paid else '✓ выдано клиенту' }}
+      </span>
+    {% elif repair.ready_at %}
+      <span class="chip amber" title="Ремонт завершён, техника ждёт клиента">готово, ждёт выдачи</span>
+    {% endif %}
   </header>
 
   <section class="rcard-panel">
@@ -134,8 +149,8 @@
       <h2>Неисправность</h2>
       <div class="ifields">
         {{ chip('fault_client', 'Со слов клиента', repair.fault_client, can.device or can.admin, wide=true) }}
-        {{ chip('fault_master', 'Диагноз мастера', repair.fault_master, true, wide=true) }}
-        {{ chip('work_done', 'Что сделано', repair.work_done, can.finance or not can.master_only, wide=true) }}
+        {{ chip('fault_master', 'Диагноз мастера', repair.fault_master, can.edit, wide=true) }}
+        {{ chip('work_done', 'Что сделано', repair.work_done, can.finance or can.edit, wide=true) }}
         {{ chip('condition_notes', 'Внешний вид', repair.condition_notes, can.device or can.admin, wide=true) }}
       </div>
       <h3 style="margin-top:18px">Мастера</h3>
@@ -172,7 +187,7 @@
         <span>{{ p.part.name if p.part else 'запчасть' }} <span class="muted">×{{ p.qty }}</span></span>
         <span>
           {{ ((p.price or 0) * p.qty) | money(currency.symbol) }}
-          {% if can.finance or not can.master_only %}
+          {% if (can.finance or not can.master_only) and can.edit %}
           <form method="post" action="/repairs/{{ repair.id }}/parts/{{ p.id }}/delete" style="display:inline"
                 onsubmit="return confirm('Убрать запчасть?')">
             <button class="act" type="submit" title="Убрать">✕</button>
@@ -181,7 +196,7 @@
         </span>
       </div>
       {% else %}<p class="muted">Нет запчастей</p>{% endfor %}
-      {% if can.addpart %}
+      {% if can.addpart and can.edit %}
       <form method="post" action="/repairs/{{ repair.id }}/parts/add" class="row rcard-add">
         <input type="text" name="name" placeholder="Запчасть (вручную)" style="max-width:180px" required>
         <input type="number" name="qty" value="1" min="1" style="max-width:64px">
@@ -229,20 +244,26 @@
         {% endif %}
         {% else %}<li class="muted">Пока пусто</li>{% endfor %}
       </ul>
+      {% if can.edit %}
       <form method="post" action="/repairs/{{ repair.id }}/comment" class="row rcard-add">
         <input type="text" name="message" placeholder="Комментарий…" required style="flex:1;min-width:140px">
         <button class="btn sm" type="submit">+</button>
       </form>
+      {% else %}
+      <p class="muted" style="font-size:12.5px">Это ремонт другого мастера — комментарии и правки доступны его исполнителю, администратору или оператору.</p>
+      {% endif %}
       <h3 style="margin-top:18px">Фото</h3>
       <div class="rcard-photos">
         {% for ph in photos %}
         <img src="{{ ph.object_key and ('/media/' + ph.object_key) or '' }}" alt="">
         {% else %}<span class="muted">нет</span>{% endfor %}
       </div>
+      {% if can.edit %}
       <form method="post" action="/repairs/{{ repair.id }}/photos" enctype="multipart/form-data" class="row rcard-add">
         <input type="file" name="file" accept="image/*" capture="environment">
         <button class="btn sm" type="submit">Загрузить</button>
       </form>
+      {% endif %}
       <p class="muted" style="margin-top:12px;font-size:12px">Страница клиента: <a href="/r/{{ repair.public_token }}" target="_blank">открыть QR</a></p>
     </section>
   </div>

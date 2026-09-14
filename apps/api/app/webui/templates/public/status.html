@@ -39,8 +39,11 @@
 
       <div class="pub-status">● {{ d.status }}</div>
 
-      <div class="pub-bar"><i style="width:{{ (progress_idx / 6 * 100) | int }}%"></i></div>
-      <small style="color:#8a949d">Этап {{ progress_idx + 1 }} из 7</small>
+      {# Полоска прогресса — по актуальному списку статусов (их пять). #}
+      {% set steps = (progress | length) - 1 %}
+      {% set pct = ((progress_idx / steps) * 100) if steps else 100 %}
+      <div class="pub-bar"><i style="width:{{ pct | int }}%"></i></div>
+      <small style="color:#8a949d">Этап {{ progress_idx + 1 }} из {{ progress | length }}</small>
 
       <dl class="pub-meta">
         <dt>Принято</dt><dd>{{ d.accepted_at | date }}</dd>

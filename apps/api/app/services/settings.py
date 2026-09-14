@@ -12,7 +12,7 @@ Default keys:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Setting
+from app.db.models import DEFAULT_REPAIR_STATUSES, Setting, map_status
 from app.services.sms import DEFAULT_PICKUP_REMINDER_TEXT
 
 DEFAULT_SETTINGS: dict[str, dict] = {
@@ -63,20 +63,7 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Название сервисного центра",
     },
     "repair_statuses": {
-        "value": {
-            "items": [
-                "Принято",
-                "Диагностика",
-                "Согласование",
-                "Ожидание запчастей",
-                "В ремонте",
-                "Готово к выдаче",
-                "Выдано",
-                "Не забрано",
-                "Архив",
-                "Отказ",
-            ]
-        },
+        "value": {"items": list(DEFAULT_REPAIR_STATUSES)},
         "description": "Список статусов ремонта (настраиваемый)",
     },
     "sms_enabled": {"value": {"enabled": False}, "description": "SMS-уведомления клиенту"},
@@ -208,7 +195,17 @@ async def get_repair_statuses(db: AsyncSession) -> list[str]:
     s = await get_setting(db, "repair_statuses")
     items = (s or {}).get("items")
     if isinstance(items, list) and items:
-        cleaned = [str(x).strip() for x in items if str(x).strip()]
+        # Старые настройки могли остаться в БД со списком из десяти статусов.
+        # Приводим их к актуальным пяти (и убираем дубли), иначе удалённые
+        # статусы продолжали бы предлагаться в селекторах.
+        cleaned: list[str] = []
+        for raw in items:
+            name = str(raw).strip()
+            if not name:
+                continue
+            name = map_status(name) or name
+            if name not in cleaned:
+                cleaned.append(name)
         if cleaned:
             return cleaned
     return list(DEFAULT_SETTINGS["repair_statuses"]["value"]["items"])

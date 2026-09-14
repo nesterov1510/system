@@ -66,19 +66,62 @@ class EventType(str, enum.Enum):
     NOTIFY = "notify"
 
 
+class RepairStatus:
+    """Единственные пять статусов ремонта.
+
+    Всё, что раньше было отдельными статусами («Выдано», «Не забрано»,
+    «Архив», «Отказ»), теперь выводится из полей ремонта, а не из строки
+    статуса: технику выдали — заполнен `issued_at`, готова и стоит в сервисе —
+    `ready_at` заполнен, а `issued_at` пустой. Так список статусов перестал
+    распухать, а факты о ремонте не теряются.
+    """
+
+    NEW = "Новый"
+    DIAGNOSTICS = "На диагностике"
+    IN_WORK = "В работе"
+    WAITING_PARTS = "Ждёт запчастей"
+    DONE = "Завершён"
+
+    ALL = (NEW, DIAGNOSTICS, IN_WORK, WAITING_PARTS, DONE)
+
+    # Статусы, в которых ремонт ещё «живой» (техника в сервисе, работа идёт).
+    ACTIVE = (NEW, DIAGNOSTICS, IN_WORK)
+
+
 # Default, overridable list (stored in settings['repair_statuses'] on seed).
-DEFAULT_REPAIR_STATUSES = [
-    "Принято",
-    "Диагностика",
-    "Согласование",
-    "Ожидание запчастей",
-    "В ремонте",
-    "Готово к выдаче",
-    "Выдано",
-    "Не забрано",
-    "Архив",
-    "Отказ",
-]
+DEFAULT_REPAIR_STATUSES = list(RepairStatus.ALL)
+
+
+# Старые статусы → новые. Используется миграцией данных
+# (`db/datamigrate.py: repair_statuses_v2`) и как «переводчик» для строк,
+# которые ещё могут прийти из старых клиентов/экспорта.
+LEGACY_STATUS_MAP = {
+    "Принято": RepairStatus.NEW,
+    "Диагностика": RepairStatus.DIAGNOSTICS,
+    "Согласование": RepairStatus.IN_WORK,
+    "В ремонте": RepairStatus.IN_WORK,
+    "Ожидание запчастей": RepairStatus.WAITING_PARTS,
+    "Готово к выдаче": RepairStatus.DONE,
+    "Выдано": RepairStatus.DONE,
+    "Не забрано": RepairStatus.DONE,
+    "Архив": RepairStatus.DONE,
+    "Отказ": RepairStatus.DONE,
+}
+
+# Какие из старых статусов означали «технику отдали клиенту»: при переносе
+# данных по ним проставляется `issued_at`, иначе подсветка «забрал, но не
+# оплатил» потеряла бы всю историю.
+LEGACY_ISSUED_STATUSES = ("Выдано",)
+
+
+def map_status(raw: str | None) -> str | None:
+    """Привести (в т.ч. устаревший) статус к одному из пяти актуальных."""
+    if not raw:
+        return raw
+    raw = str(raw).strip()
+    if raw in RepairStatus.ALL:
+        return raw
+    return LEGACY_STATUS_MAP.get(raw, raw)
 
 
 # --------------------------------------------------------------------------
@@ -257,6 +300,9 @@ class Repair(Base, TimestampMixin):
     is_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
     # Район доставки (если технику нужно привезти по адресу).
     delivery_district: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Необязательный комментарий к доставке («позвонить за час», «3 этаж»,
+    # «вход со двора»…). Заполняется в том же окне, что и район.
+    delivery_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # --- Ежедневные SMS-напоминания «заберите технику» ---
     # reminder_next_at = NULL  → напоминания не запланированы (ремонт не готов

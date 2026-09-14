@@ -4,6 +4,8 @@
 совпадают с тем, что понимает нумератор `app.services.numbering`), иконки и
 матрица видимости разделов навигации по ролям.
 """
+from app.db.models import RepairStatus
+
 
 # --- Классы техники (форма приёмки и всё остальное) ---
 DEVICE_CLASSES = [
@@ -149,8 +151,8 @@ def visible_admin_nav(user) -> list[tuple[str, str, str]]:
 
 # Этапы доски «Все ремонты» (порт STAGE_STATUSES из routers/repairs.py).
 STAGES = [
-    ("new", "Новые", ["Принято"]),
-    ("diag", "Диагностика", ["Диагностика"]),
-    ("work", "В работе", ["Согласование", "Ожидание запчастей", "В ремонте"]),
-    ("done", "Завершены", ["Готово к выдаче", "Выдано", "Не забрано", "Архив", "Отказ"]),
+    ("new", "Новые", [RepairStatus.NEW]),
+    ("diag", "Диагностика", [RepairStatus.DIAGNOSTICS]),
+    ("work", "В работе", [RepairStatus.IN_WORK, RepairStatus.WAITING_PARTS]),
+    ("done", "Завершены", [RepairStatus.DONE]),
 ]

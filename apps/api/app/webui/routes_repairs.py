@@ -15,6 +15,7 @@ from app.core.permissions import (
     can_access_repair,
     can_add_repair_part,
     can_assign_masters,
+    can_assign_repair_masters,
     can_delete_repair,
     can_edit_device_info,
     can_edit_finances,
@@ -23,6 +24,7 @@ from app.core.permissions import (
     can_refund_payment,
     can_set_repair_part_price,
     can_take_payment,
+    can_view_repair,
     is_master_only,
 )
 from app.db.models import (
@@ -103,7 +105,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
                        status: str | None = None, view: str = "table", page: int = 1,
                        per_page: int = DEFAULT_PER_PAGE,
                        just: str | None = None, printed: str | None = None,
-                       filter: str | None = None):
+                       filter: str | None = None, hl: str | None = None):
     db, user, redir = await _require(request)
     if redir:
         return redir
@@ -112,7 +114,6 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         from app.webui.data import (
             STAGE_STATUSES,
             fetch_repairs,
-            master_scope,
             repair_parts_cost,
             repair_parts_lines,
             repair_parts_names,
@@ -149,29 +150,15 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         currency = await get_currency(db)
         statuses = await get_repair_statuses(db)
         masters = await _masters_list(db)
-        # Счётчики этапов для бейджей (агрегат COUNT, без загрузки строк).
-        from sqlalchemy import func as _func
-
-        counts = {"all": 0}
-
-        async def _count(*where):
-            stmt = select(_func.count()).select_from(select(Repair.id).where(*where).subquery())
-            return (await db.execute(stmt)).scalar() or 0
-
-        for key, sts in STAGE_STATUSES.items():
-            where = [Repair.status.in_(sts)]
-            if is_master_only(user):
-                where.append(master_scope(user.id))
-            counts[key] = await _count(*where)
-        all_where = [master_scope(user.id)] if is_master_only(user) else []
-        counts["all"] = await _count(*all_where)
-
         stage_labels = [("new", "Новые"), ("diag", "Диагностика"),
                         ("work", "В работе"), ("done", "Завершены")]
         # На доске колонки «Завершены» нет: «законченные» сюда не попадают.
         board_labels = [item for item in stage_labels if item[0] != "done"]
 
         master_only = is_master_only(user)
+        # Мастер видит все ремонты и может брать свободные себе — поэтому
+        # колонка «Мастера» редактируется и ему, а не только старшим ролям.
+        can_assign_ui = can_assign_masters(user) or master_only
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repairs=repairs, total=total, stage=stage or "all", q=q or "",
@@ -181,11 +168,13 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
             masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
-            counts=counts, stages=board_labels if view == "board" else stage_labels,
+            stages=board_labels if view == "board" else stage_labels,
             just=just, printed=printed,
             sms=request.query_params.get("sms"),
             sms_detail=request.query_params.get("sms_detail"),
             can_finish=can_finish_repair(user),
+            # Выдачу техники клиенту отмечает тот, кто закрывает ремонт.
+            can_issue=can_finish_repair(user),
             can_print_any=not master_only,
             can_delete=can_delete_repair(user),
             # Инлайн-редактирование ячеек в таблице (двойной клик) — для
@@ -193,8 +182,12 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             can_inline=not master_only,
             can_finance=can_edit_finances(user),
             can_device=can_edit_device_info(user),
-            can_assign=can_assign_masters(user),
+            can_assign=can_assign_ui,
             can_client=user.has_role("admin", "manager", "operator"),
+            me_id=str(user.id),
+            # Кнопка «Готово, но всё ещё в сервисе»: подсветка ремонтов,
+            # которые завершены, а клиент технику не забрал.
+            hl_ready=(hl == "ready"),
             dash_filter=filter or "",
             dash_filter_label=DASHBOARD_FILTER_LABELS.get(filter or ""),
         )
@@ -244,16 +237,24 @@ async def repair_new_form(request: Request, type: str | None = None):
         return redir
     try:
         sel = normalize_class(type) if type else None
-        # Мастера и помощника назначают только администратор и оператор:
-        # поле выбора мастера остальным (в т.ч. мастерам) не показываем вовсе.
+        # Администратор/оператор выбирают любого мастера. Мастер на приёмке
+        # может назначить только себя либо оставить поле пустым (ремонт уйдёт
+        # в общую очередь, и его возьмёт свободный мастер).
         can_assign = can_assign_masters(_user)
+        can_self_assign = is_master_only(_user)
+        if can_assign:
+            masters = await _masters_list(db)
+        elif can_self_assign:
+            masters = [_user]
+        else:
+            masters = []
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs/new",
             cities=await _cities(db),
-            masters=await _masters_list(db) if can_assign else [],
+            masters=masters,
             complectation=await _complectation(db), device_classes=DEVICE_CLASSES,
             brands=[], error=None, form={}, sel_type=sel,
-            can_assign=can_assign,
+            can_assign=can_assign, can_self_assign=can_self_assign,
         )
         html = await render_async("repairs/new.html", **ctx)
         return HTMLResponse(html)
@@ -340,17 +341,32 @@ async def repair_create(request: Request):
             cond_parts.append(condition_other)
         condition_notes = "; ".join(cond_parts) or None
 
-        is_delivery = bool(form.get("is_delivery"))
+        # Кнопка «Доставка» присылает "1"/"0"; bool("0") дал бы True, и каждый
+        # заказ считался бы привезённым с доставкой.
+        is_delivery = (form.get("is_delivery") or "").strip() in ("1", "true", "on")
+        delivery_district = (form.get("delivery_district") or "").strip() or None
+        delivery_comment = (form.get("delivery_comment") or "").strip() or None
+        if not is_delivery:
+            delivery_district = None
+            delivery_comment = None
         brand = _caps_ident(form.get("brand_manual") or form.get("brand"))
         model = _caps_ident(form.get("model_manual") or form.get("model"))
         serial = _caps_ident(form.get("serial_manual") or form.get("serial"))
         if not brand and not model and not serial:
             brand, model, serial = _parse_identity(form.get("identity_raw"))
-        # Мастера назначают только администратор/оператор. Мастер, принявший
-        # технику, себя не назначает: ремонт сохраняется новым, без исполнителя.
+        # Мастера выбирают администратор/оператор. Мастер на приёмке может
+        # назначить только себя; пустое поле оставляет ремонт в очереди.
         master_id = None
-        if can_assign_masters(user) and form.get("master_id"):
-            master_id = uuid.UUID(form["master_id"])
+        raw_master = (form.get("master_id") or "").strip()
+        if raw_master:
+            try:
+                picked = uuid.UUID(raw_master)
+            except ValueError:
+                picked = None
+            if can_assign_masters(user):
+                master_id = picked
+            elif is_master_only(user) and picked == user.id:
+                master_id = picked
         payload = RepairCreate(
             city_id=uuid.UUID(form["city_id"]),
             client=ClientCreate(
@@ -372,8 +388,8 @@ async def repair_create(request: Request):
             master_id=master_id,
             consent_repair=bool(form.get("consent_repair")),
             is_delivery=is_delivery,
-            delivery_district=(form.get("delivery_district") or "").strip() or None
-            if is_delivery else None,
+            delivery_district=delivery_district,
+            delivery_comment=delivery_comment,
         )
         out = await repairs_api.create_repair(payload=payload, db=db, user=user, idempotency_key=None)
         rid = out.id
@@ -437,14 +453,21 @@ async def repair_create(request: Request):
     except Exception as e:
         _submitted = dict(await request.form())
         can_assign = can_assign_masters(user)
+        can_self_assign = is_master_only(user)
+        if can_assign:
+            masters = await _masters_list(db)
+        elif can_self_assign:
+            masters = [user]
+        else:
+            masters = []
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs/new",
             cities=await _cities(db),
-            masters=await _masters_list(db) if can_assign else [],
+            masters=masters,
             complectation=await _complectation(db), device_classes=DEVICE_CLASSES,
             brands=[], error=str(getattr(e, "detail", e)), form=_submitted,
             sel_type=normalize_class(_submitted.get("device_type")) if _submitted.get("device_type") else None,
-            can_assign=can_assign,
+            can_assign=can_assign, can_self_assign=can_self_assign,
         )
         html = await render_async("repairs/new.html", **ctx)
         return HTMLResponse(html, status_code=400)
@@ -514,7 +537,9 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         repair = await _load_repair(db, repair_id)
         if repair is None:
             return HTMLResponse("Ремонт не найден", status_code=404)
-        if not can_access_repair(user, repair):
+        # Список показывает мастеру все ремонты, поэтому и карточку открываем:
+        # свободный заказ надо посмотреть, прежде чем взять его себе.
+        if not can_view_repair(user, repair):
             return HTMLResponse("Нет доступа к этому ремонту", status_code=403)
 
         parts = (await db.execute(
@@ -546,7 +571,12 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
             device_classes=DEVICE_CLASSES,
             can={
                 "finance": can_edit_finances(user),
-                "assign": can_assign_masters(user),
+                # Назначение — по конкретному ремонту: мастер может взять
+                # свободный заказ себе и добрать помощников к своему.
+                "assign": can_assign_repair_masters(user, repair),
+                # Менять данные чужого ремонта мастеру нельзя.
+                "edit": can_access_repair(user, repair),
+                "issue": can_finish_repair(user) and repair.issued_at is None,
                 "finish": can_finish_repair(user),
                 "print": can_print(user, repair),
                 "payment": can_take_payment(user),
@@ -688,15 +718,53 @@ async def repair_patch_field(request: Request, repair_id: uuid.UUID):
 
 @router.post("/repairs/{repair_id}/assign")
 async def repair_assign(request: Request, repair_id: uuid.UUID):
+    """Назначить мастеров/помощников.
+
+    Администратор и оператор — на любой ремонт. Мастер — на свободный (берёт
+    себе) или на свой (добавляет напарников и помощников).
+    """
     db, user, redir = await _require(request)
     if redir:
         return redir
     try:
+        from fastapi import HTTPException
+
         form = await request.form()
         ids = [uuid.UUID(x) for x in form.getlist("master_ids") if x]
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_assign_repair_masters(user, repair):
+            return HTMLResponse(
+                "Этот ремонт занят другим мастером", status_code=403
+            )
         payload = RepairUpdate(master_ids=ids or None)
-        await repairs_api.update_repair(repair_id, payload, db, user)
-        return RedirectResponse(f"/repairs/{repair_id}", status_code=303)
+        try:
+            await repairs_api.update_repair(repair_id, payload, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/issue")
+async def repair_issue(request: Request, repair_id: uuid.UUID):
+    """Отметить, что клиент забрал технику (заполняет `issued_at`)."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        if not can_finish_repair(user):
+            return HTMLResponse("Только админ или оператор", status_code=403)
+        try:
+            await repairs_api.issue_repair(repair_id, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
     finally:
         await db.close()
 
@@ -742,8 +810,10 @@ async def repair_admin_edit(request: Request, repair_id: uuid.UUID):
             contact2_name=_blank("contact2_name"),
             contact2_phone=_blank("contact2_phone"),
             contact2_relation=_blank("contact2_relation"),
-            is_delivery=bool(form.get("is_delivery")),
+            is_delivery=(form.get("is_delivery") or "").strip()
+            in ("1", "true", "on", "yes"),
             delivery_district=_blank("delivery_district"),
+            delivery_comment=_blank("delivery_comment"),
             eta_days=eta_days,
             complectation=complectation,
         )
@@ -890,7 +960,7 @@ def _safe_next(raw: str | None, fallback: str) -> str:
 
 @router.post("/repairs/{repair_id}/finish")
 async def repair_finish(request: Request, repair_id: uuid.UUID):
-    """Только статус «Готово к выдаче». SMS клиенту — отдельной кнопкой."""
+    """Только статус «Завершён». SMS клиенту — отдельной кнопкой."""
     db, user, redir = await _require(request)
     if redir:
         return redir

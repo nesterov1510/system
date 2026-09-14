@@ -1,6 +1,6 @@
 def test_create_repair_number(client, created_repair):
     assert created_repair["number"].startswith("TV-ASG-2026-")
-    assert created_repair["status"] == "Принято"
+    assert created_repair["status"] == "Новый"
     assert created_repair["storage_until"] is not None
 
 
@@ -37,15 +37,17 @@ def test_public_page_not_found(client):
     assert r.status_code == 404
 
 
-def test_master_scoped_to_own(client, master_headers, created_repair):
-    r = client.get("/api/repairs", headers=master_headers)
+def test_master_sees_full_repair_list(client, master_headers, created_repair):
+    """Список ремонтов у мастера общий: в нём видно и свободные заказы."""
+    r = client.get("/api/repairs", headers=master_headers, params={"page_size": 100})
     assert r.status_code == 200
     numbers = {x["number"] for x in r.json()["items"]}
-    # The operator-created repair has no master assigned, so master shouldn't see it.
-    assert created_repair["number"] not in numbers
+    assert created_repair["number"] in numbers
 
 
-def test_master_intake_not_self_assigned(client, master_headers, city_id):
+def test_master_intake_not_self_assigned(
+    client, admin_headers, master_headers, city_id
+):
     """Мастер НЕ назначает себя на приёмке: «Мастер»/«Помощники» остаются
     пустыми, назначение — только администратор или оператор."""
     r = client.post(
@@ -60,26 +62,47 @@ def test_master_intake_not_self_assigned(client, master_headers, city_id):
     assert r.status_code == 201
     assert r.json()["master_id"] is None
     assert r.json()["master_names"] == []
-    assert r.json()["status"] == "Принято"
+    assert r.json()["status"] == "Новый"
 
-    # Мастер не может назначить себя (или другого) через PATCH — 403.
+    # Свободный ремонт мастер берёт себе сам — статус уходит в диагностику.
     me = client.get("/api/auth/me", headers=master_headers).json()
     r2 = client.patch(
         f"/api/repairs/{r.json()['id']}",
         headers=master_headers,
         json={"master_ids": [me["id"]]},
     )
-    assert r2.status_code == 403
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["master_id"] == me["id"]
+    assert r2.json()["status"] == "На диагностике"
+
+    # Помощника к своему ремонту он добавить может (другого сотрудника).
+    helper = client.post(
+        "/api/admin/users",
+        headers=admin_headers,
+        json={"name": "Помощник П", "email": "helper-p@msb.local",
+              "password": "pass123", "role": "master"},
+    )
+    assert helper.status_code == 201, helper.text
     r3 = client.patch(
+        f"/api/repairs/{r.json()['id']}",
+        headers=master_headers,
+        json={"helper_ids": [helper.json()["id"]]},
+    )
+    assert r3.status_code == 200, r3.text
+    assert helper.json()["id"] in r3.json()["helper_ids"]
+
+    # Себя помощником к своему же ремонту не добавить — он уже мастер.
+    r4 = client.patch(
         f"/api/repairs/{r.json()['id']}",
         headers=master_headers,
         json={"helper_ids": [me["id"]]},
     )
-    assert r3.status_code == 403
+    assert r4.status_code == 200, r4.text
+    assert me["id"] not in r4.json()["helper_ids"]
 
 
 def test_repair_without_master_stays_new(client, operator_headers, city_id):
-    """Без мастера при приёмке ремонт остаётся в «Принято», как раньше."""
+    """Без мастера при приёмке ремонт остаётся в «Новый», как раньше."""
     r = client.post(
         "/api/repairs",
         headers={**operator_headers, "Idempotency-Key": "no-master-intake-1"},
@@ -91,13 +114,13 @@ def test_repair_without_master_stays_new(client, operator_headers, city_id):
     )
     assert r.status_code == 201
     assert r.json()["master_id"] is None
-    assert r.json()["status"] == "Принято"
+    assert r.json()["status"] == "Новый"
 
 
 def test_repair_created_with_master_by_operator_is_diag(
     client, admin_headers, operator_headers, city_id
 ):
-    """Оператор при приёмке сразу указал мастера — статус тоже «Диагностика»."""
+    """Оператор при приёмке сразу указал мастера — статус «На диагностике»."""
     users = client.get("/api/admin/users", headers=admin_headers).json()
     master = next(u for u in users if u["email"] == "master@msb.local")
     r = client.post(
@@ -111,7 +134,7 @@ def test_repair_created_with_master_by_operator_is_diag(
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["status"] == "Диагностика"
+    assert r.json()["status"] == "На диагностике"
 
 
 def test_is_delivery_flag_default_and_set_on_intake(client, operator_headers, city_id):
@@ -205,24 +228,26 @@ def test_finalize_repair(client, admin_headers, created_repair):
     r = client.patch(
         f"/api/repairs/{created_repair['id']}",
         headers=admin_headers,
-        json={"cost_amount": 300, "price_final": 550, "paid": True, "status": "Выдано"},
+        json={"cost_amount": 300, "price_final": 550, "paid": True, "status": "Завершён"},
     )
     assert r.status_code == 200
     body = r.json()
     assert body["cost_amount"] == 300
     assert body["price_final"] == 550
     assert body["paid"] is True
-    assert body["status"] == "Выдано"
+    assert body["status"] == "Завершён"
+    # Готовность фиксируется датой, а не отдельным статусом.
+    assert body["ready_at"]
 
 
 def test_update_status_timeline(client, admin_headers, created_repair):
     r = client.patch(
         f"/api/repairs/{created_repair['id']}",
         headers=admin_headers,
-        json={"status": "Диагностика"},
+        json={"status": "На диагностике"},
     )
     assert r.status_code == 200
-    assert r.json()["status"] == "Диагностика"
+    assert r.json()["status"] == "На диагностике"
     types = [e["type"] for e in r.json()["events"]]
     assert "status_change" in types
 
@@ -230,7 +255,7 @@ def test_update_status_timeline(client, admin_headers, created_repair):
 def test_master_board_only_assigned(
     client, admin_headers, operator_headers, city_id
 ):
-    """Мастер на странице «Все ремонты» видит ТОЛЬКО ремонты, назначенные ему."""
+    """Мастер на странице «Все ремонты» видит весь реестр, включая чужие."""
     # Два мастера.
     m1 = client.post(
         "/api/admin/users", headers=admin_headers,
@@ -273,12 +298,12 @@ def test_master_board_only_assigned(
     ids1 = {x["id"] for x in client.get(
         "/api/repairs", headers=h1, params={"stage": "all", "page_size": 50}
     ).json()["items"]}
-    assert ids1 == {r1["id"], r2["id"]}, f"Мастер У видит лишнее: {ids1}"
+    assert {r1["id"], r2["id"], r3["id"]} <= ids1, f"Мастер У видит не всё: {ids1}"
 
     ids2 = {x["id"] for x in client.get(
         "/api/repairs", headers=h2, params={"stage": "all", "page_size": 50}
     ).json()["items"]}
-    assert ids2 == {r3["id"]}, f"Мастер Д видит лишнее: {ids2}"
+    assert {r1["id"], r2["id"], r3["id"]} <= ids2, f"Мастер Д видит не всё: {ids2}"
 
     # Счётчики по этапам у мастера тоже только по его ремонтам.
     sc1 = client.get("/api/repairs/stage-counts", headers=h1).json()
@@ -286,9 +311,11 @@ def test_master_board_only_assigned(
     sc2 = client.get("/api/repairs/stage-counts", headers=h2).json()
     assert sc2["all"] == 1
 
-    # Чужой ремонт открыть напрямую мастер не может.
-    assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 403
-    assert client.get(f"/api/repairs/{r1['id']}", headers=h2).status_code == 403
+    # Чужой занятый ремонт открыть можно, а переписать состав мастеров — нет.
+    assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 200
+    assert client.patch(
+        f"/api/repairs/{r3['id']}", headers=h1, json={"master_ids": [m1["id"]]}
+    ).status_code == 403
 
 
 def test_search_by_number_and_serial(client, operator_headers, city_id):

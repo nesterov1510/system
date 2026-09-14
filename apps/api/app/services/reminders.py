@@ -2,7 +2,7 @@
 
 Сценарий: оператор нажал «Уведомить клиента» → клиент получил SMS о
 готовности → три дня раз в сутки уходит напоминание «ремонт закончен,
-заберите технику». Как только технику выдали («Выдано», «Архив», «Отказ») —
+заберите технику». Как только технику выдали клиенту (заполнен `issued_at`) —
 напоминания прекращаются раньше.
 
 Текст — шаблон `pickup_reminder` из «Админ → SMS» (см. `services/sms.py`).
@@ -28,15 +28,22 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.db.base import utcnow
-from app.db.models import Repair, RepairEvent
+from app.db.models import Repair, RepairEvent, RepairStatus
 from app.services.sms import send_pickup_reminder_sms, sms_enabled
 
 logger = logging.getLogger("msb.reminders")
 
 # В каких статусах клиенту напоминают забрать технику.
-REMINDER_STATUSES = ("Готово к выдаче", "Не забрано")
-# В каких статусах напоминания прекращаются (технику забрали/списали).
-STOP_STATUSES = ("Выдано", "Архив", "Отказ")
+REMINDER_STATUSES = (RepairStatus.DONE,)
+
+
+def reminders_stop(repair: Repair) -> bool:
+    """Напоминания больше не нужны: технику уже выдали клиенту.
+
+    Отдельного статуса «Выдано» больше нет — факт выдачи хранится в
+    `Repair.issued_at` (см. `RepairStatus`).
+    """
+    return repair.issued_at is not None
 
 # Сколько ремонтов обрабатываем за один проход (защита от «шторма» после
 # простоя: остальные дойдут в следующий проход через несколько минут).
@@ -59,6 +66,8 @@ def schedule_reminders(repair: Repair, now: datetime | None = None) -> bool:
     now = now or utcnow()
     if repair.status not in REMINDER_STATUSES:
         return False
+    if reminders_stop(repair):
+        return False  # технику уже забрали — напоминать не о чем
     if repair.reminder_next_at is not None:
         return False  # уже запланировано — не сбрасываем отсчёт
     repair.reminder_next_at = now + timedelta(hours=settings.REMINDER_FIRST_DELAY_HOURS)
@@ -149,6 +158,8 @@ async def send_due_reminders(db: AsyncSession, now: datetime | None = None) -> d
             Repair.reminder_next_at.isnot(None),
             Repair.reminder_next_at <= now,
             Repair.status.in_(REMINDER_STATUSES),
+            # Технику уже выдали — в очередь она вернуться не должна.
+            Repair.issued_at.is_(None),
         )
         .order_by(Repair.reminder_next_at)
         .limit(BATCH_LIMIT)

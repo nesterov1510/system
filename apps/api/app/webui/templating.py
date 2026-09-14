@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from app.db.models import RepairStatus, map_status
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from markupsafe import Markup
@@ -73,12 +74,15 @@ def _stage_label(status) -> str:
 
 def _status_chip_class(status) -> str:
     colors = {
-        "Принято": "gray", "Диагностика": "amber", "Согласование": "violet",
-        "Ожидание запчастей": "violet", "В ремонте": "amber",
-        "Готово к выдаче": "green", "Выдано": "green", "Не забрано": "red",
-        "Архив": "gray", "Отказ": "red",
+        RepairStatus.NEW: "gray",
+        RepairStatus.DIAGNOSTICS: "amber",
+        RepairStatus.IN_WORK: "amber",
+        RepairStatus.WAITING_PARTS: "violet",
+        RepairStatus.DONE: "green",
     }
-    return colors.get(status, "gray")
+    # Старые статусы (из истории ремонта) показываем цветом нового эквивалента.
+    mapped = map_status(status)
+    return colors.get(mapped or status, "gray")
 
 
 def _active(ep: str | None, href: str) -> str:

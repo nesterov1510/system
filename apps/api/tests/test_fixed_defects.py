@@ -296,10 +296,18 @@ def test_invalid_status_rejected(client, operator_headers, city_id):
     r = client.patch(
         f"/api/repairs/{repair['id']}",
         headers=operator_headers,
-        json={"status": "В ремонте"},
+        json={"status": "В работе"},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "В ремонте"
+    assert r.json()["status"] == "В работе"
+
+    # Устаревший статус из старого списка больше не принимается.
+    r = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"status": "Готово к выдаче"},
+    )
+    assert r.status_code == 422, r.text
 
 
 # --------------------------------------------------------------------------

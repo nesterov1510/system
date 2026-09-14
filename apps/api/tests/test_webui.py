@@ -298,7 +298,7 @@ def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
     assert sent["phone"] == "+993 61 7788990"
     assert "закончен" in sent["text"].lower() or "готов" in sent["text"].lower()
     body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
-    assert body["status"] == "Готово к выдаче"
+    assert body["status"] == "Завершён"
     assert body["reminder_next_at"] is not None
 
 
@@ -366,7 +366,7 @@ def test_finish_from_card_does_not_send_sms(client, monkeypatch):
     assert n.status_code == 303, n.text
     assert sent == []
     body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
-    assert body["status"] == "Готово к выдаче"
+    assert body["status"] == "Завершён"
     assert body["reminder_next_at"] is None
 
 

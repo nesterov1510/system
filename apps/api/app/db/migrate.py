@@ -22,6 +22,8 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "contact2_relation": "VARCHAR(128)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
         "delivery_district": "VARCHAR(255)",
+        # Необязательный комментарий к доставке (окно «Доставка» в приёмке).
+        "delivery_comment": "TEXT",
         "master_payout": "NUMERIC(12, 2)",
         # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
         "reminder_next_at": "TIMESTAMP",

@@ -12,8 +12,10 @@
     const deliveryOpen = root.querySelector('[data-delivery-open]');
     const deliveryModal = root.querySelector('[data-delivery-modal]');
     const deliveryDistrict = root.querySelector('[data-delivery-district]');
+    const deliveryComment = root.querySelector('[data-delivery-comment]');
     const deliveryEnabledInput = root.querySelector('[data-delivery-enabled]');
     const deliveryDistrictInput = root.querySelector('[data-delivery-district-input]');
+    const deliveryCommentInput = root.querySelector('[data-delivery-comment-input]');
     const deliveryLabel = root.querySelector('[data-delivery-label]');
     const deliverySummary = root.querySelector('[data-delivery-summary]');
     const deliveryRemove = root.querySelector('[data-delivery-remove]');
@@ -27,6 +29,7 @@
       document.body.style.overflow = visible ? 'hidden' : '';
       if (visible) {
         if (deliveryDistrict) deliveryDistrict.value = deliveryDistrictInput?.value || '';
+        if (deliveryComment) deliveryComment.value = deliveryCommentInput?.value || '';
         if (deliveryRemove) deliveryRemove.hidden = deliveryEnabledInput?.value !== '1';
         window.setTimeout(() => deliveryDistrict?.focus(), 20);
       }
@@ -35,9 +38,14 @@
     const renderDelivery = () => {
       const enabled = deliveryEnabledInput?.value === '1';
       const district = String(deliveryDistrictInput?.value || '').trim();
+      const comment = String(deliveryCommentInput?.value || '').trim();
       deliveryOpen?.classList.toggle('is-active', enabled);
       if (deliveryLabel) deliveryLabel.textContent = enabled ? 'Доставка ✓' : 'Доставка';
-      if (deliverySummary) deliverySummary.textContent = enabled && district ? district : 'Не указана';
+      if (deliverySummary) {
+        deliverySummary.textContent = enabled
+          ? [district || 'район не указан', comment].filter(Boolean).join(' · ')
+          : 'Не оформлена';
+      }
       if (deliveryRemove) deliveryRemove.hidden = !enabled;
     };
 
@@ -53,13 +61,19 @@
       deliveryDistrict?.classList.remove('is-error');
       if (deliveryEnabledInput) deliveryEnabledInput.value = '1';
       if (deliveryDistrictInput) deliveryDistrictInput.value = district;
+      // Комментарий необязательный — сохраняем как есть (пустой = нет).
+      if (deliveryCommentInput) {
+        deliveryCommentInput.value = String(deliveryComment?.value || '').trim();
+      }
       renderDelivery();
       setDeliveryModal(false);
     });
     deliveryRemove?.addEventListener('click', () => {
       if (deliveryEnabledInput) deliveryEnabledInput.value = '0';
       if (deliveryDistrictInput) deliveryDistrictInput.value = '';
+      if (deliveryCommentInput) deliveryCommentInput.value = '';
       if (deliveryDistrict) deliveryDistrict.value = '';
+      if (deliveryComment) deliveryComment.value = '';
       renderDelivery();
       setDeliveryModal(false);
     });
