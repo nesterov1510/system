@@ -80,6 +80,7 @@ class RepairUpdate(BaseModel):
     contact2_relation: str | None = None
     delivery_district: str | None = None
     delivery_comment: str | None = None
+    delivery_courier_phone: str | None = None
     complectation: dict | None = None
     master_id: uuid.UUID | None = None
     # Несколько мастеров на ремонт (в бланке — строки «Inžiner»).
@@ -188,6 +189,7 @@ class RepairOut(BaseModel):
     is_delivery: bool = False
     delivery_district: str | None = None
     delivery_comment: str | None = None
+    delivery_courier_phone: str | None = None
 
     # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
     reminder_next_at: datetime | None = None

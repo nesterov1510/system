@@ -88,11 +88,18 @@ textarea.riedit{min-height:64px;resize:vertical}
     {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
     <input type="text" name="q" value="{{ q }}" placeholder="Номер, серийник, имя, телефон, марка…"
            style="flex:1;min-width:200px;max-width:420px">
-    <select name="status" style="max-width:220px">
+    <select name="status" style="max-width:240px">
       <option value="">Любой статус</option>
       {% for s in statuses %}
         <option value="{{ s }}" {% if s==status %}selected{% endif %}>{{ s }}</option>
       {% endfor %}
+      {# Два состояния, которых нет в списке статусов: готово, но техника ещё
+         в сервисе, и выдано, но клиент не рассчитался. #}
+      <optgroup label="Состояние техники">
+        {% for value, label in extra_status_filters %}
+          <option value="{{ value }}" {% if value == status %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </optgroup>
     </select>
     <button class="btn sm" type="submit">Найти</button>
     <label class="rlist-pp" title="Сколько ремонтов показывать на одной странице">

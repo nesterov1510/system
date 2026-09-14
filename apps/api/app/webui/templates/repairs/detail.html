@@ -5,15 +5,7 @@
 <link rel="stylesheet" href="/static/msb/forms.css">
 <link rel="stylesheet" href="/static/msb/repair.css">
 <style>
-  /* Чип-селект мастеров: кликабельные пилюли вместо multiselect */
-  .mchips{display:flex;flex-wrap:wrap;gap:7px}
-  .mchip{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:16px;
-         border:1px solid var(--line,#e5e7eb);background:var(--bg1,#fff);cursor:pointer;
-         font-size:13px;user-select:none;transition:all .15s}
-  .mchip input{display:none}
-  .mchip.on{border-color:#2563eb;background:#2563eb;color:#fff}
-  label.mchip:hover{border-color:#2563eb}
-  .mchips-form{margin-top:6px}
+  /* Чипы мастеров и окна-списки живут в repair.css: .mchip, .mpop, .rpop-modal. */
 </style>
 {% endblock %}
 {% block topbar_actions %}
@@ -108,7 +100,6 @@
   <section class="rcard-panel">
     <h2>Паспорт</h2>
     <div class="ifields">
-      {{ chip('status', 'Статус', repair.status, can.finish or can.admin, 'select', status_opts) }}
       {{ chip('brand', 'Марка', repair.brand, can.device) }}
       {{ chip('model', 'Модель', repair.model, can.device) }}
       {{ chip('serial', 'Серийный №', repair.serial, can.device) }}
@@ -136,12 +127,45 @@
         <span class="ichip-view is-static">{{ 'оплачено' if repair.paid else 'не оплачено' }}</span>
         {% endif %}
       </form>
+
+      {# Чипы-списки: двойной клик открывает окно со списком отметок. #}
+      {% set can_marks = can.device or can.admin %}
+      {% set notes = repair.condition_notes or '' %}
+      <div class="ifield is-pop" data-popchip="#pop-condition">
+        <span class="ichip-k">Состояние</span>
+        {% if can_marks %}
+        <button type="button" class="ichip-view" data-pop-open
+                title="Двойной клик — выбрать из списка">{{ notes or '—' }}</button>
+        {% else %}
+        <span class="ichip-view is-static">{{ notes or '—' }}</span>
+        {% endif %}
+      </div>
+
+      <div class="ifield is-pop" data-popchip="#pop-complect">
+        <span class="ichip-k">Комплектация</span>
+        {% if can_marks %}
+        <button type="button" class="ichip-view" data-pop-open
+                title="Двойной клик — открыть список">{{ complectation_marked | join(', ') if complectation_marked else '—' }}</button>
+        {% else %}
+        <span class="ichip-view is-static">{{ complectation_marked | join(', ') if complectation_marked else '—' }}</span>
+        {% endif %}
+      </div>
+
+      <div class="ifield is-pop" data-popchip="#pop-delivery">
+        <span class="ichip-k">Доставка</span>
+        {% if can.delivery %}
+        <button type="button" class="ichip-view" data-pop-open
+                title="Двойной клик — была ли доставка и телефон доставщика">
+          {% if repair.is_delivery %}🚚 да{% if repair.delivery_courier_phone %} · {{ repair.delivery_courier_phone }}{% endif %}{% else %}нет{% endif %}
+        </button>
+        {% else %}
+        <span class="ichip-view is-static">{{ '🚚 да' if repair.is_delivery else 'нет' }}{% if repair.delivery_courier_phone %} · {{ repair.delivery_courier_phone }}{% endif %}</span>
+        {% endif %}
+      </div>
+
+      {# Статус — в конце блока: основные данные техники читаются первыми. #}
+      {{ chip('status', 'Статус', repair.status, can.finish or can.admin, 'select', status_opts) }}
     </div>
-    {% if repair.complectation %}
-    <div class="rcard-tags">
-      {% for k, v in repair.complectation.items() if v %}<span class="chip gray">{{ k }}</span>{% endfor %}
-    </div>
-    {% endif %}
   </section>
 
   <div class="rcard-grid">
@@ -151,24 +175,39 @@
         {{ chip('fault_client', 'Со слов клиента', repair.fault_client, can.device or can.admin, wide=true) }}
         {{ chip('fault_master', 'Диагноз мастера', repair.fault_master, can.edit, wide=true) }}
         {{ chip('work_done', 'Что сделано', repair.work_done, can.finance or can.edit, wide=true) }}
-        {{ chip('condition_notes', 'Внешний вид', repair.condition_notes, can.device or can.admin, wide=true) }}
       </div>
       <h3 style="margin-top:18px">Мастера</h3>
-      {% set mnames = [] %}{% for m in repair.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
+      {% set linked = {} %}
+      {% for m in repair.masters %}{% set _ = linked.update({m.user_id | string: (m.kind or 'master')}) %}{% endfor %}
       {% if can.assign %}
-      <form method="post" action="/repairs/{{ repair.id }}/assign" class="mchips-form">
-        <div class="mchips">
-          {% for m in masters %}
-          <label class="mchip {% if m.id in master_ids %}on{% endif %}">
-            <input type="checkbox" name="master_ids" value="{{ m.id }}" {% if m.id in master_ids %}checked{% endif %}>
-            <span>{{ m.name }}</span>
-          </label>
-          {% endfor %}
-        </div>
-        <div style="margin-top:8px"><button class="btn sm" type="submit">Назначить</button></div>
+      {# Клик по имени — меню действий: передать, назначить мастером/помощником,
+         убрать. Раньше здесь были чекбоксы и кнопка «Назначить». #}
+      <div class="mchips">
+        {% for m in masters %}
+        {% set kind = linked.get(m.id | string, '') %}
+        <button type="button" class="mchip{% if kind == 'master' %} on{% elif kind == 'helper' %} is-helper{% endif %}"
+                data-mchip="{{ m.id }}" data-mname="{{ m.name }}" data-mkind="{{ kind }}"
+                title="Нажмите — действия с мастером">
+          <span>{{ m.name }}</span>
+          {% if kind %}<i>{{ 'мастер' if kind == 'master' else 'помощник' }}</i>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+      <form method="post" action="/repairs/{{ repair.id }}/master-action" data-mact-form hidden>
+        <input type="hidden" name="user_id" value="">
+        <input type="hidden" name="action" value="">
+        <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
       </form>
+      <div class="mpop" data-mpop hidden>
+        <p class="mpop__title"><span data-mname-slot></span></p>
+        <button type="button" class="mpop__btn" data-mact="transfer">↪ Передать ремонт</button>
+        <button type="button" class="mpop__btn" data-mact="master">🔧 Назначить мастером</button>
+        <button type="button" class="mpop__btn" data-mact="helper">🤝 Назначить помощником</button>
+        <button type="button" class="mpop__btn is-danger" data-mact="remove">✕ Убрать с ремонта</button>
+      </div>
       {% else %}
       <div class="mchips">
+        {% set mnames = [] %}{% for m in repair.masters %}{% if (m.kind or 'master') != 'helper' %}{% set _ = mnames.append(m.user.name) %}{% endif %}{% endfor %}
         {% if mnames %}
           {% for n in mnames %}<span class="mchip on"><span>{{ n }}</span></span>{% endfor %}
         {% elif repair.master %}
@@ -268,5 +307,66 @@
     </section>
   </div>
 </article>
+
+{# Окна-списки: открываются двойным кликом по чипу в паспорте. #}
+<div class="rpop-scrim" data-pop-scrim hidden></div>
+
+{% if can.device or can.admin %}
+<form class="rpop-modal" id="pop-condition" method="post" action="/repairs/{{ repair.id }}/condition" data-pop-modal hidden>
+  <h3>Состояние техники</h3>
+  <p class="rpop__hint">Отметьте, что видно на корпусе, — список подставится в чип «Состояние».</p>
+  <div class="rpop__list">
+    {% for c in condition_options %}
+    <label class="check"><input type="checkbox" name="items" value="{{ c }}"
+      {% if c in condition_marks %}checked{% endif %}> {{ c }}</label>
+    {% endfor %}
+  </div>
+  <label class="fld"><span class="lbl">Своими словами</span>
+    <input type="text" name="extra" value="{{ condition_free }}" placeholder="например: отсутствует крышка отсека"></label>
+  <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+  <div class="rpop__feet">
+    <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
+    <button type="submit" class="btn sm primary">Сохранить</button>
+  </div>
+</form>
+
+<form class="rpop-modal" id="pop-complect" method="post" action="/repairs/{{ repair.id }}/complectation" data-pop-modal hidden>
+  <h3>Комплектация</h3>
+  <p class="rpop__hint">Что приехало вместе с техникой. Не забудьте отметить недостающее в бланке.</p>
+  <div class="rpop__list">
+    {% for c in complectation_options %}
+    <label class="check"><input type="checkbox" name="items" value="{{ c }}"
+      {% if c in complectation_marked %}checked{% endif %}> {{ c }}</label>
+    {% endfor %}
+  </div>
+  <label class="fld"><span class="lbl">Добавить своё</span>
+    <input type="text" name="extra" placeholder="например: настенный кронштейн"></label>
+  <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+  <div class="rpop__feet">
+    <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
+    <button type="submit" class="btn sm primary">Сохранить</button>
+  </div>
+</form>
+{% endif %}
+
+{% if can.delivery %}
+<form class="rpop-modal" id="pop-delivery" method="post" action="/repairs/{{ repair.id }}/delivery" data-pop-modal hidden>
+  <h3>Доставка</h3>
+  <p class="rpop__hint">Отметьте, если технику привозили или забирали с адреса, и укажите телефон доставщика.</p>
+  <label class="check"><input type="checkbox" name="is_delivery" value="1"
+    {% if repair.is_delivery %}checked{% endif %}> Была доставка (не приносили в сервис)</label>
+  <label class="fld"><span class="lbl">Телефон доставщика</span>
+    <input type="tel" name="courier_phone" value="{{ repair.delivery_courier_phone or '' }}" placeholder="+993 6x xxxxxx"></label>
+  <label class="fld"><span class="lbl">Район</span>
+    <input type="text" name="delivery_district" value="{{ repair.delivery_district or '' }}"></label>
+  <label class="fld"><span class="lbl">Комментарий</span>
+    <input type="text" name="delivery_comment" value="{{ repair.delivery_comment or '' }}" placeholder="позвонить за час, 3 этаж"></label>
+  <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
+  <div class="rpop__feet">
+    <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
+    <button type="submit" class="btn sm primary">Сохранить</button>
+  </div>
+</form>
+{% endif %}
 {% endblock %}
 {% block page_js %}<script src="/static/msb/repair-card.js"></script>{% endblock %}

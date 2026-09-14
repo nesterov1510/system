@@ -203,6 +203,7 @@ def _serialize(repair: Repair) -> RepairOut:
         is_delivery=repair.is_delivery,
         delivery_district=repair.delivery_district,
         delivery_comment=repair.delivery_comment,
+        delivery_courier_phone=repair.delivery_courier_phone,
         reminder_next_at=repair.reminder_next_at,
         reminder_last_at=repair.reminder_last_at,
         reminder_count=repair.reminder_count or 0,
@@ -1228,6 +1229,9 @@ async def update_repair(
             link = existing.get(mid)
             if link is not None:
                 link.position = position
+                # Помощника повысили до мастера — связь переиспользуется,
+                # поэтому роль на ней надо перевести явно.
+                link.kind = "master"
             else:
                 repair.masters.append(RepairMaster(user_id=mid, position=position))
         # Основной мастер = первый в списке (используется правами и доской).

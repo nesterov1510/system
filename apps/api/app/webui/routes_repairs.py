@@ -47,12 +47,15 @@ from app.schemas.parts import RepairPartAdd
 from app.schemas.payments import PaymentCreate
 from app.schemas.repair import ClientCreate, RepairCreate, RepairUpdate
 from app.services.settings import get_currency, get_repair_statuses
-from app.webui.catalog import DEVICE_CLASSES, normalize_class
+from app.webui.catalog import CONDITION_OPTIONS, DEFAULT_COMPLECTATION, DEVICE_CLASSES, normalize_class
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
 from app.webui.templating import render_async
 
 router = APIRouter(tags=["webui-repairs"])
+
+# Действия из меню мастера в карточке ремонта (POST /repairs/{id}/master-action).
+MASTER_ACTIONS = ("transfer", "master", "helper", "remove")
 
 
 def _db():
@@ -85,6 +88,18 @@ async def _complectation(db):
     return (await db.execute(select(ComplectationItem).order_by(ComplectationItem.sort))).scalars().all()
 
 
+def _checked_marks(form) -> list[str]:
+    """Отмеченные пункты списка + свой текст, без дублей и пустых строк."""
+    items = [(x or "").strip() for x in form.getlist("items")]
+    items.append((form.get("extra") or "").strip())
+    return list(dict.fromkeys(x for x in items if x))
+
+
+def _join_marks(form) -> str | None:
+    marks = _checked_marks(form)
+    return ", ".join(marks) if marks else None
+
+
 async def _cities(db):
     from app.db.models import City
     return (await db.execute(select(City).order_by(City.name))).scalars().all()
@@ -112,6 +127,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
     try:
         from app.services.stats import DASHBOARD_FILTER_LABELS
         from app.webui.data import (
+            EXTRA_STATUS_FILTERS,
             STAGE_STATUSES,
             fetch_repairs,
             repair_parts_cost,
@@ -162,6 +178,7 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             parts_cost=parts_cost,
             parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
+            extra_status_filters=EXTRA_STATUS_FILTERS,
             masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
             just=just, printed=printed,
             sms=request.query_params.get("sms"),
@@ -555,6 +572,19 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         paid_total = sum(float(p.amount) for p in payments)
         master_ids = [m.user_id for m in repair.masters if (m.kind or "master") != "helper"]
 
+        # Списки для чипов «Состояние» и «Комплектация»: готовые отметки +
+        # справочник из БД + то, что уже отмечено в этом ремонте.
+        catalog_items = [c.name for c in await _complectation(db)]
+        complectation_marked = [k for k, v in (repair.complectation or {}).items() if v]
+        complectation_options = list(dict.fromkeys(
+            DEFAULT_COMPLECTATION + catalog_items + complectation_marked
+        ))
+        # «Состояние» хранится строкой через запятую: известные отметки
+        # подсвечиваются в списке, остальное уходит в поле «своими словами».
+        note_parts = [x.strip() for x in (repair.condition_notes or "").split(",") if x.strip()]
+        condition_marks = [x for x in note_parts if x in CONDITION_OPTIONS]
+        condition_free = ", ".join(x for x in note_parts if x not in CONDITION_OPTIONS)
+
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repair=repair, parts=parts, payments=payments, photos=photos,
@@ -563,6 +593,11 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
             parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
             device_classes=DEVICE_CLASSES,
+            condition_options=CONDITION_OPTIONS,
+            complectation_options=complectation_options,
+            complectation_marked=complectation_marked,
+            condition_marks=condition_marks,
+            condition_free=condition_free,
             can={
                 "finance": can_edit_finances(user),
                 # Назначение — по конкретному ремонту: мастер может взять
@@ -581,6 +616,9 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
                 "master_only": is_master_only(user),
                 "admin": can_delete_repair(user),
                 "delete": can_delete_repair(user),
+                # Доставку (район, телефон курьера) ведут старшие роли — как
+                # и данные клиента.
+                "delivery": user.has_role("admin", "manager", "operator"),
             },
         )
         html = await render_async("repairs/detail.html", **ctx)
@@ -732,6 +770,169 @@ async def repair_assign(request: Request, repair_id: uuid.UUID):
                 "Этот ремонт занят другим мастером", status_code=403
             )
         payload = RepairUpdate(master_ids=ids or None)
+        try:
+            await repairs_api.update_repair(repair_id, payload, db, user)
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/master-action")
+async def repair_master_action(request: Request, repair_id: uuid.UUID):
+    """Действие с одним мастером из карточки ремонта.
+
+    Клик по имени мастера открывает меню: передать ремонт, назначить
+    мастером, назначить помощником или убрать с ремонта. Состав исполнителей
+    при этом пересобирается целиком и уходит тем же `update_repair`, что и
+    обычное назначение.
+    """
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        action = (form.get("action") or "").strip()
+        try:
+            target = uuid.UUID((form.get("user_id") or "").strip())
+        except ValueError:
+            return HTMLResponse("Неизвестный мастер", status_code=400)
+        if action not in MASTER_ACTIONS:
+            return HTMLResponse("Неизвестное действие", status_code=400)
+
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_assign_repair_masters(user, repair):
+            return HTMLResponse("Этот ремонт занят другим мастером", status_code=403)
+
+        masters = [m.user_id for m in repair.masters if (m.kind or "master") != "helper"]
+        helpers = [m.user_id for m in repair.masters if (m.kind or "master") == "helper"]
+        if action == "transfer":
+            # Передать ремонт: исполнитель теперь только он.
+            masters, helpers = [target], [h for h in helpers if h != target]
+        elif action == "master":
+            helpers = [h for h in helpers if h != target]
+            if target not in masters:
+                masters.append(target)
+        elif action == "helper":
+            masters = [m for m in masters if m != target]
+            if target not in helpers:
+                helpers.append(target)
+        else:  # remove
+            masters = [m for m in masters if m != target]
+            helpers = [h for h in helpers if h != target]
+
+        try:
+            if action == "helper" and target in [
+                m.user_id for m in repair.masters if (m.kind or "master") != "helper"
+            ]:
+                # Понижение мастера до помощника — двумя запросами: удаление и
+                # вставка той же пары (repair_id, user_id) в одном flush
+                # упирается в уникальный индекс repair_masters.
+                await repairs_api.update_repair(
+                    repair_id, RepairUpdate(master_ids=masters), db, user
+                )
+                await repairs_api.update_repair(
+                    repair_id, RepairUpdate(helper_ids=helpers), db, user
+                )
+            else:
+                await repairs_api.update_repair(
+                    repair_id,
+                    RepairUpdate(master_ids=masters, helper_ids=helpers),
+                    db,
+                    user,
+                )
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/condition")
+async def repair_condition(request: Request, repair_id: uuid.UUID):
+    """Чип «Состояние»: отметки из списка + свой текст."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_access_repair(user, repair):
+            return HTMLResponse("Нет доступа", status_code=403)
+        if not (can_edit_device_info(user) or user.has_role("admin", "manager", "operator")):
+            return HTMLResponse("Недостаточно прав", status_code=403)
+        value = _join_marks(form)
+        try:
+            await repairs_api.update_repair(
+                repair_id, RepairUpdate(condition_notes=value), db, user
+            )
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/complectation")
+async def repair_complectation(request: Request, repair_id: uuid.UUID):
+    """Чип «Комплектация»: что приехало вместе с техникой."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_access_repair(user, repair):
+            return HTMLResponse("Нет доступа", status_code=403)
+        if not (can_edit_device_info(user) or user.has_role("admin", "manager", "operator")):
+            return HTMLResponse("Недостаточно прав", status_code=403)
+        items = _checked_marks(form)
+        # Храним так же, как приёмка: словарь {название: True}.
+        complectation = {name: True for name in items}
+        try:
+            await repairs_api.update_repair(
+                repair_id, RepairUpdate(complectation=complectation), db, user
+            )
+        except HTTPException as e:
+            return HTMLResponse(str(e.detail), status_code=e.status_code)
+        return RedirectResponse(nxt, status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/delivery")
+async def repair_delivery(request: Request, repair_id: uuid.UUID):
+    """Чип «Доставка»: была ли доставка и телефон доставщика."""
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from fastapi import HTTPException
+
+        form = await request.form()
+        nxt = _safe_next(form.get("next"), f"/repairs/{repair_id}")
+        repair = await repairs_api._get_repair_or_404(db, repair_id)
+        if not can_access_repair(user, repair):
+            return HTMLResponse("Нет доступа", status_code=403)
+        if not user.has_role("admin", "manager", "operator"):
+            return HTMLResponse("Недостаточно прав", status_code=403)
+        is_delivery = (form.get("is_delivery") or "").strip() in ("1", "true", "on", "yes", "да")
+        payload = RepairUpdate(
+            is_delivery=is_delivery,
+            delivery_courier_phone=(form.get("courier_phone") or "").strip() or None,
+            delivery_district=(form.get("delivery_district") or "").strip() or None,
+            delivery_comment=(form.get("delivery_comment") or "").strip() or None,
+        )
         try:
             await repairs_api.update_repair(repair_id, payload, db, user)
         except HTTPException as e:

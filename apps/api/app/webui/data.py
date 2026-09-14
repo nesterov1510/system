@@ -15,10 +15,20 @@ from app.db.models import (
     Repair,
     RepairMaster,
     RepairPart,
+    RepairStatus,
 )
 from app.webui.catalog import STAGES
 
 STAGE_STATUSES = {key: statuses for key, _label, statuses in STAGES}
+
+# Два «состояния», которых нет в списке статусов: это факты из дат и оплаты.
+# Живут в фильтре по статусу вкладки «Все ремонты» как отдельные пункты.
+STATUS_READY_IN_SERVICE = "__ready_in_service"   # готово, но техника в сервисе
+STATUS_ISSUED_UNPAID = "__issued_unpaid"         # выдано, но не оплачено
+EXTRA_STATUS_FILTERS = (
+    (STATUS_READY_IN_SERVICE, "✓ Готово, стоит в сервисе"),
+    (STATUS_ISSUED_UNPAID, "⚠ Выдано, но не оплачено"),
+)
 
 
 def master_scope(user_id: uuid.UUID):
@@ -52,7 +62,15 @@ async def fetch_repairs(
         filters.extend(dashboard_filter_clauses(dash_filter))
     if stage and stage != "all" and stage in STAGE_STATUSES:
         filters.append(Repair.status.in_(STAGE_STATUSES[stage]))
-    if status:
+    if status == STATUS_READY_IN_SERVICE:
+        # «Готово, стоит в сервисе»: ремонт завершён, а клиент технику не забрал.
+        filters.append(Repair.status == RepairStatus.DONE)
+        filters.append(Repair.issued_at.is_(None))
+    elif status == STATUS_ISSUED_UNPAID:
+        # «Выдано, но не оплачено»: технику забрали, а денег нет.
+        filters.append(Repair.issued_at.isnot(None))
+        filters.append(Repair.paid.is_(False))
+    elif status:
         filters.append(Repair.status == status)
     if exclude_statuses:
         # Доска «Все ремонты»: показываем только «живые» (без завершённых).

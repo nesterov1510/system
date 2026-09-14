@@ -303,6 +303,9 @@ class Repair(Base, TimestampMixin):
     # Необязательный комментарий к доставке («позвонить за час», «3 этаж»,
     # «вход со двора»…). Заполняется в том же окне, что и район.
     delivery_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Телефон доставщика (курьера), который возил технику. Заполняется в
+    # чипе «Доставка» в карточке ремонта.
+    delivery_courier_phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # --- Ежедневные SMS-напоминания «заберите технику» ---
     # reminder_next_at = NULL  → напоминания не запланированы (ремонт не готов

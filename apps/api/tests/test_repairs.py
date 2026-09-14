@@ -39,9 +39,20 @@ def test_public_page_not_found(client):
 
 def test_master_sees_full_repair_list(client, master_headers, created_repair):
     """Список ремонтов у мастера общий: в нём видно и свободные заказы."""
-    r = client.get("/api/repairs", headers=master_headers, params={"page_size": 100})
-    assert r.status_code == 200
-    numbers = {x["number"] for x in r.json()["items"]}
+    # page_size ограничен сотней, а ремонтов в тестовой БД со временем
+    # становится больше — поэтому листаем до конца.
+    numbers, page = set(), 1
+    while True:
+        r = client.get(
+            "/api/repairs", headers=master_headers,
+            params={"page_size": 100, "page": page},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        numbers.update(x["number"] for x in data["items"])
+        if page * 100 >= data["total"]:
+            break
+        page += 1
     assert created_repair["number"] in numbers
 
 

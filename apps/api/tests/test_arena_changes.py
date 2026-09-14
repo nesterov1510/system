@@ -332,9 +332,12 @@ def test_repair_card_chips_no_eta_manual_parts(client, admin_headers):
     # Запчасти: селекта каталога нет, только ручной ввод.
     assert 'name="part_id"' not in html
     assert "Запчасть (вручную)" in html
-    # Мастера — чип-селект (checkbox-пилюли), не multiselect.
+    # Мастера — кликабельные пилюли с меню действий, не multiselect и не
+    # чекбоксы: выбор уходит в /master-action одним user_id + action.
     assert 'class="mchips"' in html
-    assert 'name="master_ids"' in html
+    assert "data-mchip=" in html
+    assert 'action="/repairs/' + rep["id"] + '/master-action"' in html
+    assert 'name="master_ids"' not in html
     assert "<select name=\"master_ids\" multiple" not in html
 
 
