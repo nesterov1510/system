@@ -1029,7 +1029,9 @@ async def repairs_stats(
         user, stage, status, master_id, mid_list, q,
         date_from, date_to, date_field, unassigned,
     )
-    ids_sub = select(Repair.id).where(*filters).subquery()
+    # Обычный select(), а не subquery(): in_() принимает его без приведения
+    # (иначе SQLAlchemy ругается SAWarning на каждом запросе статистики).
+    ids_sub = select(Repair.id).where(*filters)
 
     total_row = await db.execute(
         select(
