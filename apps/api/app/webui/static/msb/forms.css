@@ -31,12 +31,27 @@
 .check input{width:17px;height:17px;margin-top:1px;accent-color:#ff7a00;flex:0 0 auto}
 
 /* ---------- Кнопки ---------- */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid transparent;border-radius:11px;padding:0 18px;min-height:42px;background:#1b2731;color:#fff;font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none;transition:background .15s ease,transform .12s ease,box-shadow .15s ease}
-.btn:hover{transform:translateY(-1px)}
-.btn.green{background:#2c9a66}.btn.green:hover{background:#26865a}
-.btn.sec,.btn.secondary{background:#fff;color:#4d5a65;border-color:#dfe4e8}.btn.sec:hover,.btn.secondary:hover{background:#f5f7f8}
-.btn.primary,.btn-primary{background:#ff7a00;color:#fff}.btn.primary:hover,.btn-primary:hover{background:#f07300}
-.btn.sm{min-height:34px;padding:0 12px;font-size:12.5px;border-radius:9px}
+/* Три уровня заметности: .primary/.cta — главное действие страницы (оранжевая,
+   с тенью), .btn — обычное действие (тёмная), .sec — вспомогательное (белая).
+   Высота подобрана под палец: 44px на телефоне, 42px на десктопе. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid transparent;border-radius:12px;padding:0 18px;min-height:44px;background:#20303c;color:#fff;font:inherit;font-size:14px;font-weight:750;letter-spacing:.01em;cursor:pointer;text-decoration:none;white-space:nowrap;box-shadow:0 1px 2px rgba(15,23,32,.14);transition:background .15s ease,transform .12s ease,box-shadow .15s ease,border-color .15s ease,color .15s ease}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(15,23,32,.16);background:#182430}
+.btn:active{transform:translateY(0);box-shadow:0 1px 2px rgba(15,23,32,.16)}
+.btn:focus-visible{outline:3px solid rgba(255,122,0,.45);outline-offset:2px}
+.btn[disabled],.btn.is-disabled{opacity:.45;pointer-events:none}
+.btn.green{background:#2c9a66;box-shadow:0 1px 2px rgba(23,94,60,.22)}.btn.green:hover{background:#26865a;box-shadow:0 6px 16px rgba(23,94,60,.24)}
+.btn.sec,.btn.secondary{background:#fff;color:#3b4854;border-color:#d5dce2;font-weight:700;box-shadow:0 1px 2px rgba(15,23,32,.07)}.btn.sec:hover,.btn.secondary:hover{background:#f6f8f9;border-color:#c5ced6;color:#22303b;box-shadow:0 4px 12px rgba(15,23,32,.10)}
+/* Главная кнопка — самая заметная: её должно быть видно и на солнце, и на
+   узком экране, поэтому фон с градиентом и выраженная тень. */
+.btn.primary,.btn-primary,.btn.cta{background:linear-gradient(180deg,#ff9330,#ff6a00);border-color:#ef6a06;color:#fff;box-shadow:0 8px 18px rgba(255,106,0,.30)}
+.btn.primary:hover,.btn-primary:hover,.btn.cta:hover{background:linear-gradient(180deg,#ff871a,#f26300);box-shadow:0 10px 22px rgba(255,106,0,.36)}
+.btn.sm{min-height:38px;padding:0 14px;font-size:13px;border-radius:10px}
+/* На телефоне «маленьких» кнопок не бывает: всё, что нажимается пальцем,
+   должно быть не меньше 44px, иначе по кнопке тяжело попасть. */
+@media(max-width:820px){
+  .btn{min-height:46px;padding:0 16px;font-size:14.5px}
+  .btn.sm{min-height:44px;padding:0 14px;font-size:13.5px;border-radius:11px}
+}
 
 /* ---------- Чипсы ---------- */
 .chip{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border:1px solid #dce2e8;border-radius:999px;background:#fff;color:#43515d;font-size:13px;font-weight:600;cursor:pointer;transition:all .13s ease}
@@ -192,7 +207,8 @@ th .colhint{position:relative;top:-1px}
 .topbar-bell.is-active{border-color:#efc59a;background:#fff7ef;color:#d96300}
 .topbar-bell svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .topbar-bell__badge{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;display:grid;place-items:center;border-radius:999px;background:#ff5a2c;color:#fff;font-size:10px;font-weight:800;line-height:1;border:2px solid #fff}
-@media(max-width:470px){.topbar-bell{width:38px;height:38px}.topbar-bell svg{width:18px;height:18px}}
+/* Колокольчик не ужимается меньше 42px: это тоже кнопка, по ней попадают пальцем. */
+@media(max-width:470px){.topbar-bell{width:42px;height:42px}.topbar-bell svg{width:19px;height:19px}}
 
 /* ---------- Список уведомлений ---------- */
 .notif-list{display:grid;gap:10px}
@@ -214,7 +230,15 @@ th .colhint{position:relative;top:-1px}
 .page-head h1{margin:0;font-size:clamp(22px,2.4vw,28px);letter-spacing:-.02em;color:#17202a}
 .page-head p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.55;max-width:720px}
 .page-head .btn{align-self:flex-end}
-@media(max-width:560px){.page-head{align-items:stretch;flex-direction:column}.page-head .btn{align-self:flex-start}}
+/* На телефоне кнопка раздела растягивается на всю ширину: её видно сразу,
+   и попасть по ней пальцем проще. */
+@media(max-width:560px){
+  .page-head{align-items:stretch;flex-direction:column}
+  .page-head .btn,.page-head .btn-row{align-self:stretch}
+  .page-head__actions{width:100%}
+  .page-head__actions>.btn,.page-head__actions>form,.btn-row>.btn,.btn-row>form{flex:1 1 auto;min-width:0}
+  .page-head .btn,.page-head__actions .btn{white-space:normal;line-height:1.25}
+}
 
 /* ===== Компактная карточка ремонта: чипы вместо вкладок ===== */
 .rcard{display:grid;gap:12px}
@@ -241,6 +265,8 @@ th .colhint{position:relative;top:-1px}
 .act{width:30px;height:30px;display:grid;place-items:center;border:1px solid #e1e6ea;border-radius:8px;background:#fff;color:#3d4851;text-decoration:none;font-size:13px;cursor:pointer;padding:0}
 .act:hover{border-color:#ef9a4b;background:#fff7ef}
 .act.green{background:#eaf8f1;border-color:#bfe6cf}
-.btn.red,.btn.danger{background:#c0392b;color:#fff}
-.btn.red:hover,.btn.danger:hover{background:#a93226}
+.btn.red,.btn.danger{background:#c0392b;color:#fff;box-shadow:0 1px 2px rgba(120,32,24,.22)}
+.btn.red:hover,.btn.danger:hover{background:#a93226;box-shadow:0 6px 16px rgba(120,32,24,.24)}
+/* Квадратная кнопка-иконка (например «🗑» в шапке карточки ремонта). */
+.btn.icon{width:44px;min-width:44px;padding:0}
 @media(max-width:820px){.rcard-grid{grid-template-columns:1fr}}

@@ -2,7 +2,7 @@
 {% block title %}Клиенты{% endblock %}
 {% block page_name %}Клиенты{% endblock %}
 {% block page_css %}<link rel="stylesheet" href="/static/msb/repair.css">{% endblock %}
-{% block topbar_actions %}<a class="btn sm" href="/repairs/new">➕ Новая приёмка</a>{% endblock %}
+{% block topbar_actions %}<a class="btn sm primary" href="/repairs/new">➕ Новая приёмка</a>{% endblock %}
 {% block content %}
 {% if just == 'deleted' %}
 <div class="flash ok">✓ Удалено контактов: <b>{{ n or request.query_params.get('n') or '0' }}</b>.</div>

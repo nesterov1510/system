@@ -43,9 +43,9 @@
     </form>
   {% endif %}
   {% if can.delete %}
-    <form method="post" action="/repairs/{{ repair.id }}/delete" style="margin:0"
+    <form class="act-icon" method="post" action="/repairs/{{ repair.id }}/delete" style="margin:0"
           onsubmit="return confirm('Удалить ремонт {{ repair.number }}?')">
-      <button class="btn sm red" type="submit">🗑</button>
+      <button class="btn sm red icon" type="submit" aria-label="Удалить ремонт">🗑</button>
     </form>
   {% endif %}
 {% endblock %}

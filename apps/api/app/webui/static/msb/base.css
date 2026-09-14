@@ -30,7 +30,12 @@ svg{display:block}
 .topbar{height:var(--topbar-h);background:rgba(255,255,255,.96);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 24px;position:sticky;top:0;z-index:30}
 .topbar-title{min-width:0}.topbar-title strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.topbar-title small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 .topbar-spacer{flex:1}
-.topbar-menu-button{display:none;width:38px;height:38px;border:1px solid var(--line);background:#fff;border-radius:10px;align-items:center;justify-content:center;color:#26323c;cursor:pointer}
+/* Кнопки действий страницы (block topbar_actions) — в одном контейнере, чтобы
+   на узком экране их можно было перенести на свою строку целиком. */
+.topbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.topbar-actions:empty{display:none}
+.topbar-actions>form{display:flex;margin:0}
+.topbar-menu-button{display:none;width:42px;height:42px;border:1px solid var(--line);background:#fff;border-radius:10px;align-items:center;justify-content:center;color:#26323c;cursor:pointer}
 .topbar-menu-button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .content{padding:24px}
 
@@ -117,4 +122,22 @@ svg{display:block}
 .topbar-user__avatar{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(145deg,#ff8d28,#ff7208);color:#fff;font-size:11px;font-weight:900;letter-spacing:.04em;box-shadow:0 5px 12px rgba(255,122,0,.18)}
 .topbar-user__copy{min-width:0}.topbar-user__copy strong,.topbar-user__copy small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.topbar-user__copy strong{font-size:11.5px;line-height:1.25}.topbar-user__copy small{margin-top:2px;color:#8a949d;font-size:9.5px}.topbar-user__chevron{width:15px;height:15px;fill:none;stroke:#9aa4ad;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media(max-width:720px){.topbar-user{max-width:190px;grid-template-columns:32px minmax(0,1fr);height:42px;padding:4px 7px 4px 5px}.topbar-user__avatar{width:32px;height:32px}.topbar-user__chevron{display:none}.topbar-user__copy strong{font-size:10.5px}.topbar-user__copy small{font-size:9px}}
-@media(max-width:470px){.topbar-title small{display:none}.topbar-user{width:38px;min-width:38px;padding:2px;display:grid;grid-template-columns:1fr;border-color:transparent;background:transparent}.topbar-user__avatar{width:34px;height:34px}.topbar-user__copy{display:none}}
+@media(max-width:470px){.topbar-title small{display:none}.topbar-user{width:42px;min-width:42px;padding:2px;display:grid;grid-template-columns:1fr;border-color:transparent;background:transparent}.topbar-user__avatar{width:38px;height:38px}.topbar-user__copy{display:none}}
+
+/* ===== Действия в шапке на узких экранах ===== */
+/* На телефоне кнопкам не хватает места в одну строку: меню 38px + заголовок +
+   колокольчик + профиль съедают ширину, и «Приёмка» сплющивается в нечитаемую
+   щель. Поэтому с 700px шапка становится двухрядной, а кнопки получают свою
+   строку во всю ширину и высоту под палец. */
+@media(max-width:700px){
+  .topbar{height:auto;min-height:var(--topbar-h);flex-wrap:wrap;align-items:center;padding:8px 12px;row-gap:9px}
+  .topbar-spacer{display:none}
+  .topbar-title{flex:1 1 auto}
+  .topbar-actions{order:10;flex:1 1 100%;flex-wrap:wrap}
+  /* Одинаковая база 140px: в строке умещается две кнопки, и делят они её
+     поровну — «Приёмка» и «Доска» получаются одного размера. */
+  .topbar-actions>*{flex:1 1 140px;min-width:0}
+  .topbar-actions>.act-icon,.topbar-actions>form.act-icon{flex:0 0 auto}
+  .topbar-actions .btn{width:100%;min-width:0;padding:9px 13px;white-space:normal;line-height:1.25}
+  .topbar-actions .btn.icon{width:48px;padding:0}
+}
