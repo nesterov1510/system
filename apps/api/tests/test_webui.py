@@ -218,7 +218,7 @@ def test_board_view_renders(client):
     cookies = _login(client)
     r = client.get("/repairs?view=board", cookies=cookies)
     assert r.status_code == 200
-    assert "kanban" in r.text or "kcol" in r.text
+    assert 'class="board"' in r.text
 
 
 def test_repairs_table_compact_columns_and_hints(client):

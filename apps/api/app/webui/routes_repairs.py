@@ -150,11 +150,6 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         currency = await get_currency(db)
         statuses = await get_repair_statuses(db)
         masters = await _masters_list(db)
-        stage_labels = [("new", "Новые"), ("diag", "Диагностика"),
-                        ("work", "В работе"), ("done", "Завершены")]
-        # На доске колонки «Завершены» нет: «законченные» сюда не попадают.
-        board_labels = [item for item in stage_labels if item[0] != "done"]
-
         master_only = is_master_only(user)
         # Мастер видит все ремонты и может брать свободные себе — поэтому
         # колонка «Мастера» редактируется и ему, а не только старшим ролям.
@@ -168,7 +163,6 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
             masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
-            stages=board_labels if view == "board" else stage_labels,
             just=just, printed=printed,
             sms=request.query_params.get("sms"),
             sms_detail=request.query_params.get("sms_detail"),

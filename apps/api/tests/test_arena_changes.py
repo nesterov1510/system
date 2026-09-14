@@ -210,7 +210,8 @@ def test_list_row_does_not_navigate_on_single_click(client):
 
 
 # -------------------------------------------------------------------- доска
-def test_board_excludes_finished_and_keeps_three_columns(client, admin_headers):
+def test_board_excludes_finished_and_has_no_stage_columns(client, admin_headers):
+    """Доска — один общий список: ни колонок по этапам, ни подсказки сверху."""
     rep = _make_repair(client, admin_headers, "board-done-1", "Доска Готовый", "+993 61 555000")
     client.patch(
         f"/api/repairs/{rep['id']}", headers=admin_headers,
@@ -220,8 +221,7 @@ def test_board_excludes_finished_and_keeps_three_columns(client, admin_headers):
     board = client.get("/repairs?view=board", cookies=cookies)
     assert board.status_code == 200
     assert "Доска Готовый" not in board.text
-    assert board.text.count('class="kcol"') == 3, "на доске должно быть 3 колонки"
-    # А в таблице на этапе «Завершены» он есть.
+    # Завершённые по-прежнему живут только в таблице, на этапе «Завершены».
     table = client.get("/repairs?stage=done", cookies=cookies)
     assert "Доска Готовый" in table.text
 
