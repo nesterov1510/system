@@ -1,0 +1,29 @@
+# /etc/cloudflared/config.yml — вариант без белого IP и без открытых портов.
+# Cloudflare Tunnel сам выходит наружу, поэтому сервер может стоять за NAT
+# (как сейчас: 192.168.8.81). Наружу уходят только перечисленные пути.
+#
+#   cloudflared tunnel create msb-public
+#   cloudflared tunnel route dns msb-public status.example.com
+#   sudo cp deploy/cloudflared-config.yml /etc/cloudflared/config.yml   # вписать UUID
+#   sudo systemctl enable --now cloudflared
+#
+# За спиной — публичный экземпляр с PUBLIC_ONLY=true (127.0.0.1:8086).
+
+tunnel: <UUID-ТУННЕЛЯ>
+credentials-file: /etc/cloudflared/<UUID-ТУННЕЛЯ>.json
+
+ingress:
+  - hostname: status.example.com
+    path: ^/r/.*
+    service: http://127.0.0.1:8086
+  - hostname: status.example.com
+    path: ^/static/msb/base\.css$
+    service: http://127.0.0.1:8086
+  - hostname: status.example.com
+    path: ^/api/public/.*
+    service: http://127.0.0.1:8086
+  - hostname: status.example.com
+    path: ^/health$
+    service: http://127.0.0.1:8086
+  # Всё остальное — 404, наружу не проксируется.
+  - service: http_status:404

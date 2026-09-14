@@ -70,8 +70,22 @@ def public_base_url(request=None) -> str:
     return origin
 
 
+def client_base_url(request=None) -> str:
+    """Origin клиентской страницы статуса.
+
+    CLIENT_BASE_URL задаёт его жёстко — это адрес в интернете, на который
+    вынесена только страница /r/{token}. Без него остаётся прежнее поведение:
+    адрес берётся из запроса печати (или из PUBLIC_BASE_URL), то есть ведёт во
+    внутреннюю сеть.
+    """
+    configured = (settings.CLIENT_BASE_URL or "").strip()
+    if configured:
+        return normalize_public_base_url(configured)
+    return public_base_url(request)
+
+
 def public_status_url(token: str, request=None) -> str:
-    return f"{public_base_url(request)}/r/{token}"
+    return f"{client_base_url(request)}/r/{token}"
 
 
 def public_repair_url(repair_id, request=None) -> str:

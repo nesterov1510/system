@@ -381,6 +381,80 @@ grep '^SEED_ADMIN_PASSWORD=' .env
 
 ---
 
+## 8.1. Только страница клиента наружу (хостинг)
+
+Внутренний экземпляр на `8085` смотрит в локальную сеть: там приёмка, админка,
+справочники и API. Наружу нужно вынести ровно одну вещь — страницу статуса
+ремонта `/r/{token}`, которую клиент открывает по QR. Ей нужен ещё один файл:
+`/static/msb/base.css`. Больше ничего: страница рендерится на сервере, без JS,
+без фото.
+
+Делается в два слоя, чтобы случайная ошибка в одном не открыла админку.
+
+**Слой 1 — приложение.** `PUBLIC_ONLY=true` оставляет только клиентские пути,
+всё остальное отвечает `404` (не `403`, чтобы снаружи не было видно других
+разделов):
+
+| Путь |PUBLIC_ONLY=true|
+|---|---|
+| `/r/{token}` | 200 |
+| `/api/public/r/{token}` | 200 |
+| `/static/msb/base.css` | 200 |
+| `/health` | 200 |
+| `/login`, `/repairs`, `/admin/*`, `/api/*`, `/docs`, `/static/msb/*` (прочее), `/media/*` | 404 |
+
+Отдельный `PUBLIC_ONLY` нужен потому, что полный интерфейс и клиентская
+страница — это одно приложение: проксировать `8085` наружу целиком нельзя.
+
+**Слой 2 — край.** Публичный экземпляр поднимается на `127.0.0.1:8086`
+(`deploy/msb-public.service`), а наружу его выпускает nginx
+(`deploy/nginx-public.conf`) или Cloudflare Tunnel (`deploy/cloudflared-config.yml`).
+
+```bash
+# публичный экземпляр (тот же код, PUBLIC_ONLY=true, порт 8086)
+sudo cp deploy/msb-public.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now msb-public
+
+# вариант А: есть белый IP и домен
+sudo cp deploy/nginx-public.conf /etc/nginx/sites-available/msb-public.conf
+sudo ln -s /etc/nginx/sites-available/msb-public.conf /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d status.example.com
+
+# вариант Б: белого IP нет (сервер за NAT) — туннель, порты не открываются
+cloudflared tunnel create msb-public
+cloudflared tunnel route dns msb-public status.example.com
+sudo cp deploy/cloudflared-config.yml /etc/cloudflared/config.yml   # вписать UUID
+sudo systemctl enable --now cloudflared
+```
+
+Оба файла края пропускают только `/r/`, `/api/public/`, `/static/msb/base.css`
+и `/health`; на всё остальное отвечают `404`.
+
+**QR должен вести на публичный адрес.** Ссылку клиента строит
+`public_status_url()`; по умолчанию она берёт origin из запроса печати, то есть
+адрес оператора во внутренней сети. Чтобы QR на бланке и этикетке вёл в
+интернет, задайте в `.env`:
+
+```
+CLIENT_BASE_URL=https://status.example.com
+```
+
+На внутренние ссылки (`/repairs/{id}` в панели и служебных сообщениях) эта
+переменная не влияет — они остаются на внутреннем адресе.
+
+**Проверка** (с телефона через мобильный интернет, не из Wi-Fi сервиса):
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" https://status.example.com/r/<токен>   # 200
+curl -s -o /dev/null -w "%{http_code}\n" https://status.example.com/login       # 404
+curl -s -o /dev/null -w "%{http_code}\n" https://status.example.com/api/repairs # 404
+curl -s -o /dev/null -w "%{http_code}\n" https://status.example.com/docs        # 404
+```
+
+Порт `8085` при этом остаётся закрытым снаружи: в firewall нужен только
+`443` (и `80` для выдачи сертификата), а при туннеле не нужно и этого.
+
 ## 9. Print-agent и Epson L3250 (опционально)
 
 > Второй принтер `3B-350B` для этикеток 58×38, расшаренный через CUPS на

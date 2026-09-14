@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from starlette.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
@@ -114,9 +115,29 @@ app.add_middleware(
 # Белый/чёрный список IP клиентов; правила читаются из БД с коротким кэшем.
 # Loopback всегда разрешён, чтобы админ не заблокировал сам себя.
 # --------------------------------------------------------------------------
-from starlette.responses import PlainTextResponse
-
 from app.services import ip_access
+
+
+# --------------------------------------------------------------------------
+# PUBLIC_ONLY: наружу — только то, что видит клиент.
+# --------------------------------------------------------------------------
+# Тот же код можно поднять вторым экземпляром с PUBLIC_ONLY=true на адресе,
+# который смотрит в интернет: он отдаст только публичную страницу ремонта
+# /r/{token}, её JSON и один CSS. Приёмка, админка, справочники и остальной
+# API остаются на внутреннем экземпляре. Незнакомый путь отвечает 404 (не 403),
+# чтобы снаружи не было видно, что за ним есть другие разделы.
+PUBLIC_ONLY_EXACT = ("/health", "/static/msb/base.css")
+PUBLIC_ONLY_PREFIXES = ("/r/", "/api/public/")
+
+
+@app.middleware("http")
+async def public_only_guard(request, call_next):
+    if not settings.PUBLIC_ONLY:
+        return await call_next(request)
+    path = request.url.path
+    if path in PUBLIC_ONLY_EXACT or path.startswith(PUBLIC_ONLY_PREFIXES):
+        return await call_next(request)
+    return PlainTextResponse("Not Found", status_code=404)
 
 
 @app.middleware("http")
