@@ -564,6 +564,32 @@ class Payment(Base, TimestampMixin):
     operator: Mapped["User | None"] = relationship(foreign_keys=[operator_id])
 
 
+class UserPageLayout(Base, TimestampMixin):
+    """Порядок блоков на странице — «конструктор» для админа.
+
+    У каждого пользователя своя строка на каждую страницу (`page`), поэтому
+    переставленные блоки сохраняются именно у того, кто их двигал, и не
+    мешают остальным. Сам порядок — список имён блоков в `blocks`; имена
+    заданы в `app/webui/layout.py:PAGE_BLOCKS`.
+    """
+
+    __tablename__ = "user_page_layouts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "page", name="uq_user_page_layout"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id"), index=True
+    )
+    page: Mapped[str] = mapped_column(String(64))
+    # Свой экземпляр JSON-типа: `Mutable.as_mutable()` вешает слушателей на сам
+    # объект типа, а общий JSONType уже занят словарями (см. User.extra_roles).
+    blocks: Mapped[list] = mapped_column(
+        MutableList.as_mutable(JSON().with_variant(JSONB(), "postgresql")), default=list
+    )
+
+
 class ComplectationItem(Base, TimestampMixin):
     __tablename__ = "complectation_items"
 

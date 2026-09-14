@@ -50,6 +50,14 @@ from app.services.settings import get_currency, get_repair_statuses
 from app.webui.catalog import CONDITION_OPTIONS, DEFAULT_COMPLECTATION, DEVICE_CLASSES, normalize_class
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
+from app.webui.layout import as_orders, block_keys, block_labels, get_layout
+
+def _layout_next(request: Request) -> str:
+    """Адрес возврата после сохранения раскладки (тот же экран с фильтрами)."""
+    q = request.url.query
+    return f"{request.url.path}?{q}" if q else request.url.path
+
+
 from app.webui.templating import render_async
 
 router = APIRouter(tags=["webui-repairs"])
@@ -170,6 +178,10 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         # Мастер видит все ремонты и может брать свободные себе — поэтому
         # колонка «Мастера» редактируется и ему, а не только старшим ролям.
         can_assign_ui = can_assign_masters(user) or master_only
+        # Конструктор блоков страницы — только админу, порядок личный.
+        can_layout = user.has_role("admin")
+        layout = await get_layout(db, user.id, "repairs_list") if can_layout else \
+            as_orders("repairs_list", None)
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repairs=repairs, total=total, stage=stage or "all", q=q or "",
@@ -179,6 +191,12 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             parts_names=parts_names, parts_lines=parts_lines, pays=pays, currency=currency,
             statuses=statuses, masters=masters,
             extra_status_filters=EXTRA_STATUS_FILTERS,
+            layout=layout,
+            layout_labels=block_labels("repairs_list"),
+            layout_default=block_keys("repairs_list"),
+            layout_page="repairs_list",
+            layout_next=_layout_next(request),
+            can_layout=can_layout,
             masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
             just=just, printed=printed,
             sms=request.query_params.get("sms"),
@@ -572,6 +590,11 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         paid_total = sum(float(p.amount) for p in payments)
         master_ids = [m.user_id for m in repair.masters if (m.kind or "master") != "helper"]
 
+        # Конструктор блоков: порядок сохраняется лично админу.
+        can_layout = user.has_role("admin")
+        layout = await get_layout(db, user.id, "repair_card") if can_layout else \
+            as_orders("repair_card", None)
+
         # Списки для чипов «Состояние» и «Комплектация»: готовые отметки +
         # справочник из БД + то, что уже отмечено в этом ремонте.
         catalog_items = [c.name for c in await _complectation(db)]
@@ -593,6 +616,12 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
             parts_cost=parts_cost, paid_total=paid_total,
             master_ids=master_ids,
             device_classes=DEVICE_CLASSES,
+            layout=layout,
+            layout_labels=block_labels("repair_card"),
+            layout_default=block_keys("repair_card"),
+            layout_page="repair_card",
+            layout_next=_layout_next(request),
+            can_layout=can_layout,
             condition_options=CONDITION_OPTIONS,
             complectation_options=complectation_options,
             complectation_marked=complectation_marked,

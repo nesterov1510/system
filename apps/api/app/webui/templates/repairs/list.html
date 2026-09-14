@@ -3,6 +3,7 @@
 {% block page_name %}Все ремонты{% endblock %}
 {% block page_css %}
 <link rel="stylesheet" href="/static/msb/repair.css">
+<link rel="stylesheet" href="/static/msb/layout.css">
 <style>
 /* Выбор размера страницы + пагинация */
 .rlist-pp{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted,#75808d);white-space:nowrap}
@@ -77,12 +78,14 @@ textarea.riedit{min-height:64px;resize:vertical}
 <div class="flash ok">✓ Удалено ремонтов: <b>{{ request.query_params.get('n') or n or '0' }}</b>.</div>
 {% endif %}
 
-<div class="rlist-page">
+{% include "repairs/_layout_bar.html" %}
+<div class="rlist-page" data-lay-root>
 {% if dash_filter_label %}
 <p class="rlist-dashfilter">Фильтр панели: <b>{{ dash_filter_label }}</b> · <a href="/repairs">сбросить</a></p>
 {% endif %}
 
-<div class="rlist-toolbar">
+<div class="rlist-toolbar" data-block="toolbar" data-block-title="Поиск и фильтры"
+     style="order:{{ layout['toolbar'] }}">
   <form class="row" method="get" action="/repairs">
     <input type="hidden" name="stage" value="{{ stage }}">
     {% if dash_filter %}<input type="hidden" name="filter" value="{{ dash_filter }}">{% endif %}
@@ -120,20 +123,23 @@ textarea.riedit{min-height:64px;resize:vertical}
     </a>
   </form>
 </div>
-<p class="rlist-legend">
+<p class="rlist-legend" data-block="legend" data-block-title="Легенда подсветки"
+   style="order:{{ layout['legend'] }}">
   <span title="Клиент забрал технику, но ремонт не оплачен"><i style="background:#ffd9d4"></i>забрал, не оплатил</span>
   <span title="Ремонт завершён, техника ждёт клиента в сервисе"><i style="background:#ffe9a8"></i>готово, ждёт выдачи</span>
 </p>
 
 {% if can_delete %}
-<form id="bulk-repairs" class="bulk-bar" method="post" action="/repairs/bulk-delete"
+<form id="bulk-repairs" class="bulk-bar" data-block="bulk" data-block-title="Массовые действия"
+      style="order:{{ layout['bulk'] }}" method="post" action="/repairs/bulk-delete"
       onsubmit="var n=document.querySelectorAll('input[name=ids][form=bulk-repairs]:checked').length; if(!n){alert('Отметьте ремонты для удаления'); return false;} return confirm('Удалить выбранные ремонты ('+n+')? Это нельзя отменить.');">
   <label class="bulk-bar__all"><input type="checkbox" data-check-all="bulk-repairs"> отметить все</label>
   <button class="btn sm red" type="submit">🗑 Удалить выбранные</button>
 </form>
 {% endif %}
 
-<div class="rlist-card">
+<div class="rlist-card" data-block="table" data-block-title="Таблица ремонтов"
+     style="order:{{ layout['table'] }}">
   <div class="table-wrap">
     <table id="rlist-table" class="{% if hl_ready %}is-hl-ready{% endif %}">
       <thead>
@@ -411,6 +417,7 @@ textarea.riedit{min-height:64px;resize:vertical}
 </div>
 
 {% set qs = 'stage=' ~ stage ~ '&q=' ~ (q | urlencode) ~ '&status=' ~ ((status or '') | urlencode) ~ '&per_page=' ~ per_page ~ ('&filter=' ~ (dash_filter | urlencode) if dash_filter else '') %}
+<div data-block="pager" data-block-title="Страницы и итог" style="order:{{ layout['pager'] }}">
 {% if pages > 1 %}
 <nav class="rlist-pager" aria-label="Страницы">
   {% if page > 1 %}
@@ -447,9 +454,13 @@ textarea.riedit{min-height:64px;resize:vertical}
 
 <p class="rlist-foot">Всего: {{ total }} · на странице {{ repairs | length }} · страница {{ page }} из {{ pages }} (по {{ per_page }})</p>
 </div>
+</div>
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/repair-list.js?v=4"></script>
+{% if can_layout %}
+<script src="/static/msb/layout.js"></script>
+{% endif %}
 {% if can_inline or can_assign %}
 <script>
 // --- Инлайн-редактирование ячеек таблицы по двойному клику. ---

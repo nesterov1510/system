@@ -24,7 +24,10 @@
 }
 .ifield select.ichip-edit{border-color:transparent!important;background:transparent!important;padding:0!important}
 
-.rcard{display:grid;gap:14px;max-width:none}
+.rcard{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:14px;align-items:start;max-width:none}
+/* Шапка и «Паспорт» — во всю ширину, остальные блоки в две колонки.
+   Порядок блоков задаёт конструктор через CSS `order` (data-block). */
+.rcard>.is-wide{grid-column:1/-1}
 /* Чип, который открывается двойным кликом (Состояние / Комплектация / Доставка). */
 .ifield.is-pop .ichip-view{cursor:pointer}
 .ifield.is-pop:hover{border-color:#f0c9a3;background:#fffaf5}
@@ -48,7 +51,6 @@
 }
 .ifields{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .rcard-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-.rcard-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:14px}
 .rcard-note{margin:0 0 10px;font-size:14px;line-height:1.45;color:#2c3740}
 .rline{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #f0f3f6;font-size:13.5px}
 .rline:last-of-type{border-bottom:0}
@@ -142,12 +144,12 @@ tr:has(.bulk-col input:checked){background:#fff6eb}
 
 @media(max-width:1100px){.ifields{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:820px){
-  .rcard-grid,.ifields{grid-template-columns:1fr 1fr}
+  .rcard,.ifields{grid-template-columns:1fr 1fr}
   .ifield.is-wide{grid-column:1 / -1}
 }
 @media(max-width:560px){
   .rcard-hero,.rcard-panel{padding:14px}
-  .ifields,.rcard-grid{grid-template-columns:1fr}
+  .ifields,.rcard{grid-template-columns:1fr}
   .row-actions{flex-wrap:wrap}
 }
 

@@ -851,3 +851,40 @@ async def profile_save(request: Request):
         return HTMLResponse(html, status_code=400)
     finally:
         await db.close()
+
+# --------------------------------------------------------------------------
+# Конструктор блоков страницы (порядок сохраняется лично пользователю)
+# --------------------------------------------------------------------------
+def _layout_next(raw: str | None) -> str:
+    """Куда вернуться после сохранения: только относительный путь сайта."""
+    nxt = (raw or "").strip()
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        return "/dashboard"
+    return nxt
+
+
+@router.post("/ui/layout")
+async def save_page_layout(request: Request):
+    """Сохранить порядок блоков страницы для текущего пользователя.
+
+    Порядок приходит из конструктора: `page` — страница из
+    `layout.PAGE_BLOCKS`, `order` — имена блоков через запятую в новом
+    порядке. Раскладка личная (user_id), поэтому чужие страницы не меняются.
+    """
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from app.webui.layout import PAGE_BLOCKS, save_layout
+
+        form = await request.form()
+        page = (form.get("page") or "").strip()
+        if page not in PAGE_BLOCKS:
+            return HTMLResponse("Неизвестная страница", status_code=400)
+        if not user.has_role("admin"):
+            return HTMLResponse("Конструктор доступен только администратору", status_code=403)
+        blocks = [b.strip() for b in (form.get("order") or "").split(",") if b.strip()]
+        await save_layout(db, user.id, page, blocks)
+        return RedirectResponse(_layout_next(form.get("next")), status_code=303)
+    finally:
+        await db.close()

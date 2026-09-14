@@ -4,6 +4,7 @@
 {% block page_css %}
 <link rel="stylesheet" href="/static/msb/forms.css">
 <link rel="stylesheet" href="/static/msb/repair.css">
+<link rel="stylesheet" href="/static/msb/layout.css">
 <style>
   /* Чипы мастеров и окна-списки живут в repair.css: .mchip, .mpop, .cmodal. */
 </style>
@@ -74,8 +75,10 @@
   {% for s in statuses %}<option value="{{ s }}" {% if s==repair.status %}selected{% endif %}>{{ s }}</option>{% endfor %}
 {% endset %}
 
-<article class="rcard">
-  <header class="rcard-hero">
+{% include "repairs/_layout_bar.html" %}
+<article class="rcard" data-lay-root>
+  <header class="rcard-hero is-wide" data-block="hero" data-block-title="Шапка: номер и статус"
+          style="order:{{ layout['hero'] }}">
     <div>
       <div class="rcard-num">{{ repair.number }} · {{ repair.device_type | class_icon }} {{ repair.device_type }}</div>
       <h1>{{ repair.brand or '' }} {{ repair.model or '' }}{% if not (repair.brand or repair.model) %}Без модели{% endif %}</h1>
@@ -97,7 +100,8 @@
     {% endif %}
   </header>
 
-  <section class="rcard-panel">
+  <section class="rcard-panel is-wide" data-block="passport" data-block-title="Паспорт"
+           style="order:{{ layout['passport'] }}">
     <h2>Паспорт</h2>
     <div class="ifields">
       {{ chip('brand', 'Марка', repair.brand, can.device) }}
@@ -168,8 +172,8 @@
     </div>
   </section>
 
-  <div class="rcard-grid">
-    <section class="rcard-panel">
+    <section class="rcard-panel" data-block="fault" data-block-title="Неисправность и мастера"
+             style="order:{{ layout['fault'] }}">
       <h2>Неисправность</h2>
       <div class="ifields">
         {{ chip('fault_client', 'Со слов клиента', repair.fault_client, can.device or can.admin, wide=true) }}
@@ -219,7 +223,8 @@
       {% endif %}
     </section>
 
-    <section class="rcard-panel" id="parts">
+    <section class="rcard-panel" id="parts" data-block="parts" data-block-title="Запчасти"
+             style="order:{{ layout['parts'] }}">
       <h2>Запчасти · {{ parts_cost | money(currency.symbol) }}</h2>
       {% for p in parts %}
       <div class="rline">
@@ -245,7 +250,8 @@
       {% endif %}
     </section>
 
-    <section class="rcard-panel" id="pay">
+    <section class="rcard-panel" id="pay" data-block="pay" data-block-title="Касса"
+             style="order:{{ layout['pay'] }}">
       <h2>Касса · {{ paid_total | money(currency.symbol) }}</h2>
       {% for p in payments %}
       <div class="rline">
@@ -271,7 +277,8 @@
       {% endif %}
     </section>
 
-    <section class="rcard-panel" id="log">
+    <section class="rcard-panel" id="log" data-block="log" data-block-title="Лента и фото"
+             style="order:{{ layout['log'] }}">
       <h2>Лента</h2>
       <ul class="timeline">
         {% for e in repair.events | sort(attribute='created_at', reverse=true) %}
@@ -305,7 +312,6 @@
       {% endif %}
       <p class="muted" style="margin-top:12px;font-size:12px">Страница клиента: <a href="/r/{{ repair.public_token }}" target="_blank">открыть QR</a></p>
     </section>
-  </div>
 </article>
 
 {# Окна-списки: открываются двойным кликом по чипу в паспорте. #}
@@ -369,4 +375,7 @@
 </form>
 {% endif %}
 {% endblock %}
-{% block page_js %}<script src="/static/msb/repair-card.js"></script>{% endblock %}
+{% block page_js %}<script src="/static/msb/repair-card.js"></script>
+{% if can_layout %}
+<script src="/static/msb/layout.js"></script>
+{% endif %}{% endblock %}

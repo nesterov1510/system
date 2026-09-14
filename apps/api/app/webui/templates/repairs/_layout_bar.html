@@ -1,0 +1,17 @@
+{# Конструктор блоков: только админу, порядок сохраняется лично ему. #}
+{% if can_layout %}
+<div class="lay-bar" data-lay-bar data-page="{{ layout_page }}"
+     data-default="{{ layout_default | join(',') }}">
+  <button type="button" class="btn sm sec" data-lay-toggle>🧩 Конструктор блоков</button>
+  <span class="lay-bar__hint" data-lay-only hidden>Переставляйте блоки стрелками или перетаскиванием — новый порядок сохранится только у вас.</span>
+  <span class="lay-bar__acts" data-lay-only hidden>
+    <button type="button" class="btn sm primary" data-lay-save>💾 Сохранить</button>
+    <button type="button" class="btn sm sec" data-lay-reset>↺ По умолчанию</button>
+  </span>
+  <form method="post" action="/ui/layout" data-lay-form hidden>
+    <input type="hidden" name="page" value="{{ layout_page }}">
+    <input type="hidden" name="order" value="">
+    <input type="hidden" name="next" value="{{ layout_next }}">
+  </form>
+</div>
+{% endif %}
