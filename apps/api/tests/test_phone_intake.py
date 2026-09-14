@@ -220,26 +220,40 @@ def test_phone_script_prefills_warns_and_blocks_submit(client, admin_headers):
 
     assert res["prefilled"] is True
 
+    # Пока номер просто недописан, под полем ничего не мелькает, а блок
+    # предупреждения на поле ровно один ( regression: их было по одному на
+    # каждую клавишу, и старые не гасли).
+    quiet = res["typingQuiet"]
+    assert quiet["shown"] is False, quiet
+    assert quiet["count"] == 1, quiet
+
     bad = res["badCode"]
     assert bad["shown"] is True and bad["badClass"] is True
     assert bad["ariaInvalid"] == "true"
     assert "Неверный код оператора «66»" in bad["text"]
     assert "12, 60, 61, 62, 63, 64, 65, 71, 72" in bad["text"]
+    assert bad["count"] == 1, bad
 
-    assert res["tooShort"]["shown"] is True and "ещё 3 цифр" in res["tooShort"]["text"]
     assert res["tooLong"]["shown"] is True and "ровно 6 цифр" in res["tooLong"]["text"]
 
     ok = res["valid"]
     assert ok["hidden"] is True and ok["goodClass"] is True and ok["badClassGone"] is True
+    assert ok["text"] == "" and ok["count"] == 1, ok
 
     for code in TM_OPERATOR_CODES:
         assert res["codes"][code] is True, f"код {code} не прошёл"
     for code in ("11", "66", "70", "73", "99"):
         assert res["codes"]["bad" + code] is False, f"чужой код {code} прошёл"
 
+    # Недописанный номер ловится, когда поле покидают, и гаснет после правки.
+    short = res["shortOnBlur"]
+    assert short["shown"] is True and "ещё 5 цифр" in short["text"], short
+    assert res["hiddenAgainAfterFix"] is True
+
     assert res["prefixProtected"] is True
     assert res["deletableAfterPrefix"] is True
     assert res["submitBlockedOnBad"] is True
+    assert res["submitBlockedOnEmpty"] is True
     assert res["submitAllowedOnGood"] is True
 
     opt = res["optionalEmptyOk"]
@@ -249,3 +263,4 @@ def test_phone_script_prefills_warns_and_blocks_submit(client, admin_headers):
     extra = res["extraPhone"]
     assert extra["initialized"] is True
     assert extra["warned"] is True  # +99311… — код 11 недопустим
+    assert extra["count"] == 1, extra

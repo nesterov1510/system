@@ -28,8 +28,22 @@ const type = (input, value) => {
   input.value = value;
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 };
-const warnOf = (input) =>
-  (input.closest(".tv-phone-row") || input).parentElement.querySelector("[data-phone-warn]");
+const blur = (input) => input.dispatchEvent(new window.Event("blur", { bubbles: false }));
+const submitForm = () => {
+  const ev = new window.Event("submit", { bubbles: true, cancelable: true });
+  form.dispatchEvent(ev);
+  return ev.defaultPrevented;
+};
+const warnOf = (input) => {
+  const anchor = input.closest(".tv-phone-row") || input;
+  return anchor.parentElement.querySelector("[data-phone-warn]");
+};
+// Сколько вообще блоков-предупреждений на всё поле (регресс: их плодилось по
+// одному на каждое нажатие клавиши, и старые не гасли).
+const warnCount = (input) => {
+  const anchor = input.closest(".tv-phone-row") || input;
+  return anchor.parentElement.querySelectorAll("[data-phone-warn]").length;
+};
 
 const out = {};
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -38,29 +52,34 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   // 1. Префикс уже в поле.
   out.prefilled = phone.value === "+993";
 
-  // 2. Неверный код оператора — предупреждение.
+  // 2. Пока номер просто недописан, предупреждение не мелькает.
+  type(phone, "+9936");
+  type(phone, "+99361");
+  type(phone, "+99361234");
+  out.typingQuiet = { shown: !warnOf(phone).hidden, count: warnCount(phone) };
+
+  // 3. Чужой код оператора виден сразу.
   type(phone, "+99366123456");
   out.badCode = {
-    shown: warnOf(phone) && !warnOf(phone).hidden,
-    text: warnOf(phone) ? warnOf(phone).textContent : "",
+    shown: !warnOf(phone).hidden,
+    text: warnOf(phone).textContent,
     badClass: phone.classList.contains("is-bad"),
     ariaInvalid: phone.getAttribute("aria-invalid"),
+    count: warnCount(phone),
   };
 
-  // 3. Мало цифр после кода.
-  type(phone, "+99361234");
-  out.tooShort = { shown: !warnOf(phone).hidden, text: warnOf(phone).textContent };
-
-  // 4. Лишние цифры.
+  // 4. Лишние цифры — тоже сразу.
   type(phone, "+993612345678");
   out.tooLong = { shown: !warnOf(phone).hidden, text: warnOf(phone).textContent };
 
-  // 5. Верный номер — предупреждение снято.
+  // 5. Исправили номер — предупреждение пропало, новых блоков не появилось.
   type(phone, "+99361234567");
   out.valid = {
     hidden: warnOf(phone).hidden,
+    text: warnOf(phone).textContent,
     goodClass: phone.classList.contains("is-good"),
     badClassGone: !phone.classList.contains("is-bad"),
+    count: warnCount(phone),
   };
 
   // 6. Все допустимые коды проходят, чужие — нет.
@@ -74,39 +93,40 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     out.codes["bad" + c] = warnOf(phone).hidden;
   });
 
-  // 7. +993 не стирается Backspace'ом на границе префикса.
+  // 7. Недописанный номер ловится, когда поле покидают.
+  type(phone, "+993612");
+  blur(phone);
+  out.shortOnBlur = { shown: !warnOf(phone).hidden, text: warnOf(phone).textContent };
   type(phone, "+99361234567");
+  out.hiddenAgainAfterFix = warnOf(phone).hidden && warnCount(phone) === 1;
+
+  // 8. +993 не стирается Backspace'ом на границе префикса.
   phone.setSelectionRange(4, 4);
   const ev = new window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
   phone.dispatchEvent(ev);
   out.prefixProtected = ev.defaultPrevented === true;
-  // а после префикса стирать можно
   phone.setSelectionRange(7, 7);
   const ev2 = new window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true });
   phone.dispatchEvent(ev2);
   out.deletableAfterPrefix = ev2.defaultPrevented === false;
 
-  // 8. Отправку формы с неверным номером скрипт блокирует.
+  // 9. Отправка формы.
   type(phone, "+99366123456");
-  const submit = new window.Event("submit", { bubbles: true, cancelable: true });
-  form.dispatchEvent(submit);
-  out.submitBlockedOnBad = submit.defaultPrevented === true;
+  out.submitBlockedOnBad = submitForm() === true;
+  type(phone, "+993");
+  out.submitBlockedOnEmpty = submitForm() === true;
   type(phone, "+99361234567");
-  const submit2 = new window.Event("submit", { bubbles: true, cancelable: true });
-  form.dispatchEvent(submit2);
-  out.submitAllowedOnGood = submit2.defaultPrevented === false;
+  out.submitAllowedOnGood = submitForm() === false;
 
-  // 9. Необязательное поле второго контакта: пустое — не ругаемся.
+  // 10. Необязательное поле второго контакта: пустое — не ругаемся.
   out.optionalEmptyOk = (() => {
     if (!second) return null;
     second.dispatchEvent(new window.Event("focus", { bubbles: false }));
     const filled = second.value;
-    const submit3 = new window.Event("submit", { bubbles: true, cancelable: true });
-    form.dispatchEvent(submit3);
-    return { prefillOnFocus: filled === "+993", submitNotBlocked: submit3.defaultPrevented === false };
+    return { prefillOnFocus: filled === "+993", submitNotBlocked: submitForm() === false };
   })();
 
-  // 10. Дополнительный номер, созданный на лету, тоже проверяется.
+  // 11. Дополнительный номер, созданный на лету, тоже проверяется.
   const extra = doc.createElement("input");
   extra.type = "tel";
   extra.name = "customer_phone_extra[]";
@@ -114,13 +134,15 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   await tick();
   extra.dispatchEvent(new window.Event("focus", { bubbles: false }));
   type(extra, "+99311123456");
+  type(extra, "+9931112345");
+  type(extra, "+993111234567");
   out.extraPhone = {
     initialized: extra.dataset.tmPhoneReady === "1",
-    prefill: "+993",
     warned: (() => {
       const w = extra.parentElement.querySelector("[data-phone-warn]");
       return w ? !w.hidden : false;
     })(),
+    count: extra.parentElement.querySelectorAll("[data-phone-warn]").length,
   };
 
   console.log(JSON.stringify(out));

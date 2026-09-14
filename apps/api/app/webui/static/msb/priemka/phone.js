@@ -47,18 +47,35 @@
     return rest === "";
   };
 
+  // Одно поле — ровно одно предупреждение. Элемент запоминаем на самом поле:
+  // вставляется он не рядом с input (тот лежит в .tv-phone-row), поэтому искать
+  // его через input.parentElement нельзя — иначе на каждое нажатие клавиши
+  // создавался новый красный блок и старые не гасли.
+  const anchorOf = (input) => input.closest(".tv-phone-row") || input;
+
   const warnOf = (input) => {
-    let warn = input.parentElement && input.parentElement.querySelector(":scope > [data-phone-warn]");
+    if (input._tmWarn && input._tmWarn.isConnected) return input._tmWarn;
+    const anchor = anchorOf(input);
+    const parent = anchor.parentElement;
+    let warn = parent && parent.querySelector(":scope > [data-phone-warn]");
     if (!warn) {
       warn = document.createElement("p");
       warn.className = "tm-phone-warn";
       warn.setAttribute("data-phone-warn", "");
       warn.setAttribute("role", "alert");
       warn.hidden = true;
-      // После самого поля, а не после строки с кнопкой телефонной книги.
-      (input.closest(".tv-phone-row") || input).insertAdjacentElement("afterend", warn);
+      anchor.insertAdjacentElement("afterend", warn);
     }
+    input._tmWarn = warn;
     return warn;
+  };
+
+  const clearWarn = (input) => {
+    input.classList.remove("is-bad", "is-good");
+    input.removeAttribute("aria-invalid");
+    const warn = warnOf(input);
+    warn.hidden = true;
+    warn.textContent = "";
   };
 
   const paint = (input, result) => {
@@ -70,16 +87,27 @@
     warn.hidden = result.ok;
   };
 
-  const validate = (input, force) => {
-    if (isEmptyish(input) && !force) {
-      input.classList.remove("is-bad", "is-good");
-      input.removeAttribute("aria-invalid");
-      const warn = warnOf(input);
-      warn.hidden = true;
-      warn.textContent = "";
+  // Пока человек ещё печатает, ошибкой считается только то, что уже точно
+  // неверно: чужой код оператора (он виден после двух цифр) и лишние цифры.
+  // Недопечатанный номер не подсвечиваем — иначе под полем мелькает по
+  // предупреждению на каждую клавишу. Строгая проверка — на blur и при
+  // отправке формы.
+  const checkTyping = (value) => {
+    const digits = digitsOf(value);
+    if (!digits) return { ok: true, msg: "" };
+    if (!digits.startsWith("993")) return check(value);
+    const body = digits.slice(3);
+    if (body.length >= 2 && !CODES.includes(body.slice(0, 2))) return check(value);
+    if (body.length > 8) return check(value);
+    return { ok: true, msg: "" };
+  };
+
+  const validate = (input, strict) => {
+    if (isEmptyish(input)) {
+      clearWarn(input);
       return { ok: true, msg: "" };
     }
-    const result = check(input.value);
+    const result = strict ? check(input.value) : checkTyping(input.value);
     paint(input, result);
     return result;
   };
@@ -117,7 +145,7 @@
       if (!input.value.trim()) input.value = PREFIX;
     });
 
-    input.addEventListener("blur", () => validate(input, false));
+    input.addEventListener("blur", () => validate(input, true));
   };
 
   const fields = () =>
@@ -134,7 +162,7 @@
   form.addEventListener("submit", (e) => {
     let bad = null;
     fields().forEach((input) => {
-      const result = validate(input, input.required);
+      const result = validate(input, true);
       if (!result.ok && !bad) bad = input;
     });
     if (bad) {
