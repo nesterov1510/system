@@ -71,19 +71,26 @@
   const scrim = document.querySelector("[data-pop-scrim]");
   const noHover = window.matchMedia && window.matchMedia("(hover: none)").matches;
 
+  // Показ/скрытие — классом .is-open (плюс hidden для доступности): у окон
+  // задан display, поэтому один атрибут hidden их не прячет.
+  const show = (el, on) => {
+    el.classList.toggle("is-open", on);
+    el.hidden = !on;
+  };
+
   const closePopups = () => {
-    document.querySelectorAll("[data-pop-modal]").forEach((modal) => { modal.hidden = true; });
+    document.querySelectorAll("[data-pop-modal]").forEach((modal) => show(modal, false));
     const menu = document.querySelector("[data-mpop]");
-    if (menu) menu.hidden = true;
-    if (scrim) scrim.hidden = true;
+    if (menu) show(menu, false);
+    if (scrim) show(scrim, false);
   };
 
   const openModal = (selector) => {
     const modal = document.querySelector(selector);
     if (!modal) return;
     closePopups();
-    modal.hidden = false;
-    if (scrim) scrim.hidden = false;
+    show(modal, true);
+    if (scrim) show(scrim, true);
     const first = modal.querySelector("input:not([type=hidden]), select, textarea");
     if (first) first.focus();
   };
@@ -130,7 +137,7 @@
           // Убирать нечего, если мастер на ремонте не значится.
           if (btn.dataset.mact === "remove") btn.disabled = !kind;
         });
-        mPop.hidden = false;
+        show(mPop, true);
         const box = chip.getBoundingClientRect();
         const width = mPop.offsetWidth || 240;
         const left = Math.max(10, Math.min(box.left, window.innerWidth - width - 10));
@@ -141,11 +148,11 @@
       const action = event.target.closest("[data-mact]");
       if (action) {
         mForm.elements.action.value = action.dataset.mact;
-        mPop.hidden = true;
+        show(mPop, false);
         mForm.submit();
         return;
       }
-      if (!event.target.closest("[data-mpop]")) mPop.hidden = true;
+      if (!event.target.closest("[data-mpop]")) show(mPop, false);
     });
   }
 })();

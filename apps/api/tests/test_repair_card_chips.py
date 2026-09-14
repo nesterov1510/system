@@ -254,3 +254,39 @@ def test_status_filters_select_by_facts_not_status(client, admin_headers):
 
 def test_repair_card_stretches_full_width():
     assert re.search(r"\.rcard\{[^}]*max-width:none", CSS), "карточка должна быть на всю ширину"
+
+
+# ---------------------------------------------- регрессии вёрстки (CSS/разметка)
+def test_card_modals_do_not_touch_list_popup_styles():
+    """.rpop* — всплывашки списка «Все ремонты» (repair-list.js).
+
+    Регресс: своё .rpop-scrim в конце repair.css поднимало затемнение до
+    z-index 440 при z-index 400 у меню, поэтому кнопка ⚡ открывала меню под
+    затемнением и на него нельзя было нажать.
+    """
+    assert CSS.count(".rpop-scrim{") == 1, "нельзя переопределять .rpop-scrim"
+    start = CSS.index(".rpop-scrim{")
+    body = CSS[start : CSS.index("}", start)]
+    assert "z-index:399" in body, "z-index затемнения списка должен остаться 399"
+    assert ".rpop-modal" not in CSS and ".rpop__list" not in CSS
+
+
+def test_card_popups_are_hidden_until_opened():
+    """Регресс: окно «Доставка» висело на карточке и не закрывалось.
+
+    Авторский `display` перебивает атрибут `hidden` из стилей браузера, поэтому
+    окна скрываются через `display:none` и открываются классом `.is-open`.
+    """
+    for sel in (".cmodal", ".cmodal-scrim", ".mpop"):
+        start = CSS.index(sel + "{")
+        body = CSS[start : CSS.index("}", start)]
+        assert "display:none" in body, f"{sel} должен быть скрыт по умолчанию"
+        assert sel + ".is-open{" in CSS, f"у {sel} нет правила показа .is-open"
+
+
+def test_card_markup_uses_cmodal_not_rpop(client, admin_headers):
+    rep = _make_repair(client, admin_headers, "chips-css-1", "Чип Классы", "+993 61 3300031")
+    html = client.get(f"/repairs/{rep['id']}", cookies=_login(client)).text
+    assert 'class="cmodal"' in html
+    assert 'class="cmodal-scrim"' in html
+    assert "rpop-modal" not in html and "rpop-scrim" not in html

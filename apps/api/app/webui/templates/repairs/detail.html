@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="/static/msb/forms.css">
 <link rel="stylesheet" href="/static/msb/repair.css">
 <style>
-  /* Чипы мастеров и окна-списки живут в repair.css: .mchip, .mpop, .rpop-modal. */
+  /* Чипы мастеров и окна-списки живут в repair.css: .mchip, .mpop, .cmodal. */
 </style>
 {% endblock %}
 {% block topbar_actions %}
@@ -309,13 +309,13 @@
 </article>
 
 {# Окна-списки: открываются двойным кликом по чипу в паспорте. #}
-<div class="rpop-scrim" data-pop-scrim hidden></div>
+<div class="cmodal-scrim" data-pop-scrim></div>
 
 {% if can.device or can.admin %}
-<form class="rpop-modal" id="pop-condition" method="post" action="/repairs/{{ repair.id }}/condition" data-pop-modal hidden>
+<form class="cmodal" id="pop-condition" method="post" action="/repairs/{{ repair.id }}/condition" data-pop-modal hidden>
   <h3>Состояние техники</h3>
-  <p class="rpop__hint">Отметьте, что видно на корпусе, — список подставится в чип «Состояние».</p>
-  <div class="rpop__list">
+  <p class="cmodal__hint">Отметьте, что видно на корпусе, — список подставится в чип «Состояние».</p>
+  <div class="cmodal__list">
     {% for c in condition_options %}
     <label class="check"><input type="checkbox" name="items" value="{{ c }}"
       {% if c in condition_marks %}checked{% endif %}> {{ c }}</label>
@@ -324,16 +324,16 @@
   <label class="fld"><span class="lbl">Своими словами</span>
     <input type="text" name="extra" value="{{ condition_free }}" placeholder="например: отсутствует крышка отсека"></label>
   <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
-  <div class="rpop__feet">
+  <div class="cmodal__feet">
     <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
     <button type="submit" class="btn sm primary">Сохранить</button>
   </div>
 </form>
 
-<form class="rpop-modal" id="pop-complect" method="post" action="/repairs/{{ repair.id }}/complectation" data-pop-modal hidden>
+<form class="cmodal" id="pop-complect" method="post" action="/repairs/{{ repair.id }}/complectation" data-pop-modal hidden>
   <h3>Комплектация</h3>
-  <p class="rpop__hint">Что приехало вместе с техникой. Не забудьте отметить недостающее в бланке.</p>
-  <div class="rpop__list">
+  <p class="cmodal__hint">Что приехало вместе с техникой. Не забудьте отметить недостающее в бланке.</p>
+  <div class="cmodal__list">
     {% for c in complectation_options %}
     <label class="check"><input type="checkbox" name="items" value="{{ c }}"
       {% if c in complectation_marked %}checked{% endif %}> {{ c }}</label>
@@ -342,7 +342,7 @@
   <label class="fld"><span class="lbl">Добавить своё</span>
     <input type="text" name="extra" placeholder="например: настенный кронштейн"></label>
   <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
-  <div class="rpop__feet">
+  <div class="cmodal__feet">
     <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
     <button type="submit" class="btn sm primary">Сохранить</button>
   </div>
@@ -350,9 +350,9 @@
 {% endif %}
 
 {% if can.delivery %}
-<form class="rpop-modal" id="pop-delivery" method="post" action="/repairs/{{ repair.id }}/delivery" data-pop-modal hidden>
+<form class="cmodal" id="pop-delivery" method="post" action="/repairs/{{ repair.id }}/delivery" data-pop-modal hidden>
   <h3>Доставка</h3>
-  <p class="rpop__hint">Отметьте, если технику привозили или забирали с адреса, и укажите телефон доставщика.</p>
+  <p class="cmodal__hint">Отметьте, если технику привозили или забирали с адреса, и укажите телефон доставщика.</p>
   <label class="check"><input type="checkbox" name="is_delivery" value="1"
     {% if repair.is_delivery %}checked{% endif %}> Была доставка (не приносили в сервис)</label>
   <label class="fld"><span class="lbl">Телефон доставщика</span>
@@ -362,7 +362,7 @@
   <label class="fld"><span class="lbl">Комментарий</span>
     <input type="text" name="delivery_comment" value="{{ repair.delivery_comment or '' }}" placeholder="позвонить за час, 3 этаж"></label>
   <input type="hidden" name="next" value="/repairs/{{ repair.id }}">
-  <div class="rpop__feet">
+  <div class="cmodal__feet">
     <button type="button" class="btn sm sec" data-pop-close>Отмена</button>
     <button type="submit" class="btn sm primary">Сохранить</button>
   </div>
