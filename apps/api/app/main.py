@@ -45,6 +45,20 @@ from app.services.reminders import reminder_loop
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Публичный экземпляр (PUBLIC_ONLY=true) базу не трогает вовсе: он берёт
+    # статус ремонта у внутреннего сервера по HTTP (PUBLIC_UPSTREAM_URL), поэтому
+    # ни схема, ни seed, ни рассылка напоминаний ему не нужны.
+    if settings.PUBLIC_ONLY:
+        debug_success_print(
+            "MSB запущен в режиме «только страница клиента»: "
+            f"upstream={settings.PUBLIC_UPSTREAM_URL or 'не задан'}",
+            source="app.start",
+        )
+        yield
+        with contextlib.suppress(Exception):
+            flush_log_writes()
+        return
+
     # MVP: create tables + seed. Replace with Alembic migrations later.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -126,7 +140,7 @@ from app.services import ip_access
 # /r/{token}, её JSON и один CSS. Приёмка, админка, справочники и остальной
 # API остаются на внутреннем экземпляре. Незнакомый путь отвечает 404 (не 403),
 # чтобы снаружи не было видно, что за ним есть другие разделы.
-PUBLIC_ONLY_EXACT = ("/health", "/static/msb/base.css")
+PUBLIC_ONLY_EXACT = ("/health", "/static/msb/base.css", "/static/app.css")
 PUBLIC_ONLY_PREFIXES = ("/r/", "/api/public/")
 
 
@@ -142,6 +156,9 @@ async def public_only_guard(request, call_next):
 
 @app.middleware("http")
 async def ip_access_control(request, call_next):
+    # Правила IP-контроля лежат в БД, а у публичного экземпляра её нет.
+    if settings.PUBLIC_ONLY:
+        return await call_next(request)
     rules = await ip_access.get_rules_cached(async_session_factory)
     if rules.get("mode") in ("whitelist", "blacklist"):
         peer = request.client.host if request.client else None

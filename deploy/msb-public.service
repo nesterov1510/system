@@ -1,22 +1,17 @@
-# /etc/systemd/system/msb-public.service
-# Публичный экземпляр MSB: отдаёт в интернет ТОЛЬКО страницу клиента /r/{token}.
-# Полный интерфейс продолжает работать на msb-api.service (127.0.0.1:8085).
+# /etc/systemd/system/msb-public.service — ВТОРАЯ машина (публичная).
+# Отдаёт в интернет только страницу клиента /r/{token}. Базы данных здесь нет:
+# статус ремонта берётся у внутреннего сервера по HTTP (PUBLIC_UPSTREAM_URL).
 #
 #   sudo cp deploy/msb-public.service /etc/systemd/system/
+#   sudo cp deploy/env.public /home/windowrepair-ae/msb/.env.public   # и заполнить
 #   sudo systemctl daemon-reload && sudo systemctl enable --now msb-public
 #
-# Переменные PUBLIC_ONLY и CLIENT_BASE_URL берутся из того же .env, поэтому
-# в нём должны быть строки (см. deploy/env.production):
-#   PUBLIC_ONLY=true        — но только если этот .env читает публичный экземпляр!
-#
-# ВАЖНО: один и тот же .env нельзя давать обоим экземплярам — внутренний
-# экземпляр с PUBLIC_ONLY=true тоже перестанет отдавать админку. Либо держите
-# отдельный файл (ниже Environment= переопределяет EnvironmentFile), либо
-# поднимайте публичный экземпляр на другой машине/контейнере.
+# Отдельный файл окружения обязателен: общий .env с внутренним сервером давать
+# нельзя — там DATABASE_URL и PUBLIC_ONLY=false.
 
 [Unit]
-Description=MSB public client page (only /r/{token})
-After=network-online.target msb-api.service
+Description=MSB public client page (only /r/{token}, no database)
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -24,11 +19,13 @@ Type=simple
 User=windowrepair-ae
 Group=windowrepair-ae
 WorkingDirectory=/home/windowrepair-ae/msb/apps/api
-EnvironmentFile=/home/windowrepair-ae/msb/.env
-# Переопределяем после EnvironmentFile: этот экземпляр — только клиентский.
-Environment=PUBLIC_ONLY=true
+EnvironmentFile=/home/windowrepair-ae/msb/.env.public
 Environment=PYTHONUNBUFFERED=1
 
+# Слушаем только loopback: наружу выпускает nginx (deploy/nginx-public.conf)
+# или Cloudflare Tunnel (deploy/cloudflared-config.yml). Еслиreverse-прокси нет
+# и порт открывается напрямую — поставьте --host 0.0.0.0 и закройте всё лишнее
+# файрволом.
 ExecStart=/home/windowrepair-ae/msb/apps/api/.venv/bin/uvicorn app.main:app \
     --host 127.0.0.1 \
     --port 8086 \
