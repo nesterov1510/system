@@ -214,7 +214,9 @@ window.msbCapsIdent = (function () {
         <div class="tv-field tv-ac-wrap">
           <label for="tvCustomerPhone">Номер телефона *</label>
           <div class="tv-phone-row">
-            <input id="tvCustomerPhone" name="phone" type="tel" inputmode="tel" autocomplete="off" placeholder="+993 6X XX XX XX" value="{{ form.get('phone','') }}" required data-client-phone>
+            <input id="tvCustomerPhone" name="phone" type="tel" inputmode="tel" autocomplete="off"
+                   placeholder="+993 61 23 45 67" value="{{ form.get('phone','') or '+993' }}" required
+                   data-client-phone data-tm-phone>
             <button class="tv-phonebook-btn" type="button" data-phonebook hidden title="Выбрать контакт из телефонной книги телефона">📇 Из телефонной книги</button>
           </div>
           <div class="tv-ac" data-ac="phone" hidden></div>
@@ -257,7 +259,7 @@ window.msbCapsIdent = (function () {
           </div>
           <div class="tv-field">
             <label for="tvSecondPhone">Телефон</label>
-            <input id="tvSecondPhone" name="contact2_phone" type="tel" inputmode="tel" placeholder="+993 6X XX XX XX" value="{{ form.get('contact2_phone','') }}">
+            <input id="tvSecondPhone" name="contact2_phone" type="tel" inputmode="tel" placeholder="+993 61 23 45 67" value="{{ form.get('contact2_phone','') }}">
           </div>
         </div>
 
@@ -431,6 +433,7 @@ window.msbCapsIdent = (function () {
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/priemka/televisions.js?v=caps3"></script>
+<script src="/static/msb/priemka/phone.js?v=1"></script>
 <script>
 // --- Автозаполнение заказчика из списка контактов сервиса + телефонная книга ---
 (function () {

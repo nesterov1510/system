@@ -167,3 +167,9 @@ input[name="model_manual"],
 input[name="serial_manual"]{
   text-transform:uppercase;
 }
+
+/* Номер телефона: +993 + код оператора + 6 цифр (priemka/phone.js). */
+.tv-intake-form input[type="tel"].is-bad{border-color:#e05252;background:#fff6f6}
+.tv-intake-form input[type="tel"].is-good{border-color:#4caf7d}
+.tm-phone-warn{margin:6px 0 0;padding:7px 10px;border:1px solid #f3c9c9;border-radius:10px;background:#fff3f3;color:#a83232;font-size:12.5px;font-weight:650;line-height:1.4}
+.tm-phone-warn[hidden]{display:none}

@@ -47,6 +47,11 @@ from app.schemas.parts import RepairPartAdd
 from app.schemas.payments import PaymentCreate
 from app.schemas.repair import ClientCreate, RepairCreate, RepairUpdate
 from app.services.settings import get_currency, get_repair_statuses
+from app.services.numbering import (
+    DEFAULT_COUNTRY_CODE,
+    phone_digits,
+    validate_tm_phone,
+)
 from app.webui.catalog import CONDITION_OPTIONS, DEFAULT_COMPLECTATION, DEVICE_CLASSES, normalize_class
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
@@ -341,6 +346,17 @@ async def repair_create(request: Request):
         return redir
     try:
         form = await request.form()
+        # Номер телефона: +993 + код оператора (12, 60–65, 71, 72) + 6 цифр.
+        # На форме это проверяет priemka/phone.js, но форму можно отправить и
+        # в обход скрипта — поэтому проверка повторяется здесь.
+        phone_err = validate_tm_phone(form.get("phone", ""))
+        if phone_err:
+            raise ValueError(f"Номер телефона заказчика: {phone_err}")
+        contact2_raw = (form.get("contact2_phone") or "").strip()
+        if phone_digits(contact2_raw) not in ("", DEFAULT_COUNTRY_CODE):
+            contact2_err = validate_tm_phone(contact2_raw)
+            if contact2_err:
+                raise ValueError(f"Телефон дополнительного контакта: {contact2_err}")
         comp = {}
         async for key in _iter_comp(form):
             comp[key] = True

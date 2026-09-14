@@ -52,7 +52,7 @@ def _intake_form(client, cookies, **data):
         "device_type": "Телевизоры",
         "identity_raw": "SAMSUNG-QE55Q70-SN998877",
         "full_name": "Доставка Клиент",
-        "phone": "+993 61 4455667",
+        "phone": "+993 61 100002",
         "fault_client": "нет изображения",
         "consent_pdn": "on",
     }
@@ -105,7 +105,7 @@ def test_blank_prints_device_type_outside_of_fields(client, admin_headers, opera
         headers={**operator_headers, "Idempotency-Key": "blank-devtype-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Бланк Тип", "phone": "+993 61 3311223", "consent_pdn": True},
+            "client": {"full_name": "Бланк Тип", "phone": "+993 61 100001", "consent_pdn": True},
             "device_type": "Мониторы",
             "brand": "AOC",
             "model": "24B2XH",
@@ -137,18 +137,18 @@ def test_master_intake_can_leave_queue_or_pick_himself(client, admin_headers):
     assert "в очередь (не назначен)" in page.text
 
     # Пустое поле — ремонт новый, без исполнителя.
-    _intake_form(client, cookies, full_name="Мастер Очередь", phone="+993 61 4455668")
-    rep = _find(client, admin_headers, "+993 61 4455668")
+    _intake_form(client, cookies, full_name="Мастер Очередь", phone="+993 61 100003")
+    rep = _find(client, admin_headers, "+993 61 100003")
     assert rep["master_id"] is None
     assert rep["status"] == "Новый"
 
     # Себя — сразу «На диагностике».
     _intake_form(
         client, cookies,
-        full_name="Мастер Себя", phone="+993 61 4455669",
+        full_name="Мастер Себя", phone="+993 61 100004",
         master_id=str(master["id"]),
     )
-    rep = _find(client, admin_headers, "+993 61 4455669")
+    rep = _find(client, admin_headers, "+993 61 100004")
     assert rep["master_id"] == master["id"]
     assert rep["status"] == "На диагностике"
 
@@ -173,7 +173,7 @@ def test_master_takes_free_repair_and_adds_helper(
         headers={**operator_headers, "Idempotency-Key": "free-take-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Свободный Клиент", "phone": "+993 61 4455670", "consent_pdn": True},
+            "client": {"full_name": "Свободный Клиент", "phone": "+993 61 100005", "consent_pdn": True},
             "device_type": "Телевизоры",
             "brand": "LG",
             "fault_client": "не включается",
@@ -224,7 +224,7 @@ def test_master_cannot_take_busy_repair(client, admin_headers, operator_headers,
         headers={**operator_headers, "Idempotency-Key": "busy-take-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Занятый Клиент", "phone": "+993 61 4455671", "consent_pdn": True},
+            "client": {"full_name": "Занятый Клиент", "phone": "+993 61 100006", "consent_pdn": True},
             "device_type": "Телевизоры",
             "fault_client": "нет звука",
             "master_id": m1["id"],
@@ -249,8 +249,8 @@ def test_master_cannot_take_busy_repair(client, admin_headers, operator_headers,
 # ---------------------------------------------------------------------------
 def test_intake_without_delivery_is_not_delivery(client, admin_headers):
     cookies = _login(client)
-    _intake_form(client, cookies, full_name="Без Доставки", phone="+993 61 4455672")
-    rep = _find(client, admin_headers, "+993 61 4455672")
+    _intake_form(client, cookies, full_name="Без Доставки", phone="+993 61 100007")
+    rep = _find(client, admin_headers, "+993 61 100007")
     assert rep["is_delivery"] is False, "каждый заказ считался привезённым"
     assert rep["delivery_district"] is None
     assert rep["delivery_comment"] is None
@@ -260,11 +260,11 @@ def test_intake_delivery_saves_district_and_comment(client, admin_headers):
     cookies = _login(client)
     _intake_form(
         client, cookies,
-        full_name="С Доставкой", phone="+993 61 4455673",
+        full_name="С Доставкой", phone="+993 61 100008",
         is_delivery="1", delivery_district="Парахат 3/2",
         delivery_comment="позвонить за час",
     )
-    rep = _find(client, admin_headers, "+993 61 4455673")
+    rep = _find(client, admin_headers, "+993 61 100008")
     assert rep["is_delivery"] is True
     assert rep["delivery_district"] == "Парахат 3/2"
     assert rep["delivery_comment"] == "позвонить за час"
@@ -272,10 +272,10 @@ def test_intake_delivery_saves_district_and_comment(client, admin_headers):
     # Комментарий необязательный — без него доставка всё равно сохраняется.
     _intake_form(
         client, cookies,
-        full_name="Доставка Без Комментария", phone="+993 61 4455674",
+        full_name="Доставка Без Комментария", phone="+993 61 100009",
         is_delivery="1", delivery_district="Мир 4",
     )
-    rep = _find(client, admin_headers, "+993 61 4455674")
+    rep = _find(client, admin_headers, "+993 61 100009")
     assert rep["is_delivery"] is True
     assert rep["delivery_district"] == "Мир 4"
     assert rep["delivery_comment"] is None
@@ -295,7 +295,7 @@ def test_list_has_work_done_column(client, admin_headers, operator_headers, city
         headers={**operator_headers, "Idempotency-Key": "workdone-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Колонка Клиент", "phone": "+993 61 4455675", "consent_pdn": True},
+            "client": {"full_name": "Колонка Клиент", "phone": "+993 61 100010", "consent_pdn": True},
             "device_type": "Телевизоры",
             "brand": "Sony",
             "fault_client": "нет изображения",
@@ -355,7 +355,7 @@ def test_list_highlights_unpaid_issued_and_ready_in_service(
         headers={**operator_headers, "Idempotency-Key": "hl-ready-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Готов Стоит", "phone": "+993 61 4455676", "consent_pdn": True},
+            "client": {"full_name": "Готов Стоит", "phone": "+993 61 100011", "consent_pdn": True},
             "device_type": "Телевизоры",
             "fault_client": "не включается",
         },
@@ -368,7 +368,7 @@ def test_list_highlights_unpaid_issued_and_ready_in_service(
         headers={**operator_headers, "Idempotency-Key": "hl-unpaid-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Забрал Не Платит", "phone": "+993 61 4455677", "consent_pdn": True},
+            "client": {"full_name": "Забрал Не Платит", "phone": "+993 61 100012", "consent_pdn": True},
             "device_type": "Телевизоры",
             "fault_client": "нет звука",
         },
@@ -430,7 +430,7 @@ def test_issue_marks_repair_and_stops_being_in_service(
         headers={**operator_headers, "Idempotency-Key": "issue-1"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Выдача Клиент", "phone": "+993 61 4455678", "consent_pdn": True},
+            "client": {"full_name": "Выдача Клиент", "phone": "+993 61 100013", "consent_pdn": True},
             "device_type": "Телевизоры",
             "fault_client": "не включается",
         },
@@ -457,7 +457,7 @@ def test_issue_forbidden_for_master(client, operator_headers, city_id):
         headers={**operator_headers, "Idempotency-Key": "issue-2"},
         json={
             "city_id": city_id,
-            "client": {"full_name": "Выдача Мастер", "phone": "+993 61 4455679", "consent_pdn": True},
+            "client": {"full_name": "Выдача Мастер", "phone": "+993 61 100014", "consent_pdn": True},
             "device_type": "Телевизоры",
             "fault_client": "не включается",
         },
