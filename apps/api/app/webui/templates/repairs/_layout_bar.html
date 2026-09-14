@@ -1,34 +1,55 @@
 {# Конструктор страницы: только админу, порядок сохраняется лично ему.
-   data-page/data-default — блоки страницы, data-cols-default — колонки таблицы. #}
+   Панель свёрнута — видна одна кнопка; по нажатию раскрываются режимы
+   («Блоки страницы» / «Колонки таблицы»), подсказка и кнопки сохранения. #}
 {% if can_layout %}
 <div class="lay-bar" data-lay-bar data-page="{{ layout_page }}"
      data-default="{{ layout_default | join(',') }}"
      {% if layout_cols_default %}data-cols-default="{{ layout_cols_default | join(',') }}"{% endif %}>
-  <button type="button" class="btn sm sec" data-lay-toggle>🧩 Блоки страницы</button>
-  {% if layout_cols_default %}
-  <button type="button" class="btn sm sec" data-laycol-toggle>🔀 Колонки таблицы</button>
-  {% endif %}
-  <span class="lay-bar__hint" data-lay-only hidden>Переставляйте блоки стрелками или перетаскиванием — новый порядок сохранится только у вас.</span>
-  <span class="lay-bar__hint" data-laycol-only hidden>Тяните заголовки колонок мышью или жмите ← → — порядок колонок сохранится только у вас.</span>
-  <span class="lay-bar__acts" data-lay-only hidden>
-    <button type="button" class="btn sm primary" data-lay-save>💾 Сохранить</button>
-    <button type="button" class="btn sm sec" data-lay-reset>↺ По умолчанию</button>
-  </span>
-  <span class="lay-bar__acts" data-laycol-only hidden>
-    <button type="button" class="btn sm primary" data-laycol-save>💾 Сохранить колонки</button>
-    <button type="button" class="btn sm sec" data-laycol-reset>↺ По умолчанию</button>
-  </span>
-  <form method="post" action="/ui/layout" data-lay-form hidden>
-    <input type="hidden" name="page" value="{{ layout_page }}">
-    <input type="hidden" name="order" value="">
-    <input type="hidden" name="next" value="{{ layout_next }}">
-  </form>
-  {% if layout_cols_default %}
-  <form method="post" action="/ui/layout" data-laycol-form hidden>
-    <input type="hidden" name="page" value="repairs_columns">
-    <input type="hidden" name="order" value="">
-    <input type="hidden" name="next" value="{{ layout_next }}">
-  </form>
-  {% endif %}
+  <button type="button" class="lay-expand" data-lay-expand
+          aria-expanded="false" aria-controls="lay-panel">
+    <span class="lay-expand__ico">🧩</span> Конструктор
+  </button>
+
+  <div class="lay-panel" id="lay-panel" data-lay-panel hidden>
+    <div class="lay-panel__head">
+      <span class="lay-panel__title">Конструктор страницы</span>
+      <div class="lay-panel__modes">
+        <button type="button" class="lay-mode" data-lay-toggle>Блоки страницы</button>
+        {% if layout_cols_default %}
+        <button type="button" class="lay-mode" data-laycol-toggle>Колонки таблицы</button>
+        {% endif %}
+      </div>
+      <button type="button" class="lay-x" data-lay-collapse title="Свернуть конструктор">✕</button>
+    </div>
+
+    <p class="lay-panel__hint" data-lay-only hidden>
+      Переставляйте блоки стрелками ↑ ↓ или перетаскиванием — порядок сохранится только у вас.
+    </p>
+    <p class="lay-panel__hint" data-laycol-only hidden>
+      Тяните заголовки колонок мышью или жмите ← → — порядок колонок сохранится только у вас.
+    </p>
+
+    <div class="lay-panel__acts" data-lay-only hidden>
+      <button type="button" class="btn sm primary" data-lay-save>💾 Сохранить</button>
+      <button type="button" class="btn sm sec" data-lay-reset>↺ По умолчанию</button>
+    </div>
+    <div class="lay-panel__acts" data-laycol-only hidden>
+      <button type="button" class="btn sm primary" data-laycol-save>💾 Сохранить колонки</button>
+      <button type="button" class="btn sm sec" data-laycol-reset>↺ По умолчанию</button>
+    </div>
+
+    <form method="post" action="/ui/layout" data-lay-form hidden>
+      <input type="hidden" name="page" value="{{ layout_page }}">
+      <input type="hidden" name="order" value="">
+      <input type="hidden" name="next" value="{{ layout_next }}">
+    </form>
+    {% if layout_cols_default %}
+    <form method="post" action="/ui/layout" data-laycol-form hidden>
+      <input type="hidden" name="page" value="repairs_columns">
+      <input type="hidden" name="order" value="">
+      <input type="hidden" name="next" value="{{ layout_next }}">
+    </form>
+    {% endif %}
+  </div>
 </div>
 {% endif %}

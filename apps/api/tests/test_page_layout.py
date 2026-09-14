@@ -392,8 +392,8 @@ def test_master_cannot_save_columns(client, admin_headers):
     assert _col_order_attr(html) == block_keys(COLS)
 
 
-def _run_layout_js(html):
-    """Прогнать настоящий layout.js в jsdom и вернуть порядок колонок."""
+def _run_layout_js(html, runner_name="layout_columns.cjs"):
+    """Прогнать настоящий layout.js в jsdom (runner задаёт, что проверять)."""
     import json
     import os
     import shutil
@@ -404,7 +404,7 @@ def _run_layout_js(html):
     node = shutil.which("node")
     if not node:
         return None
-    runner = Path(__file__).resolve().parent / "js" / "layout_columns.cjs"
+    runner = Path(__file__).resolve().parent / "js" / runner_name
     script = Path(__file__).resolve().parent.parent / "app" / "webui" / "static" / "msb" / "layout.js"
     env = dict(os.environ, NODE_PATH=os.environ.get("NODE_PATH", "/tmp/node_modules"))
     with tempfile.TemporaryDirectory() as d:
@@ -441,3 +441,63 @@ def test_layout_js_moves_columns_and_their_cells(client, admin_headers):
     res = _run_layout_js(client.get("/repairs", cookies=cookies).text)
     if res and not res.get("skip"):
         assert res["head"] == block_keys(COLS)
+
+
+# --------------------------------------------------------------------------
+# Сворачиваемая панель конструктора
+# --------------------------------------------------------------------------
+def test_constructor_panel_is_collapsed_by_default(client, admin_headers):
+    _make_repair(client, admin_headers, "layout-panel-1", "+99360110013")
+    html = client.get("/repairs", cookies=_login(client)).text
+    # панель свёрнута, видна только кнопка-пилюля
+    assert re.search(r'<div class="lay-panel"[^>]*\shidden>', html)
+    assert 'data-lay-expand' in html and 'aria-expanded="false"' in html
+    # подсказки и кнопки действий тоже скрыты до раскрытия
+    assert re.search(r'<p class="lay-panel__hint" data-lay-only hidden>', html)
+    assert re.search(r'<div class="lay-panel__acts" data-lay-only hidden>', html)
+    # обе формы внутри панели
+    panel = html[html.index('data-lay-panel'):]
+    assert 'data-lay-form' in panel and 'data-laycol-form' in panel
+
+
+def test_card_constructor_panel_is_collapsed_without_columns(client, admin_headers):
+    """На карточке ремонта нет колонок — и кнопки «Колонки таблицы» нет."""
+    rep = _make_repair(client, admin_headers, "layout-panel-2", "+99360110014")
+    html = client.get(f"/repairs/{rep['id']}", cookies=_login(client)).text
+    assert 'data-lay-expand' in html
+    assert 'data-laycol-toggle' not in html
+    assert 'data-laycol-form' not in html
+
+
+def test_panel_opens_and_switches_modes(client, admin_headers):
+    """Клики по панели в настоящем layout.js: раскрытие, режимы, сворачивание."""
+    _make_repair(client, admin_headers, "layout-panel-3", "+99360110015")
+    html = client.get("/repairs", cookies=_login(client)).text
+    res = _run_layout_js(html, "layout_panel.cjs")
+    if res is None or res.get("skip"):
+        pytest.skip("нет node или jsdom — прогон layout.js пропущен")
+
+    assert res["startsCollapsed"] is True
+    assert res["expandBtnVisible"] is True
+    assert res["opensOnClick"] is True
+    assert res["ariaExpanded"] == "true"
+
+    blk = res["blockMode"]
+    assert blk["hint"] is True and blk["acts"] is True
+    assert blk["colHintHidden"] is True
+    assert blk["activeClass"] is True
+    assert blk["rootHighlighted"] is True
+    assert blk["handles"] == blk["blocks"] == 5  # 5 блоков на странице списка
+
+    col = res["colMode"]
+    assert col["hint"] is True and col["acts"] is True
+    assert col["blockHintHidden"] is True
+    assert col["blockHandlesRemoved"] is True   # режимы не смешиваются
+    assert col["blockActiveRemoved"] is True
+    assert col["activeClass"] is True
+    assert col["tableHighlighted"] is True
+    assert col["handles"] == 13                 # по ручке на колонку
+
+    assert res["collapses"] is True
+    assert res["modesOffAfterCollapse"] is True
+    assert res["ariaCollapsed"] == "false"

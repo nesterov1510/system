@@ -1,20 +1,28 @@
 // Конструктор страницы: админ переставляет блоки и колонки таблицы.
 // Порядок сохраняется лично ему через POST /ui/layout (user_page_layouts).
 //
-// Блоки — прямые потомки [data-lay-root], порядок задаётся CSS `order`.
-// Колонки — в таблицах `order` не работает, поэтому ячейки переставляются
-// по-настоящему: заголовки в thead и все td с тем же data-col в каждой строке.
+// Панель свёрнута: по кнопке «🧩 Конструктор» раскрываются два режима —
+// «Блоки страницы» и «Колонки таблицы». Блоки — прямые потомки
+// [data-lay-root], их порядок задаётся CSS `order`. Колонки — в таблицах
+// `order` не работает, поэтому ячейки переставляются по-настоящему:
+// заголовки в thead и все td с тем же data-col в каждой строке.
 (() => {
   "use strict";
   const bar = document.querySelector("[data-lay-bar]");
   const root = document.querySelector("[data-lay-root]");
   if (!bar || !root) return;
 
+  const panel = bar.querySelector("[data-lay-panel]");
+  const expandBtn = bar.querySelector("[data-lay-expand]");
+  const collapseBtn = bar.querySelector("[data-lay-collapse]");
+  const modeBlockBtn = bar.querySelector("[data-lay-toggle]");
+  const modeColBtn = bar.querySelector("[data-laycol-toggle]");
   const table = document.getElementById("rlist-table");
   const onlyBlock = Array.from(bar.querySelectorAll("[data-lay-only]"));
   const onlyCol = Array.from(bar.querySelectorAll("[data-laycol-only]"));
   const formBlock = bar.querySelector("[data-lay-form]");
   const formCol = bar.querySelector("[data-laycol-form]");
+
   const editingBlocks = () => bar.classList.contains("is-editing-blocks");
   const editingCols = () => bar.classList.contains("is-editing-cols");
 
@@ -23,6 +31,22 @@
     form.elements.order.value = order.join(",");
     form.submit();
   };
+
+  // ------------------------------------------------------------------ панель
+  // Свёрнутый вид — одна кнопка; раскрытие показывает режимы и действия.
+  function setPanel(on) {
+    if (!panel) return;
+    if (!on) {
+      setBlockMode(false);
+      setColMode(false);
+    }
+    panel.hidden = !on;
+    bar.classList.toggle("is-open", on);
+    if (expandBtn) expandBtn.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+
+  expandBtn?.addEventListener("click", () => setPanel(!bar.classList.contains("is-open")));
+  collapseBtn?.addEventListener("click", () => setPanel(false));
 
   // ------------------------------------------------------------------ блоки
   const blocks = () => Array.from(root.querySelectorAll(":scope > [data-block]"));
@@ -66,11 +90,12 @@
     return ctl;
   };
 
-  const setBlockMode = (on) => {
-    setColMode(false);
+  function setBlockMode(on) {
+    if (on) setColMode(false);
     bar.classList.toggle("is-editing-blocks", on);
-    bar.classList.toggle("is-editing", on);
+    if (panel) panel.classList.toggle("is-editing", on);
     root.classList.toggle("is-lay", on);
+    if (modeBlockBtn) modeBlockBtn.classList.toggle("is-active", on);
     onlyBlock.forEach((el) => {
       el.hidden = !on;
     });
@@ -80,11 +105,9 @@
       el.draggable = on;
       if (on) el.prepend(blockControl(el));
     });
-    const btn = bar.querySelector("[data-lay-toggle]");
-    if (btn) btn.textContent = on ? "✕ Закрыть конструктор" : "🧩 Блоки страницы";
-  };
+  }
 
-  bar.querySelector("[data-lay-toggle]")?.addEventListener("click", () => setBlockMode(!editingBlocks()));
+  modeBlockBtn?.addEventListener("click", () => setBlockMode(!editingBlocks()));
 
   let dragBlock = null;
   root.addEventListener("dragstart", (e) => {
@@ -194,8 +217,9 @@
   function setColMode(on) {
     if (on) setBlockMode(false);
     bar.classList.toggle("is-editing-cols", on);
-    bar.classList.toggle("is-editing", on);
+    if (panel) panel.classList.toggle("is-editing", on);
     table.classList.toggle("is-lay-cols", on);
+    if (modeColBtn) modeColBtn.classList.toggle("is-active", on);
     onlyCol.forEach((el) => {
       el.hidden = !on;
     });
@@ -208,11 +232,9 @@
         if (on) th.prepend(colControl(th));
       });
     }
-    const btn = bar.querySelector("[data-laycol-toggle]");
-    if (btn) btn.textContent = on ? "✕ Закрыть конструктор" : "🔀 Колонки таблицы";
   }
 
-  bar.querySelector("[data-laycol-toggle]")?.addEventListener("click", () => setColMode(!editingCols()));
+  modeColBtn?.addEventListener("click", () => setColMode(!editingCols()));
 
   let dragCol = null;
   table.addEventListener("dragstart", (e) => {
