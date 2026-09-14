@@ -50,7 +50,13 @@ from app.services.settings import get_currency, get_repair_statuses
 from app.webui.catalog import CONDITION_OPTIONS, DEFAULT_COMPLECTATION, DEVICE_CLASSES, normalize_class
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
-from app.webui.layout import as_orders, block_keys, block_labels, get_layout
+from app.webui.layout import (
+    as_orders,
+    block_keys,
+    block_labels,
+    get_layout,
+    get_layout_order,
+)
 
 def _layout_next(request: Request) -> str:
     """Адрес возврата после сохранения раскладки (тот же экран с фильтрами)."""
@@ -182,6 +188,9 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         can_layout = user.has_role("admin")
         layout = await get_layout(db, user.id, "repairs_list") if can_layout else \
             as_orders("repairs_list", None)
+        # Порядок колонок таблицы — тоже личный (page="repairs_columns").
+        layout_cols = await get_layout_order(db, user.id, "repairs_columns") if can_layout \
+            else block_keys("repairs_columns")
         ctx = await base_context(
             request, await get_web_user(request), active="/repairs",
             repairs=repairs, total=total, stage=stage or "all", q=q or "",
@@ -196,6 +205,8 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
             layout_default=block_keys("repairs_list"),
             layout_page="repairs_list",
             layout_next=_layout_next(request),
+            layout_cols_order=",".join(layout_cols),
+            layout_cols_default=block_keys("repairs_columns"),
             can_layout=can_layout,
             masters_json=[{"id": str(m.id), "name": m.name} for m in masters],
             just=just, printed=printed,

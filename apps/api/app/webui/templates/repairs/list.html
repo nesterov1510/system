@@ -141,46 +141,47 @@ textarea.riedit{min-height:64px;resize:vertical}
 <div class="rlist-card" data-block="table" data-block-title="Таблица ремонтов"
      style="order:{{ layout['table'] }}">
   <div class="table-wrap">
-    <table id="rlist-table" class="{% if hl_ready %}is-hl-ready{% endif %}">
+    <table id="rlist-table" class="{% if hl_ready %}is-hl-ready{% endif %}"
+           data-col-order="{{ layout_cols_order }}">
       <thead>
         <tr>
-          {% if can_delete %}<th class="bulk-col"><span class="sr-only">Отметить</span></th>{% endif %}
-          <th style="text-transform:none;letter-spacing:0">📅 Дата
+          {% if can_delete %}<th data-col="bulk" class="bulk-col"><span class="sr-only">Отметить</span></th>{% endif %}
+          <th data-col="date" style="text-transform:none;letter-spacing:0">📅 Дата
             <button type="button" class="colhint" data-colhint data-title="Дата"
               data-hint="Дата и время, когда технику приняли в сервис.">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">📺 Техника
+          <th data-col="device" style="text-transform:none;letter-spacing:0">📺 Техника
             <button type="button" class="colhint" data-colhint data-title="Название техники"
               data-hint="Класс техники, марка и модель. Карточка открывается через меню ⚡ в последней колонке."
               data-details="🚚 — заказ с доставкой (курьер или забрали с адреса)">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">🧾 Принял
+          <th data-col="accepted" style="text-transform:none;letter-spacing:0">🧾 Принял
             <button type="button" class="colhint" data-colhint data-title="Кто принял технику"
               data-hint="Сотрудник, который оформил приёмку этого ремонта.">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">🔧 Причина
+          <th data-col="fault" style="text-transform:none;letter-spacing:0">🔧 Причина
             <button type="button" class="colhint" data-colhint data-title="Причина поломки"
               data-hint="Неисправность со слов клиента. Если жалоба пустая — показывается диагноз мастера.">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">🛠 Что починили
+          <th data-col="fixed" style="text-transform:none;letter-spacing:0">🛠 Что починили
             <button type="button" class="colhint" data-colhint data-title="Что починили"
               data-hint="Что именно сделали — со слов мастера (поле «Что сделано» в карточке ремонта). Печатается в бланке.">?</button></th>
-          <th class="num" style="text-transform:none;letter-spacing:0">💵 Сумма
+          <th data-col="sum" class="num" style="text-transform:none;letter-spacing:0">💵 Сумма
             <button type="button" class="colhint" data-colhint data-title="Общая сумма ремонта"
               data-hint="Сколько стоит ремонт: итоговая цена, если она уже указана, иначе верхняя граница вилки из прайса.">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">🔩 Запчасти
+          <th data-col="parts" style="text-transform:none;letter-spacing:0">🔩 Запчасти
             <button type="button" class="colhint" data-colhint data-title="Расходы на запчасти"
               data-hint="Сумма списанных под ремонт запчастей и сами позиции (название ×кол-во).">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">👤 Клиент
+          <th data-col="client" style="text-transform:none;letter-spacing:0">👤 Клиент
             <button type="button" class="colhint" data-colhint data-title="Имя и номер клиента"
               data-hint="Кто владелец ремонта. Позвонить можно из меню ⚡.">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">👷 Мастера
+          <th data-col="masters" style="text-transform:none;letter-spacing:0">👷 Мастера
             <button type="button" class="colhint" data-colhint data-title="Мастер(а) и помощники"
               data-hint="Кто ведёт ремонт: сначала основные мастера, ниже строчкой помощники (kömekçi). Назначают администратор и оператор."
               data-details="«Не назначен» — у ремонта ещё нет исполнителя">?</button></th>
-          <th class="num" style="text-transform:none;letter-spacing:0">💰 Выплата
+          <th data-col="payout" class="num" style="text-transform:none;letter-spacing:0">💰 Выплата
             <button type="button" class="colhint" data-colhint data-title="Сколько оплачено мастерам"
               data-hint="Сумма, выплаченная мастерам за этот ремонт. Заполняется при оформлении починки (админ/менеджер/оператор).">?</button></th>
-          <th class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
+          <th data-col="total" class="num" style="text-transform:none;letter-spacing:0">🏁 Итог
             <button type="button" class="colhint" data-colhint data-title="Итоговая сумма ремонта"
               data-hint="Итог к оплате и отметка, рассчитался ли клиент: «✓ оплачено» или «не оплачено».">?</button></th>
-          <th style="text-transform:none;letter-spacing:0">⚡ Действия
+          <th data-col="actions" style="text-transform:none;letter-spacing:0">⚡ Действия
             <button type="button" class="colhint" data-colhint data-title="Действия по ремонту"
               data-hint="Карточка открывается здесь: «Открыть карточку». Плюс бланк, этикетки, «закончен», SMS клиенту и звонок. SMS уходит только по ✉.">?</button></th>
         </tr>
@@ -196,16 +197,16 @@ textarea.riedit{min-height:64px;resize:vertical}
         {% if ready_waiting %}{% set _ = row_flags.append('is-ready') %}{% endif %}
         <tr class="{{ row_flags | join(' ') }}">
           {% if can_delete %}
-          <td class="bulk-col">
+          <td data-col="bulk" class="bulk-col">
             <input type="checkbox" name="ids" value="{{ r.id }}" form="bulk-repairs" aria-label="Отметить ремонт клиента {{ r.client.full_name }}">
           </td>
           {% endif %}
-          <td title="Принято {{ r.accepted_at | dt }}">
+          <td data-col="date" title="Принято {{ r.accepted_at | dt }}">
             <div class="rlist-date">
               <b>{{ r.accepted_at | dt }}</b>
             </div>
           </td>
-          <td class="wrap">
+          <td data-col="device" class="wrap">
             <div class="rlist-dev">
               <span class="rlist-dev__ico">{{ r.device_type | class_icon }}</span>
               <span>
@@ -221,35 +222,35 @@ textarea.riedit{min-height:64px;resize:vertical}
               </span>
             </div>
           </td>
-          <td>{{ r.accepted_by_user.name if r.accepted_by_user else '—' }}</td>
+          <td data-col="accepted">{{ r.accepted_by_user.name if r.accepted_by_user else '—' }}</td>
           {% if can_inline %}
-          <td class="wrap muted rieditable" style="max-width:200px" data-edit="fault_client" data-repair-id="{{ r.id }}"
+          <td data-col="fault" class="wrap muted rieditable" style="max-width:200px" data-edit="fault_client" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.fault_client or r.fault_master or '' }}"
               title="Двойной клик — изменить неисправность">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
           {% else %}
-          <td class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
+          <td data-col="fault" class="wrap muted" style="max-width:200px">{{ (r.fault_client or r.fault_master or '—') | truncate(60) }}</td>
           {% endif %}
           {% if can_inline %}
-          <td class="wrap rieditable" style="max-width:220px" data-edit="work_done" data-repair-id="{{ r.id }}"
+          <td data-col="fixed" class="wrap rieditable" style="max-width:220px" data-edit="work_done" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.work_done or '' }}"
               title="Двойной клик — изменить «что починили» (со слов мастера)">{{ (r.work_done or '—') | truncate(60) }}</td>
           {% else %}
-          <td class="wrap" style="max-width:220px">{{ (r.work_done or '—') | truncate(60) }}</td>
+          <td data-col="fixed" class="wrap" style="max-width:220px">{{ (r.work_done or '—') | truncate(60) }}</td>
           {% endif %}
           {% if can_inline and can_finance %}
-          <td class="num rieditable" data-edit="price_final" data-edit-kind="money" data-repair-id="{{ r.id }}"
+          <td data-col="sum" class="num rieditable" data-edit="price_final" data-edit-kind="money" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.price_final if r.price_final is not none else '' }}"
               title="Двойной клик — изменить итоговую цену">
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
           </td>
           {% else %}
-          <td class="num">
+          <td data-col="sum" class="num">
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
           </td>
           {% endif %}
-          <td class="num rpop-cell">
+          <td data-col="parts" class="num rpop-cell">
             {% set pc = parts_cost.get(r.id) %}
             {% set lines = parts_lines.get(r.id) if parts_lines is defined else none %}
             {% if pc %}
@@ -277,7 +278,7 @@ textarea.riedit{min-height:64px;resize:vertical}
             </div>
             {% else %}<span class="muted">—</span>{% endif %}
           </td>
-          <td class="wrap">
+          <td data-col="client" class="wrap">
             {% if can_inline and can_client %}
             <b class="rieditable" data-edit="client_name" data-repair-id="{{ r.id }}"
                data-edit-value="{{ r.client.full_name or '' }}"
@@ -295,11 +296,11 @@ textarea.riedit{min-height:64px;resize:vertical}
           {% set hnames = [] %}
           {% for m in r.masters %}{% if (m.kind or 'master') == 'helper' %}{% set _ = hnames.append(m.user.name) %}{% endif %}{% endfor %}
           {% if can_assign %}
-          <td class="wrap rieditable" data-edit="masters" data-edit-kind="master" data-repair-id="{{ r.id }}"
+          <td data-col="masters" class="wrap rieditable" data-edit="masters" data-edit-kind="master" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.master_id or '' }}"
               title="Двойной клик — назначить мастера (помощники — в карточке ремонта)">
           {% else %}
-          <td class="wrap">
+          <td data-col="masters" class="wrap">
           {% endif %}
             {% if mnames %}
               <div>{{ mnames | join(', ') }}</div>
@@ -309,17 +310,17 @@ textarea.riedit{min-height:64px;resize:vertical}
             {% else %}<span class="chip gray">Не назначен</span>{% endif %}
           </td>
           {% if can_inline and can_finance %}
-          <td class="num rieditable" data-edit="master_payout" data-edit-kind="money" data-repair-id="{{ r.id }}"
+          <td data-col="payout" class="num rieditable" data-edit="master_payout" data-edit-kind="money" data-repair-id="{{ r.id }}"
               data-edit-value="{{ r.master_payout if r.master_payout is not none else '' }}"
               title="Двойной клик — изменить выплату мастерам">
             {% if r.master_payout is not none %}<span style="color:#b06b00;font-weight:700">{{ r.master_payout | money(currency.symbol) }}</span>{% else %}<span class="muted">—</span>{% endif %}
           </td>
           {% else %}
-          <td class="num">
+          <td data-col="payout" class="num">
             {% if r.master_payout is not none %}<span style="color:#b06b00;font-weight:700">{{ r.master_payout | money(currency.symbol) }}</span>{% else %}<span class="muted">—</span>{% endif %}
           </td>
           {% endif %}
-          <td class="num">
+          <td data-col="total" class="num">
             {% set sum = r.price_final if r.price_final is not none else r.price_max %}
             {% if sum is not none %}<b>{{ sum | money(currency.symbol) }}</b>{% else %}<span class="muted">—</span>{% endif %}
             <div style="margin-top:3px">
@@ -347,7 +348,7 @@ textarea.riedit{min-height:64px;resize:vertical}
               {% endif %}
             </div>
           </td>
-          <td class="row-actions rpop-cell">
+          <td data-col="actions" class="row-actions rpop-cell">
             <button type="button" class="rpop-trigger" data-pop
                     onclick="event.preventDefault();event.stopPropagation();return msbRpop(this)"
                     aria-expanded="false" aria-haspopup="menu" title="Действия">⚡</button>
@@ -415,6 +416,9 @@ textarea.riedit{min-height:64px;resize:vertical}
     </table>
   </div>
 </div>
+{% if can_layout %}
+<script src="/static/msb/layout.js"></script>
+{% endif %}
 
 {% set qs = 'stage=' ~ stage ~ '&q=' ~ (q | urlencode) ~ '&status=' ~ ((status or '') | urlencode) ~ '&per_page=' ~ per_page ~ ('&filter=' ~ (dash_filter | urlencode) if dash_filter else '') %}
 <div data-block="pager" data-block-title="Страницы и итог" style="order:{{ layout['pager'] }}">
@@ -458,9 +462,7 @@ textarea.riedit{min-height:64px;resize:vertical}
 {% endblock %}
 {% block page_js %}
 <script src="/static/msb/repair-list.js?v=4"></script>
-{% if can_layout %}
-<script src="/static/msb/layout.js"></script>
-{% endif %}
+
 {% if can_inline or can_assign %}
 <script>
 // --- Инлайн-редактирование ячеек таблицы по двойному клику. ---

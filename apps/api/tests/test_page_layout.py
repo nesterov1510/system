@@ -14,6 +14,7 @@ from app.webui.layout import PAGE_BLOCKS, block_keys, normalize
 
 CARD = "repair_card"
 LIST = "repairs_list"
+COLS = "repairs_columns"
 
 
 # --------------------------------------------------------------------------
@@ -109,7 +110,7 @@ def second_admin(client, admin_headers):
 def test_blocks_registered_for_both_pages():
     assert block_keys(CARD) == ["hero", "passport", "fault", "parts", "pay", "log"]
     assert block_keys(LIST) == ["toolbar", "legend", "bulk", "table", "pager"]
-    assert set(PAGE_BLOCKS) == {CARD, LIST}
+    assert set(PAGE_BLOCKS) == {CARD, LIST, COLS}
     for page, blocks in PAGE_BLOCKS.items():
         assert blocks, page
         assert all(label.strip() for _key, label in blocks), page
@@ -314,3 +315,129 @@ def test_card_grid_is_flat_so_blocks_can_move():
     assert card.count('data-block="') == len(block_keys(CARD))
     for name in block_keys(CARD):
         assert f'data-block="{name}"' in card
+
+
+# --------------------------------------------------------------------------
+# Колонки таблицы «Все ремонты»
+# --------------------------------------------------------------------------
+def _col_order_attr(html):
+    m = re.search(r'data-col-order="([^"]*)"', html)
+    assert m, "у таблицы нет data-col-order"
+    return [c for c in m.group(1).split(",") if c]
+
+
+def test_column_keys_match_table_markup():
+    """Ключи колонок в layout.py = data-col в шаблоне, тем же порядком."""
+    from pathlib import Path
+
+    tpl = (Path(__file__).resolve().parent.parent / "app" / "webui" / "templates" / "repairs" / "list.html").read_text(
+        encoding="utf-8"
+    )
+    ths = re.findall(r'<th data-col="(\w+)"', tpl)
+    tds = re.findall(r'<td data-col="(\w+)"', tpl)
+    # заголовки идут ровно в том порядке, что и ключи колонок
+    assert ths == block_keys(COLS)
+    # у каждой колонки есть ячейка в теле таблицы
+    assert set(tds) == set(block_keys(COLS))
+    # 13 колонок + 5 колонок с парой if/else (редактируемые и их readonly-вид)
+    assert len(tds) == len(block_keys(COLS)) + 5
+
+
+def test_table_renders_default_column_order(client, admin_headers):
+    _make_repair(client, admin_headers, "layout-cols-1", "+99360110008")
+    html = client.get("/repairs", cookies=_login(client)).text
+    assert _col_order_attr(html) == block_keys(COLS)
+    assert 'data-laycol-toggle' in html and 'value="repairs_columns"' in html
+
+
+def test_saved_column_order_is_rendered_back(client, admin_headers):
+    _make_repair(client, admin_headers, "layout-cols-2", "+99360110009")
+    cookies = _login(client)
+    order = ["actions", "client", "date", "device", "accepted", "fault",
+             "fixed", "sum", "parts", "masters", "payout", "total", "bulk"]
+    _set_order(client, cookies, COLS, order)
+    html = client.get("/repairs", cookies=cookies).text
+    assert _col_order_attr(html) == order
+    # порядок блоков при этом не поехал
+    assert _orders(html, LIST) == {name: i for i, name in enumerate(block_keys(LIST))}
+    _set_order(client, cookies, COLS, block_keys(COLS))
+
+
+def test_column_order_is_personal_not_shared(client, admin_headers, second_admin):
+    _make_repair(client, admin_headers, "layout-cols-3", "+99360110010")
+    cookies = _login(client)
+    order = ["actions", "client", "date", "device", "accepted", "fault",
+             "fixed", "sum", "parts", "masters", "payout", "total", "bulk"]
+    _set_order(client, cookies, COLS, order)
+    assert _col_order_attr(client.get("/repairs", cookies=cookies).text) == order
+
+    other = _login(client, **second_admin)
+    assert _col_order_attr(client.get("/repairs", cookies=other).text) == block_keys(COLS)
+    _set_order(client, cookies, COLS, block_keys(COLS))
+
+
+def test_master_cannot_save_columns(client, admin_headers):
+    _make_repair(client, admin_headers, "layout-cols-4", "+99360110011")
+    cookies = _login(client, "master@msb.local", "master123")
+    r = client.post(
+        "/ui/layout",
+        cookies=cookies,
+        data={"page": COLS, "order": "actions,date", "next": "/repairs"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 403
+    # у мастера конструктора колонок нет вовсе
+    html = client.get("/repairs", cookies=cookies).text
+    assert "data-laycol-toggle" not in html
+    assert _col_order_attr(html) == block_keys(COLS)
+
+
+def _run_layout_js(html):
+    """Прогнать настоящий layout.js в jsdom и вернуть порядок колонок."""
+    import json
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    node = shutil.which("node")
+    if not node:
+        return None
+    runner = Path(__file__).resolve().parent / "js" / "layout_columns.cjs"
+    script = Path(__file__).resolve().parent.parent / "app" / "webui" / "static" / "msb" / "layout.js"
+    env = dict(os.environ, NODE_PATH=os.environ.get("NODE_PATH", "/tmp/node_modules"))
+    with tempfile.TemporaryDirectory() as d:
+        page = Path(d) / "page.html"
+        page.write_text(html, encoding="utf-8")
+        proc = subprocess.run(
+            [node, str(runner), str(page), str(script)],
+            capture_output=True, text=True, env=env, timeout=120,
+        )
+    assert proc.returncode == 0, proc.stderr[-800:]
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+def test_layout_js_moves_columns_and_their_cells(client, admin_headers):
+    """Сохранённый порядок применяется самим layout.js: шапка и все ячейки."""
+    _make_repair(client, admin_headers, "layout-cols-5", "+99360110012")
+    cookies = _login(client)
+    order = ["actions", "client", "date", "device", "accepted", "fault",
+             "fixed", "sum", "parts", "masters", "payout", "total", "bulk"]
+    _set_order(client, cookies, COLS, order)
+    html = client.get("/repairs", cookies=cookies).text
+
+    res = _run_layout_js(html)
+    if res is None or res.get("skip"):
+        _set_order(client, cookies, COLS, block_keys(COLS))
+        pytest.skip("нет node или jsdom — прогон layout.js пропущен")
+
+    assert res["rowCount"] > 0, "в таблице нет строк"
+    assert res["head"] == order, res["head"]
+    assert res["firstRow"] == order, res["firstRow"]
+    assert res["allRowsMatch"] is True
+
+    _set_order(client, cookies, COLS, block_keys(COLS))
+    res = _run_layout_js(client.get("/repairs", cookies=cookies).text)
+    if res and not res.get("skip"):
+        assert res["head"] == block_keys(COLS)

@@ -94,3 +94,33 @@
     flex: 1 1 auto;
   }
 }
+/* ── Колонки таблицы «Все ремонты» ─────────────────────────────────────── */
+/* В таблицах CSS `order` не работает: layout.js переставляет заголовки и
+   ячейки по data-col. Здесь — только подсветка режима правки и ручки ← →. */
+.is-lay-cols {
+  outline: 2px dashed #ffc48a;
+  outline-offset: 4px;
+}
+.is-lay-cols thead th {
+  cursor: grab;
+}
+.is-lay-cols thead th.is-dragging {
+  background: #fff3e8;
+  opacity: 0.5;
+}
+.lay-ctl--col {
+  display: inline-flex;
+  gap: 3px;
+  margin: 0 6px 0 0;
+  padding: 2px;
+  vertical-align: middle;
+  border: 1px solid #ffd9b0;
+  border-radius: 8px;
+  background: #fff7ef;
+  cursor: grab;
+}
+.lay-ctl--col .lay-btn {
+  width: 26px;
+  height: 22px;
+  font-size: 12px;
+}

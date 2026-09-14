@@ -33,6 +33,24 @@ PAGE_BLOCKS: dict[str, list[tuple[str, str]]] = {
         ("table", "Таблица ремонтов"),
         ("pager", "Страницы и итог"),
     ],
+    # Колонки таблицы «Все ремонты» — тот же механизм, но порядок применяется
+    # перестановкой ячеек (CSS `order` в таблицах не работает). Ключи должны
+    # совпадать с data-col в templates/repairs/list.html.
+    "repairs_columns": [
+        ("bulk", "Отметить"),
+        ("date", "📅 Дата"),
+        ("device", "📺 Техника"),
+        ("accepted", "🧾 Принял"),
+        ("fault", "🔧 Причина"),
+        ("fixed", "🛠 Что починили"),
+        ("sum", "💵 Сумма"),
+        ("parts", "🔩 Запчасти"),
+        ("client", "👤 Клиент"),
+        ("masters", "👷 Мастера"),
+        ("payout", "💰 Выплата"),
+        ("total", "🏁 Итог"),
+        ("actions", "⚡ Действия"),
+    ],
 }
 
 
@@ -76,6 +94,19 @@ async def get_layout(db, user_id: uuid.UUID, page: str) -> dict[str, int]:
         )
     ).scalar_one_or_none()
     return as_orders(page, row.blocks if row else None)
+
+
+async def get_layout_order(db, user_id: uuid.UUID, page: str) -> list[str]:
+    """Сохранённый порядок списком (для колонок таблицы)."""
+    row = (
+        await db.execute(
+            select(UserPageLayout).where(
+                UserPageLayout.user_id == user_id,
+                UserPageLayout.page == page,
+            )
+        )
+    ).scalar_one_or_none()
+    return normalize(page, row.blocks if row else None)
 
 
 async def save_layout(db, user_id: uuid.UUID, page: str, blocks) -> dict[str, int]:
