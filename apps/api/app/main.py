@@ -217,6 +217,7 @@ from app.webui import (
     routes_public as _web_public,
 )
 from app.webui import (
+    routes_intake_public as _web_intake_public,
     routes_repairs as _web_repairs,
 )
 
@@ -242,6 +243,8 @@ app.mount("/static", StaticFiles(directory=_web_static_dir), name="webui-static"
 
 # Публичная страница клиента (без авторизации) — регистрируется до общих.
 app.include_router(_web_public.router)
+# Приёмка без аккаунта (/intake) — тоже без авторизации.
+app.include_router(_web_intake_public.router)
 app.include_router(_web_auth.router)
 app.include_router(_web_repairs.router)
 app.include_router(_web_misc.router)

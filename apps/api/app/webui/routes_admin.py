@@ -533,6 +533,7 @@ async def admin_settings(request: Request, section: str = "general", saved: str 
         consent_text = await settings_svc.get_consent_repair_text(db)
         print_stub = await settings_svc.get_print_stub(db)
         intake_print = await settings_svc.get_intake_auto_print(db)
+        public_intake = await settings_svc.get_public_intake(db)
         ip_control = await settings_svc.get_ip_control(db)
         # Текущий IP админа — чтобы он мог сразу добавить себя в белый список
         # и не заблокировать доступ.
@@ -565,6 +566,7 @@ async def admin_settings(request: Request, section: str = "general", saved: str 
             ip_control=ip_control, current_ip=current_ip,
             attempts=attempts, recent_attempts=recent_attempts,
             print_stub=print_stub, intake_print=intake_print,
+            public_intake=public_intake,
         )
         html = await render_async("admin/settings.html", **ctx)
         return HTMLResponse(html)
@@ -640,6 +642,23 @@ async def admin_settings_print(request: Request):
             "Автопечать при приёмке: этикетка / бланк / оба / ничего",
         )
         return RedirectResponse("/admin/settings?section=print&saved=1", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/admin/settings/public-intake")
+async def admin_settings_public_intake(request: Request):
+    """Приёмка без аккаунта: включить/выключить страницу /intake и задать код."""
+    db, _user, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        f = await request.form()
+        enabled = (f.get("public_intake_enabled") or "").strip() in ("1", "on", "true")
+        code = (f.get("public_intake_code") or "").strip()
+        await settings_svc.set_setting(db, "public_intake", {"enabled": enabled, "code": code})
+        await db.commit()
+        return RedirectResponse("/admin/settings?section=intake&saved=1", status_code=303)
     finally:
         await db.close()
 

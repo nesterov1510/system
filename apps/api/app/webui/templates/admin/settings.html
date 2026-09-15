@@ -19,6 +19,7 @@
 
 <div class="tabs">
   <a href="/admin/settings?section=general" class="{% if section=='general' %}active{% endif %}">Общие</a>
+  <a href="/admin/settings?section=intake" class="{% if section=='intake' %}active{% endif %}">Приёмка без аккаунта</a>
   <a href="/admin/settings?section=print" class="{% if section=='print' %}active{% endif %}">Печать</a>
   <a href="/admin/settings?section=printer" class="{% if section=='printer' %}active{% endif %}">Принтер и этикетки</a>
   <a href="/admin/settings?section=sms" class="{% if section=='sms' %}active{% endif %}">SMS-шлюз</a>
@@ -48,6 +49,34 @@
       <button class="btn primary" type="submit">Сохранить общие настройки</button>
     </div>
   </div>
+</form>
+
+{% elif section == 'intake' %}
+{# ============== ПРИЁМКА БЕЗ АККАУНТА ============== #}
+<form method="post" action="/admin/settings/public-intake">
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Страница /intake</h2></div>
+    <div class="msb-form-card__body">
+      <label class="fld"><span class="lbl">Разрешить приёмку без входа</span>
+        <select name="public_intake_enabled">
+          <option value="1" {% if public_intake.enabled %}selected{% endif %}>Включена</option>
+          <option value="0" {% if not public_intake.enabled %}selected{% endif %}>Выключена</option>
+        </select>
+        <span class="hint">Открыть страницу может любой, кто знает адрес — вход в систему не нужен. Оформленный ремонт попадает в «Все ремонты» со статусом «Новый», без мастера: его берёт свободный мастер или назначает администратор. Принявшим указывается служебная учётка «Приёмка без аккаунта».</span></label>
+      <label class="fld"><span class="lbl">Код доступа (необязательно)</span>
+        <input type="text" name="public_intake_code" value="{{ public_intake.code }}" autocomplete="off" placeholder="Например: MSB-2026">
+        <span class="hint">Если задать код, страницу откроет только тот, кто его ввёл; адрес для закладки станет <b>/intake?key=КОД</b>. Пусто — страница открыта всем, кто знает адрес.</span></label>
+    </div>
+  </div>
+  <div class="msb-form-card">
+    <div class="msb-form-card__head"><h2>Адрес страницы</h2></div>
+    <div class="msb-form-card__body">
+      <label class="fld"><span class="lbl">Ссылка для планшета или точки приёма</span>
+        <input type="text" readonly value="/intake{% if public_intake.code %}?key={{ public_intake.code }}{% endif %}">
+        <span class="hint">Страница работает и с телефона: её можно открыть по QR или добавить на главный экран.</span></label>
+    </div>
+  </div>
+  <button class="btn primary" type="submit">Сохранить</button>
 </form>
 
 {% elif section == 'print' %}

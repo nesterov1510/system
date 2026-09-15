@@ -3,6 +3,7 @@
   - город (Ашхабад)
   - филиал (Центральная точка)
   - admin (admin@msb.local)
+  - служебная учётка «Приёмка без аккаунта» (intake@msb.local, вход закрыт)
   - чат-каналы (#общий, #приёмка, #мастера, #callcenter)
   - комплектация (пульт, шнур и т.д.)
   - шаблон бланка
@@ -10,6 +11,8 @@
 
 Без демо-данных: ремонтов, клиентов, запчастей, прайса, лишних пользователей.
 """
+import secrets
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +30,22 @@ from app.db.models import (
 )
 from app.services.print import DEFAULT_TEMPLATE, template_to_body
 from app.services.settings import DEFAULT_SETTINGS
+
+
+# Служебная учётка для приёмки без аккаунта (см. /intake).
+PUBLIC_INTAKE_EMAIL = "intake@msb.local"
+PUBLIC_INTAKE_NAME = "Приёмка без аккаунта"
+
+
+async def get_public_intake_user(db: AsyncSession) -> User:
+    """Служебный пользователь, от имени которого оформляются публичные приёмки."""
+    row = await db.execute(select(User).where(User.email == PUBLIC_INTAKE_EMAIL))
+    user = row.scalar_one_or_none()
+    if user is None:  # база создана до появления учётки — досоздаём
+        await seed(db)
+        row = await db.execute(select(User).where(User.email == PUBLIC_INTAKE_EMAIL))
+        user = row.scalar_one_or_none()
+    return user
 
 
 async def seed(db: AsyncSession) -> None:
@@ -85,6 +104,25 @@ async def seed(db: AsyncSession) -> None:
                 role=UserRole.ADMIN.value,
                 city_id=city.id,
                 branch_id=branch.id,
+            )
+        )
+
+    # --- Служебный пользователь «Приёмка без аккаунта» ---
+    # На странице /intake технику оформляют без входа, но у каждого ремонта
+    # должен быть принявший сотрудник (журнал, фильтры, статистика). Роль
+    # оператора и active=False: войти под ним нельзя — пароль случайный и
+    # учётка выключена, зато в списке ремонтов видно, откуда запись.
+    row = await db.execute(select(User).where(User.email == PUBLIC_INTAKE_EMAIL))
+    if row.scalar_one_or_none() is None:
+        db.add(
+            User(
+                name=PUBLIC_INTAKE_NAME,
+                email=PUBLIC_INTAKE_EMAIL,
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                role=UserRole.OPERATOR.value,
+                city_id=city.id,
+                branch_id=branch.id,
+                active=False,
             )
         )
 

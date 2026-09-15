@@ -20,6 +20,15 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "value": {"months": 3},
         "description": "Срок хранения техники после готовности (месяцев)",
     },
+    "public_intake": {
+        "value": {"enabled": True, "code": ""},
+        "description": (
+            "Приёмка без аккаунта: страница /intake, куда технику может оформить "
+            "любой человек без входа. Ремонты попадают в «Новые», мастера берут "
+            "их сами или назначает администратор. code — необязательный код "
+            "доступа: если задан, страницу откроет только тот, кто его знает."
+        ),
+    },
     "legal_text": {
         "value": {
             "text": (
@@ -311,6 +320,21 @@ async def get_print_stub(db) -> dict:
             if val:
                 value[key] = val
     return value
+
+
+async def get_public_intake(db) -> dict:
+    """Приёмка без аккаунта: {"enabled": bool, "code": str}.
+
+    `enabled` — доступна ли страница /intake; `code` — необязательный код
+    доступа (пустой = страница открыта всем, кто знает адрес).
+    """
+    saved = await get_setting(db, "public_intake")
+    data = saved or {}
+    default = DEFAULT_SETTINGS["public_intake"]["value"]
+    return {
+        "enabled": bool(data.get("enabled", default["enabled"])),
+        "code": str(data.get("code") or "").strip(),
+    }
 
 
 async def get_intake_auto_print(db) -> str:
