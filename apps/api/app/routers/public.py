@@ -19,18 +19,6 @@ async def public_repair(token: str, db: DbSession, request: Request):
     if not public_limiter.allow(f"r:{client_key}"):
         raise HTTPException(429, "Слишком много запросов")
 
-    # Публичный сервер без БД: проксируем ответ внутреннего сервера.
-    from app.services import upstream
-
-    if upstream.upstream_base():
-        try:
-            data = await upstream.fetch_public_repair(token)
-        except upstream.UpstreamUnavailable as exc:
-            raise HTTPException(502, "Внутренний сервис недоступен") from exc
-        if data is None:
-            raise HTTPException(404, "Ремонт не найден")
-        return data
-
     row = await db.execute(
         select(Repair)
         .where(Repair.public_token == token)

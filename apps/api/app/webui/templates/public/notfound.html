@@ -4,22 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>{% if reason == 'unavailable' %}Сервис временно недоступен{% else %}Ремонт не найден{% endif %} — MSB</title>
+  <title>Ремонт не найден — MSB</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="login-wrap">
   <div class="login-card" style="text-align:center">
     <div class="logo" style="justify-content:center"><span class="mark">🧰</span> MSB</div>
-{% if reason == 'unavailable' %}
-    <h2 style="margin-top:18px">Сервис временно недоступен</h2>
-    <p class="muted">Не удалось получить статус ремонта. Обновите страницу
-      через минуту или позвоните в сервисный центр — ваш ремонт на месте.</p>
-{% else %}
     <h2 style="margin-top:18px">Ремонт не найден</h2>
     <p class="muted">Ссылка недействительна или технику ещё не оформили.
       Проверьте QR-код на бланке или обратитесь в сервисный центр.</p>
-{% endif %}
   </div>
 </div>
 </body>
