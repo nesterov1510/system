@@ -190,16 +190,29 @@ def can_edit_stock_catalog(user) -> bool:
 def can_add_repair_part(user) -> bool:
     """Списать запчасть под конкретный ремонт.
 
-    Мастер может списывать деталь на ремонт, который ведёт сам, — но только
-    без указания своей цены (цену подставляет складская). Право на произвольную
-    цену есть у старших ролей.
+    Мастер может списывать деталь на ремонт, который ведёт сам, и указать к
+    ней свою цену (см. `can_set_repair_part_price`). Если цену не указал —
+    подставляется складская.
     """
     return has_any_role(user, *SENIOR_ROLES, MASTER, CALLCENTER)
 
 
-def can_set_repair_part_price(user) -> bool:
-    """Задать/переопределить цену запчасти в ремонте."""
-    return has_any_role(user, *SENIOR_ROLES)
+def can_set_repair_part_price(user, repair=None) -> bool:
+    """Задать/переопределить цену запчасти в ремонте.
+
+    Старшие роли — всегда. Мастер — в своём заказе: он ведёт ремонт и знает,
+    по какой цене ставил деталь, иначе ему приходилось бы звать оператора
+    из-за каждой позиции.
+
+    Чужой заказ мастеру по-прежнему недоступен: принадлежность проверяет
+    `can_access_repair`, поэтому произвольно менять себестоимость чужих
+    ремонтов он не может. Без переданного ремонта право мастеру не выдаётся.
+    """
+    if has_any_role(user, *SENIOR_ROLES):
+        return True
+    if repair is None:
+        return False
+    return is_master_only(user) and can_access_repair(user, repair)
 
 
 def can_remove_repair_part(user) -> bool:

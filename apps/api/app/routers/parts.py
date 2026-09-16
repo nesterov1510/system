@@ -205,12 +205,12 @@ async def add_repair_part(
     if not can_add_repair_part(user):
         raise _forbid("Недостаточно прав, чтобы добавлять запчасти к ремонту")
 
-    # Цену запчасти вправе задавать только старшие роли: иначе мастер может
-    # списать деталь по произвольной (заниженной/завышенной) цене и исказить
-    # себестоимость и прибыль.
+    # Цену вправе указать старшая роль либо мастер в своём заказе — ремонт к
+    # этому моменту уже загружен, и can_access_repair выше подтвердил, что
+    # заказ его. В чужом ремонте мастер цену по-прежнему не задаёт.
     wants_price = payload.price is not None
-    if wants_price and not can_set_repair_part_price(user):
-        raise _forbid("Цену запчасти указывает администратор, менеджер или оператор")
+    if wants_price and not can_set_repair_part_price(user, repair):
+        raise _forbid("Цену запчасти в этом ремонте вам указать нельзя")
 
     is_manual = False
     if payload.part_id:
