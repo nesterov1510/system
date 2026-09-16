@@ -417,3 +417,81 @@ def test_master_client_list_is_scoped(client, operator_headers, two_masters, cit
     admin_listed = {x["id"] for x in client.get(
         "/api/repairs/clients/list", headers=operator_headers).json()}
     assert foreign_client in admin_listed
+
+
+def test_master_client_lookup_returns_only_visible_repairs(
+    client, operator_headers, two_masters, city_id
+):
+    """Поиск клиента по телефону не отдаёт мастеру чужие заказы этого клиента.
+
+    Проверены обе ветки: единственный клиент (список его ремонтов) и несколько
+    совпадений (счётчики ремонтов у кандидатов).
+    """
+    # два ремонта одного клиента: один назначен vis-m1, другой — vis-m2
+    a = _intake(client, operator_headers, city_id, "vis-19", phone="+993 61 500019")
+    assert a.status_code == 201, a.text
+    b = _intake(client, operator_headers, city_id, "vis-20", phone="+993 61 500019")
+    assert b.status_code == 201, b.text
+    _assign(client, operator_headers, a.json()["id"], two_masters["vis-m1"]["id"])
+    _assign(client, operator_headers, b.json()["id"], two_masters["vis-m2"]["id"])
+
+    # клиент, у которого нет ни одного доступного vis-m1 ремонта
+    hidden = _intake(client, operator_headers, city_id, "vis-21", phone="+993 61 509977")
+    assert hidden.status_code == 201, hidden.text
+    _assign(client, operator_headers, hidden.json()["id"], two_masters["vis-m2"]["id"])
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    # такому клиенту имя и телефон не раскрываются
+    hid = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": "+993 61 509977"}
+    )
+    assert hid.status_code == 200, hid.text
+    assert hid.json().get("found") is False, hid.text[:300]
+    assert "client" not in hid.json(), hid.text[:300]
+    # старшая роль того же клиента находит
+    assert client.get(
+        "/api/repairs/clients/lookup", headers=operator_headers,
+        params={"phone": "+993 61 509977"}).json()["found"] is True
+
+    r = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": "+993 61 500019"}
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    ids = {x["id"] for x in data["repairs"]}
+    assert a.json()["id"] in ids, "свой заказ не вернулся"
+    assert b.json()["id"] not in ids, "чужой заказ вернулся мастеру"
+    assert data["repairs_count"] == 1, data["repairs_count"]
+
+    # Ветка с несколькими совпадениями: счётчик считается только по доступным
+    # мастеру ремонтам, поэтому у клиента с чужим заказом он меньше полного.
+    # Номера берём из незанятого префикса 5099: база в тестах общая для сессии,
+    # и широкий поиск зацепил бы клиентов из других тестов.
+    SEARCH = "61 5099"
+    for i in range(3):
+        c_i = _intake(client, operator_headers, city_id, f"vis-cand-{i}",
+                      phone=f"+993 61 5099{10 + i}")
+        assert c_i.status_code == 201, c_i.text
+        # второй ремонт того же клиента уходит другому мастеру
+        extra = _intake(client, operator_headers, city_id, f"vis-cand-x-{i}",
+                        phone=f"+993 61 5099{10 + i}")
+        assert extra.status_code == 201, extra.text
+        _assign(client, operator_headers, extra.json()["id"], two_masters["vis-m2"]["id"])
+
+    cand = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": SEARCH}
+    )
+    assert cand.status_code == 200, cand.text
+    assert cand.json().get("multiple") is True, cand.text[:300]
+    rows = {r["phone"]: r["repairs_count"] for r in cand.json()["candidates"]}
+    assert len(rows) == 3, rows
+    for phone, count in rows.items():
+        assert count == 1, (phone, count, rows)
+
+    # старшая роль видит оба ремонта каждого клиента
+    admin_rows = {r["phone"]: r["repairs_count"] for r in client.get(
+        "/api/repairs/clients/lookup", headers=operator_headers,
+        params={"phone": SEARCH}).json()["candidates"]}
+    for phone in rows:
+        assert admin_rows[phone] == 2, (phone, admin_rows[phone])

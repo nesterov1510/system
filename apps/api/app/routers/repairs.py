@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -242,9 +242,15 @@ async def lookup_client(
     user: CurrentUser,
     phone: str = Query(..., description="Телефон для поиска клиента"),
 ):
-    """Найти клиента по телефону + вернуть список его ремонтов."""
+    """Найти клиента по телефону + вернуть список его ремонтов.
+
+    Мастеру возвращаются только доступные ему ремонты клиента — те же границы,
+    что и у списка «Все ремонты» (`repair_scope.master_visible`). Без этого
+    поиск по телефону отдавал мастеру чужие заказы клиента со статусами и ценами.
+    """
     from app.services.numbering import normalize_phone
     phone_norm = normalize_phone(phone)
+    master_only = _is_master_only(user)
 
     # Сначала ищем по нормализованному номеру
     row = await db.execute(
@@ -258,18 +264,25 @@ async def lookup_client(
     if client is None:
         from sqlalchemy import func
         like = f"%{phone.strip()}%"
-        row = await db.execute(
+        cand_q = (
             select(
                 Client.id,
                 Client.full_name,
                 Client.phone,
                 func.count(Repair.id).label("repairs_count"),
             )
-            .outerjoin(Repair, Repair.client_id == Client.id)
             .where(Client.phone.ilike(like), Client.deleted_at.is_(None))
             .group_by(Client.id, Client.full_name, Client.phone)
             .limit(5)
         )
+        if master_only:
+            # inner join: считаем только доступные мастеру ремонты.
+            cand_q = cand_q.join(
+                Repair, and_(Repair.client_id == Client.id, master_visible(user.id))
+            )
+        else:
+            cand_q = cand_q.outerjoin(Repair, Repair.client_id == Client.id)
+        row = await db.execute(cand_q)
         candidates = row.all()
         if candidates:
             return {
@@ -287,9 +300,25 @@ async def lookup_client(
             }
         return {"found": False, "phone": phone, "phone_norm": phone_norm}
 
-    # Клиент найден — возвращаем его ремонты
+    # Клиент найден — возвращаем его ремонты (мастеру только доступные ему).
+    if master_only:
+        vis_q = (
+            select(Repair)
+            .where(Repair.client_id == client.id, master_visible(user.id))
+            .order_by(Repair.accepted_at.desc())
+        )
+        visible = (await db.execute(vis_q)).scalars().all()
+        if not visible:
+            # Согласовано со списком клиентов: без доступных ремонтов клиент
+            # мастеру не раскрывается — иначе поиск по номеру выдавал имя и
+            # телефон владельца чужих заказов. Приёмке это не мешает: клиент
+            # подбирается сервером по phone_norm, а не по ответу этого метода.
+            return {"found": False, "phone": phone, "phone_norm": phone_norm}
+    else:
+        visible = sorted(client.repairs, key=lambda x: x.accepted_at, reverse=True)
+
     repairs = []
-    for r in sorted(client.repairs, key=lambda x: x.accepted_at, reverse=True):
+    for r in visible:
         repairs.append({
             "id": str(r.id),
             "number": r.number,
@@ -329,7 +358,7 @@ async def list_clients(
     «Все ремонты» (`repair_scope.master_visible`). Иначе эндпоинт отдавал
     мастеру всю базу клиентов сервиса с телефонами и чужими счётчиками.
     """
-    from sqlalchemy import and_, func
+    from sqlalchemy import func
     cols = (
         Client.id,
         Client.full_name,
