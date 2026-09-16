@@ -682,3 +682,57 @@ def test_master_cannot_read_foreign_payments_and_parts(
     r = client.get(f"/api/repairs/{fid}/payments", headers=operator_headers)
     assert r.status_code == 200, r.status_code
     assert [p["amount"] for p in r.json()] == [321.5], r.text
+
+
+def test_master_cannot_change_foreign_part_orders(
+    client, operator_headers, two_masters, city_id
+):
+    """Заказы запчастей чужого ремонта мастеру не подвластны.
+
+    PATCH и DELETE /api/repairs/{id}/part-orders/{order_id} грузили заказ по id
+    и проверяли только совпадение repair_id — прав не проверяли вовсе, хотя
+    чтение и добавление заказа были закрыты.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-30",
+                      phone="+993 61 509961")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-31",
+                   phone="+993 61 509962")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    order = client.post(f"/api/repairs/{fid}/part-orders", headers=operator_headers,
+                        json={"name": "Пульт", "qty": 1, "price": 50})
+    assert order.status_code == 201, order.text
+    oid = order.json()["id"]
+
+    own_order = client.post(f"/api/repairs/{mid}/part-orders", headers=operator_headers,
+                            json={"name": "Кабель", "qty": 1, "price": 10})
+    assert own_order.status_code == 201, own_order.text
+    own_oid = own_order.json()["id"]
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    r = client.patch(f"/api/repairs/{fid}/part-orders/{oid}", headers=m1,
+                     json={"qty": 99})
+    assert r.status_code == 403, r.status_code
+
+    r = client.delete(f"/api/repairs/{fid}/part-orders/{oid}", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    # заказ не изменился
+    rows = client.get(f"/api/repairs/{fid}/part-orders",
+                      headers=operator_headers).json()
+    assert [(x["name"], x["qty"]) for x in rows] == [("Пульт", 1)], rows
+
+    # свой заказ мастер правит и удаляет
+    assert client.patch(f"/api/repairs/{mid}/part-orders/{own_oid}", headers=m1,
+                        json={"qty": 3}).status_code == 200
+    assert client.delete(f"/api/repairs/{mid}/part-orders/{own_oid}",
+                         headers=m1).status_code == 200

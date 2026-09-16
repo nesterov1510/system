@@ -1772,6 +1772,11 @@ async def update_part_order(
     db: DbSession,
     user: CurrentUser,
 ):
+    # Права — как у чтения и добавления заказа: без этого мастер правил
+    # заказы запчастей чужого ремонта.
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     order = await db.get(RepairPartOrder, order_id)
     if order is None or order.repair_id != repair_id:
         raise HTTPException(404, "Заказ запчасти не найден")
@@ -1786,6 +1791,9 @@ async def update_part_order(
 async def delete_part_order(
     repair_id: uuid.UUID, order_id: uuid.UUID, db: DbSession, user: CurrentUser
 ):
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     order = await db.get(RepairPartOrder, order_id)
     if order is None or order.repair_id != repair_id:
         raise HTTPException(404, "Заказ запчасти не найден")
