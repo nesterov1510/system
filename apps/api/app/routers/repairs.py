@@ -52,7 +52,7 @@ from app.schemas.repair import (
 from app.services import audit
 from app.services.chat import send_assignment_notice
 from app.services import repair_scope
-from app.services.repair_scope import master_visible
+from app.services.repair_scope import master_visible, repair_audience
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.sms import (
     build_ready_sms,
@@ -567,6 +567,9 @@ async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
         "photos": len(object_keys),
     }
 
+    # Адресатов live-события считаем до удаления — после будет неоткуда.
+    audience = await repair_audience(db, repair)
+
     for model in (
         Notification,
         PrintJob,
@@ -595,7 +598,9 @@ async def delete_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
     # записи в БД без картинок.
     remove_objects(object_keys)
 
-    await manager.broadcast({"type": "repair.deleted", "repair": {"id": str(repair_id)}})
+    await manager.send_to_users(
+        audience, {"type": "repair.deleted", "repair": {"id": str(repair_id)}}
+    )
     return {"ok": True}
 
 
@@ -717,11 +722,12 @@ async def create_repair(
             await send_assignment_notice(db, actor=user, master=repair.master, repair=repair)
         await _record_master_sms(db, user, repair, repair.master)
 
-    await manager.broadcast(
+    await manager.send_to_users(
+        await repair_audience(db, repair),
         {
             "type": "repair.created",
             "repair": {"number": repair.number, "status": repair.status},
-        }
+        },
     )
     return _serialize(repair)
 
@@ -1515,11 +1521,12 @@ async def update_repair(
             await _record_master_sms(db, user, repair, master)
 
     if repair.status != old_status:
-        await manager.broadcast(
+        await manager.send_to_users(
+            await repair_audience(db, repair),
             {
                 "type": "repair.status_changed",
                 "repair": {"number": repair.number, "status": repair.status},
-            }
+            },
         )
     return _serialize(repair)
 
@@ -1566,11 +1573,12 @@ async def finish_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
         await db.commit()
         db.expire(repair)
         repair = await _get_repair_or_404(db, repair_id)
-        await manager.broadcast(
+        await manager.send_to_users(
+            await repair_audience(db, repair),
             {
                 "type": "repair.status_changed",
                 "repair": {"number": repair.number, "status": RepairStatus.DONE},
-            }
+            },
         )
 
     from app.services.settings import get_sms_templates
@@ -1654,11 +1662,12 @@ async def issue_repair(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
         )
         cancel_reminders(repair)
         await db.commit()
-        await manager.broadcast(
+        await manager.send_to_users(
+            await repair_audience(db, repair),
             {
                 "type": "repair.issued",
                 "repair": {"number": repair.number, "paid": bool(repair.paid)},
-            }
+            },
         )
     return _serialize(await _get_repair_or_404(db, repair_id))
 

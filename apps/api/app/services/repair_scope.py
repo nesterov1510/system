@@ -81,3 +81,40 @@ def free_to_take():
 def master_visible(user_id: uuid.UUID):
     """Что видит мастер: свои ремонты + свободные (взять себе)."""
     return or_(own(user_id), free_to_take())
+
+
+async def repair_audience(db, repair: Repair) -> list[uuid.UUID]:
+    """Кому можно присылать live-события по этому ремонту.
+
+    Та же граница, что у списка «Все ремонты»: старшие роли видят всё, мастер —
+    только свои ремонты, плюс свободный заказ видят все (его можно взять себе).
+
+    Без этого `manager.broadcast` рассылал номер и статус каждого ремонта всем
+    подключённым сокетам, и мастер получал в live-ленту чужие заказы, которых
+    нет в его списке.
+    """
+    from app.core.permissions import is_master_only
+
+    executor_ids: set[uuid.UUID] = set()
+    if repair.master_id is not None:
+        executor_ids.add(repair.master_id)
+    rows = await db.execute(
+        select(RepairMaster.user_id).where(RepairMaster.repair_id == repair.id)
+    )
+    executor_ids.update(rows.scalars().all())
+
+    # Свободный заказ есть в списке у каждого мастера — ему событие положено.
+    is_free = (
+        await db.execute(select(Repair.id).where(Repair.id == repair.id, free_to_take()))
+    ).scalar_one_or_none() is not None
+
+    audience: list[uuid.UUID] = []
+    users = (await db.execute(select(User).where(User.active.is_(True)))).scalars().all()
+    for u in users:
+        if not is_master_only(u):
+            audience.append(u.id)  # старшие роли видят всё
+        elif is_free or u.id in executor_ids:
+            audience.append(u.id)  # свободный заказ либо свой
+        elif not executor_ids and u.id == repair.accepted_by:
+            audience.append(u.id)  # своя приёмка, пока исполнитель не назначен
+    return audience

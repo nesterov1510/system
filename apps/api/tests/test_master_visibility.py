@@ -940,3 +940,40 @@ def test_master_reads_no_foreign_repair_data_from_any_endpoint(
                 f"контекст: {' '.join(snippet.split())}"
             )
     assert checked >= 40, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+def test_repair_events_reach_only_who_may_see_the_repair(
+    client, operator_headers, two_masters, city_id
+):
+    """Live-события по ремонту идут только тем, кому этот ремонт виден.
+
+    `manager.broadcast` рассылал номер и статус каждого ремонта всем
+    подключённым сокетам, поэтому мастер получал в live-ленту чужие заказы,
+    которых нет в его списке «Все ремонты».
+    """
+    import asyncio
+
+    from app.db.models import Repair
+    from app.db.session import async_session_factory
+    from app.services.repair_scope import repair_audience
+
+    r = _intake(client, operator_headers, city_id, "vis-ws-1",
+                phone="+993 61 509977", name="WS Клиент 509977")
+    assert r.status_code == 201, r.text
+    rid = uuid.UUID(r.json()["id"])
+    m1, m2 = two_masters["vis-m1"]["id"], two_masters["vis-m2"]["id"]
+
+    async def audience():
+        async with async_session_factory() as db:
+            repair = await db.get(Repair, rid)
+            return {str(x) for x in await repair_audience(db, repair)}
+
+    # Свободный заказ есть в списке у каждого мастера — событие ему положено.
+    free = asyncio.run(audience())
+    assert m1 in free and m2 in free, f"свободный ремонт виден всем: {free}"
+
+    _assign(client, operator_headers, str(rid), m2)
+
+    assigned = asyncio.run(audience())
+    assert m2 in assigned, "исполнитель должен получать события по своему ремонту"
+    assert m1 not in assigned, "чужой мастер не должен получать события по ремонту"
