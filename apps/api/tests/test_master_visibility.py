@@ -14,11 +14,12 @@ import uuid
 import pytest
 
 
-def _intake(client, headers, city_id, key, phone="+993 61 500000", master_id=None):
+def _intake(client, headers, city_id, key, phone="+993 61 500000", master_id=None,
+            name="Клиент Видимости"):
     """Приёмка через API (как в остальных тестах приёмки)."""
     body = {
         "city_id": city_id,
-        "client": {"full_name": "Клиент Видимости", "phone": phone, "consent_pdn": True},
+        "client": {"full_name": name, "phone": phone, "consent_pdn": True},
         "device_type": "Телевизоры",
         "brand": "LG",
         "model": "32LK6100",
@@ -47,10 +48,10 @@ def two_masters(client, admin_headers):
     return out
 
 
-def _login(client, email):
+def _login(client, email, password="pass123"):
     r = client.post(
         "/login",
-        data={"email": email, "password": "pass123", "next_url": "/repairs"},
+        data={"email": email, "password": password, "next_url": "/repairs"},
         follow_redirects=False,
     )
     assert r.status_code == 303 and "/login" not in r.headers["location"]
@@ -495,3 +496,50 @@ def test_master_client_lookup_returns_only_visible_repairs(
         params={"phone": SEARCH}).json()["candidates"]}
     for phone in rows:
         assert admin_rows[phone] == 2, (phone, admin_rows[phone])
+
+
+def test_master_clients_suggest_hides_foreign_clients(
+    client, operator_headers, two_masters, city_id
+):
+    """Автокомплит заказчика не подсказывает мастеру владельцев чужих заказов.
+
+    Эндпоинт доступен любому сотруднику, который открывает приёмку, и раньше
+    отдавал имена и телефоны всех клиентов сервиса.
+    """
+    # Имена берём уникальные: подсказка ограничена восемью строками, и широкий
+    # поиск по общему имени в общей для сессии базе давал бы непредсказуемый срез.
+    hidden = _intake(client, operator_headers, city_id, "vis-22",
+                     phone="+993 61 509988", name="ЧужойПодсказка509988")
+    assert hidden.status_code == 201, hidden.text
+    _assign(client, operator_headers, hidden.json()["id"], two_masters["vis-m2"]["id"])
+
+    mine = _intake(client, operator_headers, city_id, "vis-23",
+                   phone="+993 61 509989", name="СвойПодсказка509989")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"], two_masters["vis-m1"]["id"])
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    # поиск по имени своего клиента — находится
+    r = client.get("/web/clients-suggest", cookies=cookies,
+                   params={"q": "СвойПодсказка509989"})
+    assert r.status_code == 200, r.text
+    assert {row["phone"] for row in r.json()} == {"+993 61 509989"}, r.text
+
+    # поиск по имени чужого клиента — пусто
+    r2 = client.get("/web/clients-suggest", cookies=cookies,
+                    params={"q": "ЧужойПодсказка509988"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json() == [], r2.text
+
+    # поиск по цифрам чужого номера — тоже пусто
+    r3 = client.get("/web/clients-suggest", cookies=cookies, params={"q": "509988"})
+    assert r3.status_code == 200, r3.text
+    assert r3.json() == [], r3.text
+
+    # старшая роль видит обоих
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    r4 = client.get("/web/clients-suggest", cookies=admin_cookies, params={"q": "50998"})
+    assert r4.status_code == 200, r4.text
+    admin_phones = {row["phone"] for row in r4.json()}
+    assert {"+993 61 509988", "+993 61 509989"} <= admin_phones, admin_phones

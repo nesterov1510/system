@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.core.permissions import (
@@ -321,6 +321,9 @@ async def clients_suggest(request: Request, q: str = ""):
     """Автокомплит заказчика в приёмке: поиск клиента по телефону или имени.
 
     Доступен любому авторизованному сотруднику, который открывает приёмку.
+    Мастеру подсказываются только те клиенты, у которых есть доступные ему
+    ремонты, — иначе подсказка раскрывала имена и телефоны владельцев чужих
+    заказов. Приёмке это не мешает: клиент подбирается сервером по phone_norm.
     """
     webuser = await get_web_user(request)
     if not webuser.authenticated:
@@ -335,14 +338,21 @@ async def clients_suggest(request: Request, q: str = ""):
         conds = [Client.full_name.ilike(like_txt), Client.phone.ilike(like_txt)]
         if len(digits) >= 3:
             conds.append(Client.phone_norm.contains(digits))
-        rows = (
-            await db.execute(
-                select(Client)
-                .where(Client.deleted_at.is_(None), or_(*conds))
-                .order_by(Client.full_name)
-                .limit(8)
-            )
-        ).scalars().all()
+        stmt = (
+            select(Client)
+            .where(Client.deleted_at.is_(None), or_(*conds))
+            .order_by(Client.full_name)
+            .limit(8)
+        )
+        user = webuser.user
+        if is_master_only(user):
+            from app.services.repair_scope import master_visible
+
+            # distinct: у клиента может быть несколько доступных ремонтов.
+            stmt = stmt.join(
+                Repair, and_(Repair.client_id == Client.id, master_visible(user.id))
+            ).distinct()
+        rows = (await db.execute(stmt)).scalars().all()
         return [{"name": c.full_name, "phone": c.phone} for c in rows]
     finally:
         await db.close()
