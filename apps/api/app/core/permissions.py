@@ -227,25 +227,27 @@ def can_assign_masters(user) -> bool:
 def can_assign_repair_masters(user, repair) -> bool:
     """Может ли пользователь менять состав мастеров ЭТОГО ремонта.
 
-    Администратор и оператор — всегда. Мастер — в двух случаях:
+    Администратор и оператор — всегда. Мастер — в трёх случаях:
 
-    * ремонт ещё никому не назначен: тогда он берёт его себе (и может сразу
-      добавить себе помощника);
+    * ремонт свободен (`is_free_repair`): тогда он берёт его себе (и может
+      сразу добавить себе помощника);
     * ремонт уже его (назначен напрямую или через список мастеров): тогда он
-      добирает дополнительных мастеров и помощников.
+      добирает дополнительных мастеров и помощников;
+    * он сам оформил приёмку: пока исполнитель не назначен, заказ остаётся его.
 
-    Чужой занятый ремонт мастер себе не забирает.
+    Чужой занятый ремонт мастер себе не забирает — в том числе чужую приёмку
+    без исполнителя, она уже занята принявшим её мастером.
     """
     if can_assign_masters(user):
         return True
     if not has_any_role(user, MASTER):
         return False
     links = list(getattr(repair, "masters", None) or [])
-    if not repair.master_id and not links:
+    if repair.master_id == user.id or repair.accepted_by == user.id:
         return True
-    if repair.master_id == user.id:
+    if any(link.user_id == user.id for link in links):
         return True
-    return any(link.user_id == user.id for link in links)
+    return is_free_repair(repair)
 
 
 def can_finish_repair(user) -> bool:
@@ -315,16 +317,8 @@ def can_view_repair(user, repair) -> bool:
         return True
     if repair.accepted_by == user.id:
         return True
-    # Свободный ремонт — можно открыть и взять себе. Чужая приёмка без
-    # исполнителя уже занята принявшим её мастером, поэтому не открывается.
-    if repair.master_id is not None or list(repair.masters or []):
-        return False
-    if _accepted_by_master(repair):
-        return False
-    # Завершённый или выданный ремонт брать нечего.
-    if repair.status == RepairStatus.DONE or repair.issued_at is not None:
-        return False
-    return True
+    # Свободный ремонт — можно открыть и взять себе.
+    return is_free_repair(repair)
 
 
 def _accepted_by_master(repair) -> bool:
@@ -339,6 +333,25 @@ def _accepted_by_master(repair) -> bool:
     if acceptor is None:
         return False
     return acceptor.role == MASTER
+
+
+def is_free_repair(repair) -> bool:
+    """Свободен ли ремонт — может ли любой мастер взять его себе.
+
+    Зеркалит `services/repair_scope.free_to_take()` по уже загруженному объекту:
+    исполнителя нет, принял не мастер (приёмка оператора/админа или публичной
+    приёмки, ушедшая в общую очередь), ремонт не завершён и не выдан.
+
+    Чужая приёмка без исполнителя свободной НЕ считается: её принял другой
+    мастер, она уже занята им (он же печатает на неё этикетку).
+    """
+    if repair.master_id is not None or list(getattr(repair, "masters", None) or []):
+        return False
+    if _accepted_by_master(repair):
+        return False
+    if repair.status == RepairStatus.DONE or repair.issued_at is not None:
+        return False
+    return True
 
 
 def can_delete_repair(user) -> bool:

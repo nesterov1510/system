@@ -257,3 +257,49 @@ def test_finished_unassigned_repair_is_not_in_master_list(
         assert rid not in _table_ids(client, _login(client, email))
         assert rid not in _api_ids(client, _bearer(client, email))
     assert rid in _api_ids(client, operator_headers)
+
+
+def test_master_cannot_take_another_masters_intake(
+    client, operator_headers, two_masters, city_id
+):
+    """Чужую приёмку без исполнителя второй мастер себе не переписывает.
+
+    Ремонта нет в его списке, и прямое действие «Взять себе» тоже закрыто:
+    приёмку оформил другой мастер, заказ уже занят им.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-15", phone="+993 61 500015")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    cookies2 = _login(client, "vis-m2@msb.local")
+
+    action = client.post(
+        f"/repairs/{rid}/master-action",
+        data={
+            "action": "master",
+            "user_id": two_masters["vis-m2"]["id"],
+            "next": "/repairs",
+        },
+        cookies=cookies2,
+        follow_redirects=False,
+    )
+    assert action.status_code == 403, (action.status_code, action.text[:200])
+
+    # исполнитель не сменился — приёмка осталась у того, кто её оформил
+    current = client.get(f"/api/repairs/{rid}", headers=operator_headers).json()
+    assert current["master_id"] is None, current["master_id"]
+
+    # сам приёмщик по-прежнему может назначить себя исполнителем
+    own_action = client.post(
+        f"/repairs/{rid}/master-action",
+        data={
+            "action": "master",
+            "user_id": two_masters["vis-m1"]["id"],
+            "next": "/repairs",
+        },
+        cookies=_login(client, "vis-m1@msb.local"),
+        follow_redirects=False,
+    )
+    assert own_action.status_code == 303, (own_action.status_code, own_action.text[:200])
+    after = client.get(f"/api/repairs/{rid}", headers=operator_headers).json()
+    assert after["master_id"] == two_masters["vis-m1"]["id"], after["master_id"]
