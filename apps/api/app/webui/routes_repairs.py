@@ -1228,14 +1228,26 @@ async def repair_print_client_label(request: Request, repair_id: uuid.UUID):
 @router.get("/repairs/by-number/{number}")
 async def repair_by_number(request: Request, number: str):
     """Редирект на карточку по номеру (ссылки из чата)."""
-    db, _user, redir = await _require(request)
+    db, user, redir = await _require(request)
     if redir:
         return redir
     try:
-        row = await db.execute(select(Repair).where(Repair.number == number))
+        row = await db.execute(
+            select(Repair)
+            .where(Repair.number == number)
+            .options(
+                selectinload(Repair.masters),
+                selectinload(Repair.accepted_by_user),
+            )
+        )
         repair = row.scalar_one_or_none()
         if repair is None:
             return HTMLResponse("Ремонт не найден", status_code=404)
+        # Редирект раскрывает UUID ремонта, поэтому доступ проверяем здесь,
+        # а не только на карточке: иначе мастер перебором номеров узнавал,
+        # какие заказы существуют, и получал их идентификаторы.
+        if not can_view_repair(user, repair):
+            return HTMLResponse("Нет доступа к этому ремонту", status_code=403)
         return RedirectResponse(f"/repairs/{repair.id}", status_code=303)
     finally:
         await db.close()

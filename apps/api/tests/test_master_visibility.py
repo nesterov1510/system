@@ -926,14 +926,23 @@ def test_master_reads_no_foreign_repair_data_from_any_endpoint(
             kwargs["cookies"] = cookies
         r = client.get(url, **kwargs)
         checked += 1
-        if r.status_code != 200 or url.startswith(public_prefixes):
+        if url.startswith(public_prefixes):
             continue
-        # Подсказки в placeholder — статический текст разметки, а не данные
-        # (в чате там пример номера: «напр. TV-ASG-2026-00001»).
-        hay = _PLACEHOLDER_RE.sub("", r.text)
-        hits = [label for label, needle in needles if needle in hay]
+        # Редирект тоже уносит данные: в заголовке Location так утекал UUID
+        # чужого ремонта из /repairs/by-number.
+        hay = r.headers.get("location", "")
+        if r.status_code == 200:
+            # Подсказки в placeholder — статический текст разметки, а не
+            # данные (в чате там пример номера: «напр. TV-ASG-2026-00001»).
+            hay += _PLACEHOLDER_RE.sub("", r.text)
+        if not hay:
+            continue
+        # То, что тест сам подставил в URL, утечкой не считается: ответ лишь
+        # возвращает уже известный ему идентификатор обратно.
+        checks = [(label, needle) for label, needle in needles if needle not in url]
+        hits = [label for label, needle in checks if needle in hay]
         if hits:
-            pos = hay.find(needles[0][1])
+            pos = hay.find(hits and next(n for l, n in checks if l == hits[0]))
             snippet = hay[max(0, pos - 400):pos + 150]
             assert not hits, (
                 f"GET {url} раскрыл мастеру чужой ремонт: {hits}\n"
