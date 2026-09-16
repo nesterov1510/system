@@ -141,3 +141,20 @@ svg{display:block}
   .topbar-actions .btn{width:100%;min-width:0;padding:9px 13px;white-space:normal;line-height:1.25}
   .topbar-actions .btn.icon{width:48px;padding:0}
 }
+
+/* Вкладки-разделы (Настройки, Колл-центр).
+   Класс .tabs был описан только в static/app.css, а base.html его не
+   подключает — из-за этого вкладки выглядели голыми ссылками без отступов,
+   подсветки активного раздела и без нормальной высоты под палец. */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:2px solid var(--line);
+  margin-bottom:18px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tabs a,.tabs button{display:inline-flex;align-items:center;justify-content:center;
+  min-height:44px;padding:10px 16px;border:0;border-bottom:3px solid transparent;
+  margin-bottom:-2px;background:none;color:var(--muted);font:inherit;font-size:14px;
+  font-weight:700;white-space:nowrap;cursor:pointer;text-decoration:none}
+.tabs a:hover,.tabs button:hover{color:var(--text);text-decoration:none}
+.tabs a.active,.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Мелкие утилитарные классы разметки: тоже жили только в app.css. */
+.muted{color:var(--muted)}
+.wrap{overflow-wrap:anywhere;word-break:break-word}
