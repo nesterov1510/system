@@ -322,18 +322,29 @@ async def list_clients(
     q: str | None = Query(None, description="Поиск по имени или телефону"),
     limit: int = Query(100, le=500),
 ):
-    """Список всех клиентов с количеством ремонтов."""
-    from sqlalchemy import func
+    """Список всех клиентов с количеством ремонтов.
+
+    Мастеру видны только клиенты, у которых есть доступные ему ремонты, и
+    счётчик считается лишь по этим ремонтам — те же границы, что и у списка
+    «Все ремонты» (`repair_scope.master_visible`). Иначе эндпоинт отдавал
+    мастеру всю базу клиентов сервиса с телефонами и чужими счётчиками.
+    """
+    from sqlalchemy import and_, func
+    cols = (
+        Client.id,
+        Client.full_name,
+        Client.phone,
+        Client.phone_norm,
+        func.count(Repair.id).label("repairs_count"),
+    )
+    if _is_master_only(user):
+        # inner join: клиент без доступных мастеру ремонтов не показывается.
+        join_cond = and_(Repair.client_id == Client.id, master_visible(user.id))
+        q_stmt = select(*cols).join(Repair, join_cond)
+    else:
+        q_stmt = select(*cols).outerjoin(Repair, Repair.client_id == Client.id)
     q_stmt = (
-        select(
-            Client.id,
-            Client.full_name,
-            Client.phone,
-            Client.phone_norm,
-            func.count(Repair.id).label("repairs_count"),
-        )
-        .outerjoin(Repair, Repair.client_id == Client.id)
-        .group_by(Client.id, Client.full_name, Client.phone, Client.phone_norm)
+        q_stmt.group_by(Client.id, Client.full_name, Client.phone, Client.phone_norm)
         .order_by(func.count(Repair.id).desc(), Client.full_name)
     )
     q_stmt = q_stmt.where(Client.deleted_at.is_(None))

@@ -34,7 +34,7 @@ from app.webui.catalog import DEVICE_CLASSES
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
 from app.webui.templating import render_async
-from app.webui.data import is_master_only, master_scope
+from app.webui.data import is_master_only
 
 router = APIRouter(tags=["webui-pages"])
 
@@ -76,7 +76,12 @@ async def clients_page(request: Request, q: str | None = None, just: str | None 
             like = f"%{q.strip()}%"
             stmt = stmt.where(or_(Client.full_name.ilike(like), Client.phone.ilike(like)))
         if is_master_only(user):
-            stmt = stmt.where(Repair.id.isnot(None)).where(master_scope(user.id))
+            # Те же границы, что у списка «Все ремонты»: клиент показывается,
+            # только если у него есть доступные мастеру ремонты, и счётчик
+            # считается лишь по ним.
+            from app.services.repair_scope import master_visible
+
+            stmt = stmt.where(Repair.id.isnot(None)).where(master_visible(user.id))
         rows = (await db.execute(stmt)).all()
         clients = [{"c": c, "count": cnt} for c, cnt in rows]
         ctx = await base_context(
@@ -137,7 +142,9 @@ async def client_detail(request: Request, client_id: uuid.UUID):
             .order_by(Repair.accepted_at.desc())
         )
         if is_master_only(user):
-            stmt = stmt.where(master_scope(user.id))
+            from app.services.repair_scope import master_visible
+
+            stmt = stmt.where(master_visible(user.id))
         repairs = (await db.execute(stmt)).scalars().all()
         from app.services.settings import get_currency
         currency = await get_currency(db)

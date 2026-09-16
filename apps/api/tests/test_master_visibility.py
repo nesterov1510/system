@@ -387,3 +387,33 @@ def test_master_cannot_open_callcenter_queue(client, two_masters):
 
     api = client.get("/api/callcenter/queue", headers=_bearer(client, "vis-m1@msb.local"))
     assert api.status_code == 403, api.text[:200]
+
+
+def test_master_client_list_is_scoped(client, operator_headers, two_masters, city_id):
+    """Список клиентов мастеру — только те, у кого есть доступные ему ремонты.
+
+    Эндпоинт `/api/repairs/clients/list` отдавал мастеру всю базу клиентов
+    сервиса с телефонами и счётчиками чужих ремонтов, хотя страница `/clients`
+    была ограничена. Границы должны совпадать со списком «Все ремонты».
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-17", phone="+993 61 500017")
+    assert foreign.status_code == 201, foreign.status_code
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+    foreign_client = foreign.json()["client_id"]
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+    listed = {x["id"] for x in client.get("/api/repairs/clients/list", headers=m1).json()}
+    assert foreign_client not in listed, "чужой клиент виден в списке"
+
+    # счётчик ремонтов у видимого клиента считает только доступные мастеру
+    own = _intake(client, operator_headers, city_id, "vis-18", phone="+993 61 500018")
+    assert own.status_code == 201, own.text
+    _assign(client, operator_headers, own.json()["id"], two_masters["vis-m1"]["id"])
+    listed = {x["id"]: x["repairs_count"] for x in client.get(
+        "/api/repairs/clients/list", headers=m1).json()}
+    assert own.json()["client_id"] in listed
+
+    # старшая роль видит всех клиентов
+    admin_listed = {x["id"] for x in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    assert foreign_client in admin_listed
