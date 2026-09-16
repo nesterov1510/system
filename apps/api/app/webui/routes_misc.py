@@ -382,6 +382,11 @@ async def parts_create(request: Request):
     if redir:
         return redir
     try:
+        # Роль проверяется здесь, а не в parts_api.create_part: там она
+        # объявлена как Depends, а при прямом вызове функции зависимости
+        # FastAPI не выполняются. У соседних маршрутов склада проверка есть.
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
         f = await request.form()
 
         def num(k):

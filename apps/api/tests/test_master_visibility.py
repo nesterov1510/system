@@ -805,3 +805,64 @@ def test_master_blocked_on_every_foreign_repair_mutation(
                 f"{method} {url} вернул {r.status_code} — мастер изменил чужой ремонт"
             )
     assert checked >= 20, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+# Маршруты, которые legitimately доступны любому авторизованному сотруднику:
+# собственный профиль, свои уведомления, чат. Всё остальное мастеру закрыто.
+_STAFF_ALLOWED = (
+    "/api/auth/login", "/api/auth/refresh", "/api/auth/me",
+    "/api/chat/direct/{user_id}", "/api/chat/channels/{channel_id}/read",
+    "/api/chat/channels/{channel_id}/messages",
+    "/api/notifications/{notification_id}/read",
+    "/login", "/logout", "/chat/send", "/chat/direct/{user_id}",
+    "/notifications/read-all", "/notifications/{notification_id}/read",
+    "/profile", "/profile-password",
+)
+
+
+def test_master_blocked_on_admin_mutations_outside_repair_card(
+    client, operator_headers, two_masters, city_id
+):
+    """Мутации вне карточки ремонта мастеру закрыты.
+
+    Проверяются справочники и настройки: города, филиалы, сотрудники,
+    оборудование, склад, прайс, AI-сводки. Раньше это подтверждалось только
+    разовым прогоном — теперь новый маршрут без роли упадёт в тесте.
+    """
+    from app.main import app
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    dummy = str(uuid.uuid4())
+
+    checked = 0
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "{repair_id}" in path or path in _STAFF_ALLOWED:
+            continue
+        for method in sorted(m.upper() for m in ops):
+            if method in ("GET", "HEAD", "OPTIONS"):
+                continue
+            url = path
+            for key in ("city_id", "branch_id", "user_id", "template_id",
+                        "price_id", "part_id", "equipment_id", "donor_id",
+                        "notification_id", "channel_id", "client_id", "key"):
+                url = url.replace("{" + key + "}", dummy)
+            is_api = url.startswith("/api")
+            kwargs = {"follow_redirects": False}
+            if is_api:
+                kwargs["headers"] = m1
+                kwargs["json"] = {"name": "x", "email": "x@msb.local",
+                                  "password": "pass123", "role": "master",
+                                  "value": "1", "price": 1, "qty": 1,
+                                  "device_type": "x", "work": "y"}
+            else:
+                kwargs["cookies"] = cookies
+                kwargs["data"] = {"name": "x", "value": "1", "price": "1",
+                                  "qty": "1", "full_name": "x", "phone": "+993 61 000000"}
+            r = client.request(method, url, **kwargs)
+            checked += 1
+            assert r.status_code >= 400, (
+                f"{method} {url} вернул {r.status_code} — мастер изменил "
+                f"справочник или настройку"
+            )
+    assert checked >= 30, f"проверено всего {checked} маршрутов — перечисление сломалось"
