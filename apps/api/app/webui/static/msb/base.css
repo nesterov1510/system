@@ -154,7 +154,3 @@ svg{display:block}
   font-weight:700;white-space:nowrap;cursor:pointer;text-decoration:none}
 .tabs a:hover,.tabs button:hover{color:var(--text);text-decoration:none}
 .tabs a.active,.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
-
-/* Мелкие утилитарные классы разметки: тоже жили только в app.css. */
-.muted{color:var(--muted)}
-.wrap{overflow-wrap:anywhere;word-break:break-word}
