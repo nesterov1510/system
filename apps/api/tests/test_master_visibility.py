@@ -592,3 +592,46 @@ def test_master_cannot_touch_foreign_repair_actions(
     r = client.post(f"/api/repairs/{fid}/print-failure", cookies=admin_cookies,
                     json={"reason": "проверка"})
     assert r.status_code not in (403, 500), r.status_code
+
+
+def test_master_client_page_hides_client_without_visible_repairs(
+    client, operator_headers, two_masters, city_id
+):
+    """Карточка клиента без доступных мастеру ремонтов не открывается.
+
+    Список ремонтов на странице фильтровался, но имя и телефон клиента
+    показывались всегда — по прямой ссылке раскрывался владелец чужих заказов,
+    хотя в списке клиентов он не показывается.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-26",
+                      phone="+993 61 509995")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+
+    mine = _intake(client, operator_headers, city_id, "vis-27",
+                   phone="+993 61 509996")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+
+    # id клиентов берём из списка, доступного старшей роли
+    listed = {row["phone"]: row["id"] for row in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    foreign_cid = listed["+993 61 509995"]
+    mine_cid = listed["+993 61 509996"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    r = client.get(f"/clients/{foreign_cid}", cookies=cookies)
+    assert r.status_code == 404, r.status_code
+    assert "+993 61 509995" not in r.text
+
+    r2 = client.get(f"/clients/{mine_cid}", cookies=cookies)
+    assert r2.status_code == 200, r2.status_code
+    assert "+993 61 509996" in r2.text
+
+    # старшая роль открывает обе карточки
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    assert client.get(f"/clients/{foreign_cid}",
+                      cookies=admin_cookies).status_code == 200

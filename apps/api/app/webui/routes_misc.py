@@ -141,11 +141,18 @@ async def client_detail(request: Request, client_id: uuid.UUID):
             .options(selectinload(Repair.master))
             .order_by(Repair.accepted_at.desc())
         )
-        if is_master_only(user):
+        master_only = is_master_only(user)
+        if master_only:
             from app.services.repair_scope import master_visible
 
             stmt = stmt.where(master_visible(user.id))
         repairs = (await db.execute(stmt)).scalars().all()
+        if master_only and not repairs:
+            # Согласовано со списком клиентов и поиском по телефону: без
+            # доступных мастеру ремонтов клиент не раскрывается. Иначе по
+            # прямой ссылке открывались имя и телефон владельца чужих заказов,
+            # хотя в списке такой клиент не показывается.
+            return HTMLResponse("Клиент не найден", status_code=404)
         from app.services.settings import get_currency
         currency = await get_currency(db)
         ctx = await base_context(
