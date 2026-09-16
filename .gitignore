@@ -6,6 +6,8 @@ venv/
 *.db
 uploads/
 test_uploads/
+# артефакты локального превью (см. запуск uvicorn с UPLOAD_DIR=./dev_uploads)
+dev_uploads/
 .pytest_cache/
 
 # Env / secrets

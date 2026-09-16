@@ -88,30 +88,79 @@ def _ui_login(client):
 # --------------------------------------------------------------------------
 # Страница доступна без входа
 # --------------------------------------------------------------------------
-def test_intake_page_is_anonymous_and_renders_form(client):
+def test_intake_first_shows_device_type_picker(client):
+    """Без ?type= страница начинается с выбора техники — как обычная приёмка."""
     r = client.get("/intake")
+    assert r.status_code == 200
+    body = r.text
+    assert "Выберите тип техники" in body
+    assert 'name="phone"' not in body, "форма не должна открываться до выбора техники"
+    # ссылки выбора ведут на публичную приёмку, а не на /repairs/new
+    assert 'href="/intake?type=Телевизоры"' in body
+    assert "/repairs/new?type=" not in body
+
+
+def test_picker_lists_the_same_device_classes(client, admin_headers):
+    """Категории те же, что видит сотрудник на /repairs/new."""
+    public = client.get("/intake").text
+    _ui_login(client)
+    staff = client.get("/repairs/new").text
+    for cls in ("Телевизоры", "Мониторы", "ТВ-приставки", "Компьютеры", "Другое"):
+        assert f"/intake?type={cls}" in public
+        assert f"/repairs/new?type={cls}" in staff
+
+
+def test_form_opens_after_type_is_chosen(client):
+    r = client.get("/intake?type=Телевизоры")
     assert r.status_code == 200
     body = r.text
     assert 'action="/intake"' in body
     assert 'name="phone"' in body
     assert "+993" in body                     # префикс подставлен
     assert 'name="full_name"' in body
-    assert 'name="device_type"' in body
-    assert 'name="consent_repair"' in body
+    assert 'name="fault_client"' in body
     # внутренний интерфейс на странице не подключён
     assert "/repairs/new" not in body
     assert "Выйти" not in body
 
 
-def test_intake_page_shows_device_classes(client):
-    body = client.get("/intake").text
-    for label in ("Телевизоры", "Мониторы", "Компьютеры", "Бытовая техника"):
-        assert label in body
+def test_public_form_has_no_master_selection(client):
+    """Единственное отличие от обычной приёмки — нет выбора мастера."""
+    public = client.get("/intake?type=Телевизоры").text
+    assert 'name="master_id"' not in public
+    assert "Мастер-исполнитель" not in public
+
+    _ui_login(client)
+    staff = client.get("/repairs/new?type=Телевизоры").text
+    assert 'name="master_id"' in staff
 
 
-def test_intake_type_param_preselects_class(client):
-    body = client.get("/intake?type=Мониторы").text
-    assert '<option value="Мониторы" selected>' in body
+def test_public_form_repeats_staff_form_fields(client):
+    """Поля те же, что у сотрудника: техника, комплектация, состояние, фото."""
+    public = client.get("/intake?type=Телевизоры").text
+    for field in (
+        'name="identity_raw"', 'name="equipment"', 'name="equipment_other"',
+        'name="condition"', 'name="condition_other"', 'name="photos"',
+        'name="contact2_phone"', 'name="delivery_district"',
+    ):
+        assert field in public, field
+
+
+def test_client_autocomplete_is_disabled_for_anonymous(client):
+    """Поиск по базе клиентов не должен работать без входа."""
+    body = client.get("/intake?type=Телевизоры").text
+    assert "data-no-clients-ac" in body
+
+    # Эндпоинт подсказок закрыт для анонима. Клиент в тестах сессионный и может
+    # нести cookie прошлого теста, поэтому берём чистый экземпляр.
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app, client=("127.0.0.1", 50000)) as anon:
+        assert anon.cookies.get("msb_session") is None
+        r = anon.get("/web/clients-suggest?q=иван")
+        assert r.status_code == 401
 
 
 def test_done_page_links_to_client_status_page(client, admin_headers, city_id):
@@ -276,14 +325,14 @@ def test_code_is_required_when_set(client, intake_code, admin_headers, city_id):
     assert "Код доступа" in r.text
     assert 'name="full_name"' not in r.text
 
-    # с кодом — форма
+    # с кодом — выбор техники
     r = client.get("/intake?key=" + intake_code)
     assert r.status_code == 200
-    assert 'name="full_name"' in r.text
+    assert "Выберите тип техники" in r.text
 
     # неверный код в GET — снова страница ввода
     r = client.get("/intake?key=неверный")
-    assert 'name="full_name"' not in r.text
+    assert "Выберите тип техники" not in r.text
 
     # отправка без кода — 403, ремонт не создан
     before = client.get("/api/repairs?page_size=1", headers=admin_headers).json()["total"]
@@ -337,8 +386,8 @@ def test_admin_can_toggle_intake_from_ui(client, admin_headers):
     assert "/intake?key=MSB-2026" in settings_page
 
     # сама страница без кода закрыта, с кодом — открыта
-    assert 'name="full_name"' not in client.get("/intake").text
-    assert 'name="full_name"' in client.get("/intake?key=MSB-2026").text
+    assert "Выберите тип техники" not in client.get("/intake").text
+    assert "Выберите тип техники" in client.get("/intake?key=MSB-2026").text
 
     # возвращаем как было
     client.post(
@@ -346,7 +395,7 @@ def test_admin_can_toggle_intake_from_ui(client, admin_headers):
         data={"public_intake_enabled": "1", "public_intake_code": ""},
         follow_redirects=False,
     )
-    assert 'name="full_name"' in client.get("/intake").text
+    assert "Выберите тип техники" in client.get("/intake").text
 
 
 # --------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends public_layout|default('base.html') %}
 {% block title %}Приёмка{% endblock %}
 {% block page_name %}Приёмка{% endblock %}
 {% block page_css %}
@@ -98,6 +98,7 @@ window.msbCapsIdent = (function () {
 })();
 </script>
 {% endblock %}
+{% set intake_base = '/intake' if public_mode else '/repairs/new' %}
 {% block content %}
 
 {% if not sel_type %}
@@ -112,7 +113,7 @@ window.msbCapsIdent = (function () {
   </header>
 
   <div class="intake-type-grid" role="list" aria-label="Категории ремонта">
-    <a class="intake-type-card intake-type-card--tv" href="/repairs/new?type=Телевизоры" role="listitem">
+    <a class="intake-type-card intake-type-card--tv" href="{{ intake_base }}?type=Телевизоры" role="listitem">
       <span class="intake-type-card__icon" aria-hidden="true">
         <svg viewBox="0 0 64 64"><rect x="8" y="12" width="48" height="34" rx="5"></rect><path d="M22 54h20M26 46l-3 8M38 46l3 8"></path><path d="M16 20h32v18H16z"></path></svg>
       </span>
@@ -120,7 +121,7 @@ window.msbCapsIdent = (function () {
       <span class="intake-type-card__arrow" aria-hidden="true">›</span>
     </a>
 
-    <a class="intake-type-card intake-type-card--monitor" href="/repairs/new?type=Мониторы" role="listitem">
+    <a class="intake-type-card intake-type-card--monitor" href="{{ intake_base }}?type=Мониторы" role="listitem">
       <span class="intake-type-card__icon" aria-hidden="true">
         <svg viewBox="0 0 64 64"><rect x="7" y="10" width="50" height="34" rx="5"></rect><path d="M32 44v9M20 54h24"></path><circle cx="49" cy="38" r="1.5"></circle></svg>
       </span>
@@ -128,7 +129,7 @@ window.msbCapsIdent = (function () {
       <span class="intake-type-card__arrow" aria-hidden="true">›</span>
     </a>
 
-    <a class="intake-type-card intake-type-card--android" href="/repairs/new?type=ТВ-приставки" role="listitem">
+    <a class="intake-type-card intake-type-card--android" href="{{ intake_base }}?type=ТВ-приставки" role="listitem">
       <span class="intake-type-card__icon" aria-hidden="true">
         <svg viewBox="0 0 64 64"><rect x="9" y="18" width="46" height="30" rx="7"></rect><path d="M22 18l-4-7M42 18l4-7"></path><circle cx="24" cy="31" r="2"></circle><circle cx="40" cy="31" r="2"></circle><path d="M22 39h20"></path></svg>
       </span>
@@ -136,7 +137,7 @@ window.msbCapsIdent = (function () {
       <span class="intake-type-card__arrow" aria-hidden="true">›</span>
     </a>
 
-    <a class="intake-type-card intake-type-card--pc" href="/repairs/new?type=Компьютеры" role="listitem">
+    <a class="intake-type-card intake-type-card--pc" href="{{ intake_base }}?type=Компьютеры" role="listitem">
       <span class="intake-type-card__icon" aria-hidden="true">
         <svg viewBox="0 0 64 64"><rect x="7" y="12" width="34" height="27" rx="4"></rect><path d="M14 47h28l5 7H9l5-7z"></path><rect x="45" y="15" width="12" height="31" rx="3"></rect><circle cx="51" cy="39" r="1.5"></circle></svg>
       </span>
@@ -144,7 +145,7 @@ window.msbCapsIdent = (function () {
       <span class="intake-type-card__arrow" aria-hidden="true">›</span>
     </a>
 
-    <a class="intake-type-card intake-type-card--other" href="/repairs/new?type=Другое" role="listitem">
+    <a class="intake-type-card intake-type-card--other" href="{{ intake_base }}?type=Другое" role="listitem">
       <span class="intake-type-card__icon" aria-hidden="true">
         <svg viewBox="0 0 64 64"><path d="M25 10h14l3 8 8 3v14l-8 3-3 8H25l-3-8-8-3V21l8-3 3-8z"></path><circle cx="32" cy="28" r="7"></circle><path d="M32 35v12M26 47h12"></path></svg>
       </span>
@@ -158,7 +159,7 @@ window.msbCapsIdent = (function () {
 {# ============ ФОРМА ПРИЁМКИ (тип уже выбран) — по эталону televisions ============ #}
 <section class="tv-intake" data-tv-intake>
   <div class="tv-intake__toolbar">
-    <a class="intake-category-back" href="/repairs/new">← Все категории</a>
+    <a class="intake-category-back" href="{{ intake_base }}">← Все категории</a>
     <div class="tv-intake__toolbar-actions">
       <button class="tv-delivery-trigger" type="button" data-delivery-open aria-haspopup="dialog" aria-controls="tvDeliveryModal" aria-expanded="false">
         <span class="tv-delivery-trigger__icon" aria-hidden="true">
@@ -194,7 +195,7 @@ window.msbCapsIdent = (function () {
     </div>
   </div>
 
-  <form class="tv-intake-form" method="post" action="/repairs/new" enctype="multipart/form-data" data-tv-intake-form novalidate>
+  <form class="tv-intake-form" method="post" action="{{ intake_base }}" enctype="multipart/form-data" data-tv-intake-form novalidate>
     <input type="hidden" name="device_type" value="{{ form.get('device_type', sel_type) }}">
     <input type="hidden" name="is_delivery" value="{{ '1' if form.get('is_delivery') in ('1','true','on') else '0' }}" data-delivery-enabled>
     <input type="hidden" name="delivery_district" value="{{ form.get('delivery_district','') }}" data-delivery-district-input>
@@ -484,6 +485,9 @@ window.msbCapsIdent = (function () {
     }
 
     function query(box, q) {
+      // Приёмка без аккаунта: поиск по базе клиентов закрыт (иначе анонимная
+      // страница отдавала бы имена и телефоны уже принятых заказчиков).
+      if (document.body.hasAttribute('data-no-clients-ac')) return;
       var my = ++acSeq;
       fetch('/web/clients-suggest?q=' + encodeURIComponent(q), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : []; })
