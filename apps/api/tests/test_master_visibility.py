@@ -977,3 +977,49 @@ def test_repair_events_reach_only_who_may_see_the_repair(
     assigned = asyncio.run(audience())
     assert m2 in assigned, "исполнитель должен получать события по своему ремонту"
     assert m1 not in assigned, "чужой мастер не должен получать события по ремонту"
+
+
+def test_master_cannot_read_foreign_repair_through_chat_preview(
+    client, operator_headers, two_masters, city_id
+):
+    """Упоминание номера в чате не раскрывает чужой ремонт.
+
+    `_repair_preview` искал ремонт по номеру без проверки видимости, поэтому
+    любой участник публичного канала получал статус, устройство, бренд и модель
+    заказа, который ему недоступен. Номера последовательные — это был оракул на
+    всю базу.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-chat-1",
+                      phone="+993 61 509988", name="Чат Клиент 509988")
+    assert foreign.status_code == 201, foreign.text
+    fnum = foreign.json()["number"]
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+    assert client.get(f"/api/repairs/{foreign.json()['id']}",
+                      headers=m1).status_code == 403
+
+    channels = client.get("/api/chat/channels", headers=m1).json()
+    public = next(c for c in channels if c["kind"] == "public")
+
+    posted = client.post(
+        f"/api/chat/channels/{public['id']}/messages", headers=m1,
+        json={"text": f"Что со статусом {fnum}?"},
+    )
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["repair_preview"] is None, posted.json()["repair_preview"]
+
+    history = client.get(
+        f"/api/chat/channels/{public['id']}/messages", headers=m1).json()
+    leaked = [m["repair_preview"] for m in history
+              if m.get("repair_preview") and m["repair_preview"].get("number") == fnum]
+    assert leaked == [], leaked
+
+    # Тому, кому ремонт виден, превью по-прежнему показывается.
+    admin_view = client.get(
+        f"/api/chat/channels/{public['id']}/messages",
+        headers={"Authorization": f"Bearer {client.post('/api/auth/login', json={'email': 'admin@msb.local', 'password': 'admin123'}).json()['access_token']}"},
+    ).json()
+    assert any(m.get("repair_preview") and m["repair_preview"].get("number") == fnum
+               for m in admin_view), "админ должен видеть превью"

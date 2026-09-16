@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
+from app.core.permissions import can_view_repair
 from app.db.models import (
     ChatChannel,
     ChatChannelMember,
@@ -55,8 +56,12 @@ async def _mark_read(db, channel_id: uuid.UUID, user_id: uuid.UUID) -> None:
     mem.last_read_at = utcnow()
 
 
-async def _repair_preview(db, number: str) -> dict | None:
-    row = await db.execute(select(Repair).where(Repair.number == number))
+async def _repair_preview(db, number: str, user=None) -> dict | None:
+    row = await db.execute(
+        select(Repair)
+        .where(Repair.number == number)
+        .options(selectinload(Repair.masters), selectinload(Repair.accepted_by_user))
+    )
     repair = row.scalar_one_or_none()
     if repair is None:
         # Short ref like "TV-MSK-00001" (no year) -> match prefix + seq.
@@ -64,10 +69,22 @@ async def _repair_preview(db, number: str) -> dict | None:
         if len(parts) == 3:
             prefix, city, seq = parts
             like = f"{prefix}-{city}-%-{seq}"
-            row = await db.execute(select(Repair).where(Repair.number.like(like)))
+            row = await db.execute(
+                select(Repair)
+                .where(Repair.number.like(like))
+                .options(
+                    selectinload(Repair.masters),
+                    selectinload(Repair.accepted_by_user),
+                )
+            )
             repairs = row.scalars().all()
             repair = repairs[0] if len(repairs) == 1 else None
     if repair is None:
+        return None
+    # Упомянутый номер — не пропуск: чужой ремонт нельзя раскрыть через чат.
+    # Номера последовательные, иначе любой мастер перебрал бы их и узнал
+    # статус и модель каждого заказа в сервисе.
+    if user is not None and not can_view_repair(user, repair):
         return None
     return {
         "id": str(repair.id),
@@ -257,7 +274,9 @@ async def list_messages(
 
     out = []
     for m in messages:
-        preview = await _repair_preview(db, m.repair_ref) if m.repair_ref else None
+        preview = (
+            await _repair_preview(db, m.repair_ref, user) if m.repair_ref else None
+        )
         out.append(
             MessageOut(
                 id=m.id,
@@ -297,7 +316,7 @@ async def create_message(
     await db.commit()
     await db.refresh(message)
 
-    preview = await _repair_preview(db, repair_ref) if repair_ref else None
+    preview = await _repair_preview(db, repair_ref, user) if repair_ref else None
 
     out = MessageOut(
         id=message.id,
