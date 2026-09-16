@@ -339,3 +339,37 @@ def test_free_check_fails_closed_without_loaded_acceptor():
     assert is_free_repair(repair) is False
     assert can_view_repair(other, repair) is False
     assert can_assign_repair_masters(other, repair) is False
+
+
+def test_intake_handed_to_another_master_is_not_own_anymore(
+    client, operator_headers, two_masters, city_id
+):
+    """Приёмка, переданная другому мастеру, у приёмщика больше не «своя».
+
+    Мастер А оформил приёмку, администратор назначил исполнителем мастера Б,
+    ремонт завершили и не оплатили. Раньше `own()` считал ремонт своим по
+    `accepted_by` безусловно — и приёмщик видел завершённый неоплаченный
+    заказ другого мастера.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-16", phone="+993 61 500016")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert r.json()["master_id"] is None
+
+    _assign(client, operator_headers, rid, two_masters["vis-m2"]["id"])
+    done = client.patch(
+        f"/api/repairs/{rid}", headers=operator_headers, json={"status": "Завершён"}
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "Завершён"
+    assert done.json()["paid"] is False
+
+    # исполнитель видит свой заказ
+    assert rid in _table_ids(client, _login(client, "vis-m2@msb.local"))
+    # приёмщик — уже нет: заказ передан другому мастеру
+    assert rid not in _table_ids(client, _login(client, "vis-m1@msb.local"))
+    assert rid not in _api_ids(client, m1)
+    assert client.get(
+        f"/repairs/{rid}", cookies=_login(client, "vis-m1@msb.local")
+    ).status_code == 403

@@ -231,23 +231,19 @@ def can_assign_repair_masters(user, repair) -> bool:
 
     * ремонт свободен (`is_free_repair`): тогда он берёт его себе (и может
       сразу добавить себе помощника);
-    * ремонт уже его (назначен напрямую или через список мастеров): тогда он
-      добирает дополнительных мастеров и помощников;
-    * он сам оформил приёмку: пока исполнитель не назначен, заказ остаётся его.
+    * ремонт уже его (`is_own_repair`): назначен напрямую или через список
+      мастеров — тогда он добирает напарников и помощников, либо он сам
+      оформил приёмку и исполнитель ещё не назначен.
 
     Чужой занятый ремонт мастер себе не забирает — в том числе чужую приёмку
-    без исполнителя, она уже занята принявшим её мастером.
+    без исполнителя (она занята принявшим её мастером) и тот заказ, который он
+    сам принял, но передал другому мастеру.
     """
     if can_assign_masters(user):
         return True
     if not has_any_role(user, MASTER):
         return False
-    links = list(getattr(repair, "masters", None) or [])
-    if repair.master_id == user.id or repair.accepted_by == user.id:
-        return True
-    if any(link.user_id == user.id for link in links):
-        return True
-    return is_free_repair(repair)
+    return is_own_repair(user, repair) or is_free_repair(repair)
 
 
 def can_finish_repair(user) -> bool:
@@ -299,10 +295,11 @@ def can_access_repair(user, repair) -> bool:
 def can_view_repair(user, repair) -> bool:
     """Может ли пользователь ОТКРЫТЬ ремонт (только чтение).
 
-    Мастер видит свои ремонты и свободные (без исполнителя) — свободный заказ
-    нужно открыть, прежде чем взять себе (см. `can_assign_repair_masters`).
-    Чужой ремонт с назначенным исполнителем ему недоступен: те же границы, что
-    и у списка «Все ремонты» (см. `services/repair_scope.master_visible`).
+    Мастер видит свои ремонты и свободные (которые можно взять себе) — те же
+    границы, что и у списка «Все ремонты» (см.
+    `services/repair_scope.master_visible`). Чужой ремонт с назначенным
+    исполнителем ему недоступен, в том числе тот, что он сам принял при
+    приёмке, но передал другому мастеру.
 
     Старшие роли и колл-центр видят всё. Менять чужой ремонт по-прежнему
     нельзя: мутации проверяются `can_access_repair`, а деньги/статусы/
@@ -310,15 +307,28 @@ def can_view_repair(user, repair) -> bool:
     """
     if not is_master_only(user):
         return True
-    # Свои: исполнитель (в том числе помощник) либо собственная приёмка.
+    return is_own_repair(user, repair) or is_free_repair(repair)
+
+
+def _has_no_executor(repair) -> bool:
+    """У ремонта нет исполнителя: ни прямого назначения, ни списка мастеров."""
+    return repair.master_id is None and not list(getattr(repair, "masters", None) or [])
+
+
+def is_own_repair(user, repair) -> bool:
+    """Свой ли это ремонт для данного мастера.
+
+    Зеркалит `services/repair_scope.own()`: исполнитель (напрямую или через
+    список мастеров, в том числе помощник) **либо** собственная приёмка — но
+    только пока исполнитель не назначен. С назначением исполнителя заказ
+    становится заказом исполнителя, и у приёмщика он уже не «свой» (та же
+    граница, что у права печати своей приёмки — `can_print`).
+    """
     if repair.master_id == user.id:
         return True
     if any(m.user_id == user.id for m in (repair.masters or [])):
         return True
-    if repair.accepted_by == user.id:
-        return True
-    # Свободный ремонт — можно открыть и взять себе.
-    return is_free_repair(repair)
+    return repair.accepted_by == user.id and _has_no_executor(repair)
 
 
 def _accepted_by_master(repair) -> bool:
@@ -348,7 +358,7 @@ def is_free_repair(repair) -> bool:
     Чужая приёмка без исполнителя свободной НЕ считается: её принял другой
     мастер, она уже занята им (он же печатает на неё этикетку).
     """
-    if repair.master_id is not None or list(getattr(repair, "masters", None) or []):
+    if not _has_no_executor(repair):
         return False
     if _accepted_by_master(repair):
         return False
