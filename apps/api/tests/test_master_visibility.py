@@ -543,3 +543,52 @@ def test_master_clients_suggest_hides_foreign_clients(
     assert r4.status_code == 200, r4.text
     admin_phones = {row["phone"] for row in r4.json()}
     assert {"+993 61 509988", "+993 61 509989"} <= admin_phones, admin_phones
+
+
+def test_master_cannot_touch_foreign_repair_actions(
+    client, operator_headers, two_masters, city_id
+):
+    """Действия в карточке чужого ремонта мастеру закрыты — без 500.
+
+    Печать клиентской этикетки раньше падала в MissingGreenlet (500), потому
+    что связь `masters` не подгружалась, а `can_print` читала её лениво.
+    Регистрация «без печати» вообще не проверяла права: любой сотрудник писал
+    событие в историю чужого заказа.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-24",
+                      phone="+993 61 509991")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-25",
+                   phone="+993 61 509992")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    # чужой ремонт: 403, а не 500
+    r = client.post(f"/repairs/{fid}/print-client-label", cookies=cookies)
+    assert r.status_code == 403, r.status_code
+
+    r = client.post(f"/api/repairs/{fid}/print-failure", cookies=cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code == 403, r.status_code
+
+    # свой ремонт: не 403 и не 500 (принтер в тестах не настроен — допустим 400)
+    r = client.post(f"/repairs/{mid}/print-client-label", cookies=cookies)
+    assert r.status_code not in (403, 500), r.status_code
+
+    r = client.post(f"/api/repairs/{mid}/print-failure", cookies=cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code not in (403, 500), r.status_code
+
+    # старшая роль печатает любой ремонт
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    r = client.post(f"/api/repairs/{fid}/print-failure", cookies=admin_cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code not in (403, 500), r.status_code

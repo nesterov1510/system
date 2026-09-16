@@ -261,9 +261,14 @@ def can_print(user, repair) -> bool:
     """Напечатать бланк/этикетку: мастер — свой ремонт либо своя приёмка в очереди."""
     if has_any_role(user, *PRINT_QUEUE_ROLES) or not has_any_role(user, MASTER):
         return True
-    if repair.master_id == user.id or any(
-        link.user_id == user.id for link in repair.masters
-    ):
+    if repair.master_id == user.id:
+        return True
+    # Список исполнителей должен быть подгружен вместе с ремонтом. Если связь
+    # не загружена, ленивое чтение в async-коде падает в MissingGreenlet —
+    # считаем ремонт чужим, чтобы проверка прав отвечала 403, а не 500.
+    if "masters" in inspect(repair).unloaded:
+        return False
+    if any(link.user_id == user.id for link in repair.masters):
         return True
     # Мастер принял технику сам, а исполнителя назначает администратор/оператор:
     # на этом этапе этикетку напечатать необходимо (её клеят на технику при

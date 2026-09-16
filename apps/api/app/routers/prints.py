@@ -393,7 +393,7 @@ async def create_client_label_print_job(
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
-        .options(selectinload(Repair.client))
+        .options(selectinload(Repair.client), selectinload(Repair.masters))
     )
     repair = row.scalar_one_or_none()
     if repair is None:
@@ -473,11 +473,16 @@ async def report_print_failure(
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
-        .options(selectinload(Repair.client))
+        .options(selectinload(Repair.client), selectinload(Repair.masters))
     )
     repair = row.scalar_one_or_none()
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+    # Отметить «зарегистрировано без печати» вправе только тот, кто может
+    # печатать этот ремонт: иначе любой сотрудник писал событие в историю
+    # чужого заказа и рассылал уведомления администраторам.
+    if not _can_print(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
 
     reason = (body or {}).get("reason") or "Печать не удалась дважды подряд"
 
