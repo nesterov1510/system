@@ -225,6 +225,7 @@ async def _get_repair_or_404(db, repair_id: uuid.UUID) -> Repair:
         .options(
             selectinload(Repair.client),
             selectinload(Repair.master),
+            selectinload(Repair.accepted_by_user),
             selectinload(Repair.events),
             selectinload(Repair.masters).selectinload(RepairMaster.user),
         )

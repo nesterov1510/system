@@ -200,3 +200,60 @@ def test_master_search_does_not_leak_foreign_repairs(
     )
     assert r.status_code == 200
     assert foreign.json()["id"] not in {x["id"] for x in r.json()["items"]}
+
+
+def _bearer(client, email):
+    token = client.post(
+        "/api/auth/login", json={"email": email, "password": "pass123"}
+    ).json()["access_token"]
+    return {"Authorization": "Bearer " + token}
+
+
+def _api_ids(client, headers):
+    return {
+        x["id"] for x in client.get(
+            "/api/repairs", headers=headers, params={"stage": "all", "page_size": 100}
+        ).json()["items"]
+    }
+
+
+def test_own_intake_without_executor_is_not_free_for_others(
+    client, operator_headers, two_masters, city_id
+):
+    """Приёмка, которую мастер принял на себя, занята им — не «свободная».
+
+    Исполнитель при этом не назначен, поэтому раньше ремонт уходил в общую
+    очередь и второй мастер видел чужую работу.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-13", phone="+993 61 500013")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert r.json()["master_id"] is None, "исполнитель не назначен"
+
+    # Принимающий видит свой ремонт.
+    assert rid in _table_ids(client, _login(client, "vis-m1@msb.local"))
+    # Второй мастер — нет: приёмка чужая.
+    assert rid not in _table_ids(client, _login(client, "vis-m2@msb.local"))
+    assert rid not in _api_ids(client, _bearer(client, "vis-m2@msb.local"))
+    # Старшая роль видит всё.
+    assert rid in _api_ids(client, operator_headers)
+
+
+def test_finished_unassigned_repair_is_not_in_master_list(
+    client, operator_headers, two_masters, city_id
+):
+    """Завершённый ремонт без исполнителя брать нечего — он не в очереди."""
+    r = _intake(client, operator_headers, city_id, "vis-14", phone="+993 61 500014")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    done = client.patch(
+        f"/api/repairs/{rid}", headers=operator_headers, json={"status": "Завершён"}
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "Завершён"
+
+    for email in ("vis-m1@msb.local", "vis-m2@msb.local"):
+        assert rid not in _table_ids(client, _login(client, email))
+        assert rid not in _api_ids(client, _bearer(client, email))
+    assert rid in _api_ids(client, operator_headers)

@@ -8,7 +8,9 @@
 Здесь — единственное место, где описано, кто что может. Роутеры обязаны
 использовать эти функции, а не писать проверки ролей по месту.
 """
-from app.db.models import UserRole
+from sqlalchemy import inspect
+
+from app.db.models import RepairStatus, UserRole
 
 ADMIN = UserRole.ADMIN.value
 MANAGER = UserRole.MANAGER.value
@@ -306,12 +308,37 @@ def can_view_repair(user, repair) -> bool:
     """
     if not is_master_only(user):
         return True
+    # Свои: исполнитель (в том числе помощник) либо собственная приёмка.
     if repair.master_id == user.id:
         return True
     if any(m.user_id == user.id for m in (repair.masters or [])):
         return True
-    # Свободный ремонт — можно открыть и взять себе.
-    return repair.master_id is None and not list(repair.masters or [])
+    if repair.accepted_by == user.id:
+        return True
+    # Свободный ремонт — можно открыть и взять себе. Чужая приёмка без
+    # исполнителя уже занята принявшим её мастером, поэтому не открывается.
+    if repair.master_id is not None or list(repair.masters or []):
+        return False
+    if _accepted_by_master(repair):
+        return False
+    # Завершённый или выданный ремонт брать нечего.
+    if repair.status == RepairStatus.DONE or repair.issued_at is not None:
+        return False
+    return True
+
+
+def _accepted_by_master(repair) -> bool:
+    """Ремонт принят пользователем с основной ролью «мастер».
+
+    `accepted_by_user` может быть не загружен в сессии — тогда считаем приёмку
+    чужой только если связь доступна; иначе не блокируем просмотр.
+    """
+    if "accepted_by_user" in inspect(repair).unloaded:
+        return False
+    acceptor = repair.accepted_by_user
+    if acceptor is None:
+        return False
+    return acceptor.role == MASTER
 
 
 def can_delete_repair(user) -> bool:
