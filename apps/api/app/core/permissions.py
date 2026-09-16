@@ -295,13 +295,23 @@ def can_access_repair(user, repair) -> bool:
 def can_view_repair(user, repair) -> bool:
     """Может ли пользователь ОТКРЫТЬ ремонт (только чтение).
 
-    Мастера видят в списке все ремонты — в том числе свободные, без
-    исполнителя, чтобы взять заказ себе (см. `can_assign_repair_masters`).
-    Карточку для этого открываем любому сотруднику, а вот менять чужой
-    ремонт по-прежнему нельзя: мутации проверяются `can_access_repair`,
-    а деньги/статусы/назначения — своими функциями прав.
+    Мастер видит свои ремонты и свободные (без исполнителя) — свободный заказ
+    нужно открыть, прежде чем взять себе (см. `can_assign_repair_masters`).
+    Чужой ремонт с назначенным исполнителем ему недоступен: те же границы, что
+    и у списка «Все ремонты» (см. `services/repair_scope.master_visible`).
+
+    Старшие роли и колл-центр видят всё. Менять чужой ремонт по-прежнему
+    нельзя: мутации проверяются `can_access_repair`, а деньги/статусы/
+    назначения — своими функциями прав.
     """
-    return True
+    if not is_master_only(user):
+        return True
+    if repair.master_id == user.id:
+        return True
+    if any(m.user_id == user.id for m in (repair.masters or [])):
+        return True
+    # Свободный ремонт — можно открыть и взять себе.
+    return repair.master_id is None and not list(repair.masters or [])
 
 
 def can_delete_repair(user) -> bool:

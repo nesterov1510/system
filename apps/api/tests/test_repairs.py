@@ -263,10 +263,10 @@ def test_update_status_timeline(client, admin_headers, created_repair):
     assert "status_change" in types
 
 
-def test_master_board_only_assigned(
+def test_master_sees_own_and_unassigned_only(
     client, admin_headers, operator_headers, city_id
 ):
-    """Мастер на странице «Все ремонты» видит весь реестр, включая чужие."""
+    """В «Все ремонты» мастер видит свои ремонты и свободные — чужие нет."""
     # Два мастера.
     m1 = client.post(
         "/api/admin/users", headers=admin_headers,
@@ -298,32 +298,45 @@ def test_master_board_only_assigned(
             },
         ).json()
 
-    # 3 ремонта: первые 2 назначены МастерУ, третий — Мастеру Д.
+    # Счётчики измеряем дельтой: база в тестах общая для всей сессии.
+    sc1_before = client.get("/api/repairs/stage-counts", headers=h1).json()
+    sc2_before = client.get("/api/repairs/stage-counts", headers=h2).json()
+
+    # 4 ремонта: r1 и r2 — у Мастера У, r3 — у Мастера Д, r4 свободен.
     r1 = mk(1); client.patch(f"/api/repairs/{r1['id']}", headers=operator_headers,
                              json={"master_ids": [m1["id"]]})
     r2 = mk(2); client.patch(f"/api/repairs/{r2['id']}", headers=operator_headers,
                              json={"master_ids": [m1["id"]]})
     r3 = mk(3); client.patch(f"/api/repairs/{r3['id']}", headers=operator_headers,
                              json={"master_ids": [m2["id"]]})
+    r4 = mk(4)  # исполнитель не назначен — его может взять любой мастер
 
     ids1 = {x["id"] for x in client.get(
         "/api/repairs", headers=h1, params={"stage": "all", "page_size": 50}
     ).json()["items"]}
-    assert {r1["id"], r2["id"], r3["id"]} <= ids1, f"Мастер У видит не всё: {ids1}"
+    assert {r1["id"], r2["id"]} <= ids1, f"Мастер У не видит своих: {ids1}"
+    assert r4["id"] in ids1, "свободный ремонт не виден мастеру"
+    assert r3["id"] not in ids1, "чужой назначенный ремонт виден мастеру"
 
     ids2 = {x["id"] for x in client.get(
         "/api/repairs", headers=h2, params={"stage": "all", "page_size": 50}
     ).json()["items"]}
-    assert {r1["id"], r2["id"], r3["id"]} <= ids2, f"Мастер Д видит не всё: {ids2}"
+    assert r3["id"] in ids2, f"Мастер Д не видит своего: {ids2}"
+    assert r4["id"] in ids2, "свободный ремонт не виден мастеру"
+    assert r1["id"] not in ids2 and r2["id"] not in ids2, "чужие ремонты видны"
 
-    # Счётчики по этапам у мастера тоже только по его ремонтам.
+    # Счётчики этапов совпадают со списком: свои + свободные.
+    # Мастеру У добавились r1, r2 (свои) и r4 (свободный) — 3.
+    # Мастеру Д — r3 (свой) и r4 (свободный) — 2.
     sc1 = client.get("/api/repairs/stage-counts", headers=h1).json()
-    assert sc1["all"] == 2
+    assert sc1["all"] - sc1_before["all"] == 3, (sc1_before, sc1)
     sc2 = client.get("/api/repairs/stage-counts", headers=h2).json()
-    assert sc2["all"] == 1
+    assert sc2["all"] - sc2_before["all"] == 2, (sc2_before, sc2)
 
-    # Чужой занятый ремонт открыть можно, а переписать состав мастеров — нет.
-    assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 200
+    # Свободный ремонт мастер открывает и забирает себе.
+    assert client.get(f"/api/repairs/{r4['id']}", headers=h1).status_code == 200
+    # Чужой назначенный — не открывается и не правится.
+    assert client.get(f"/api/repairs/{r3['id']}", headers=h1).status_code == 403
     assert client.patch(
         f"/api/repairs/{r3['id']}", headers=h1, json={"master_ids": [m1["id"]]}
     ).status_code == 403

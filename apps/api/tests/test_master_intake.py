@@ -147,14 +147,26 @@ def test_master_card_of_unassigned_intake_is_read_only(client, master_headers, c
     assert comment.status_code == 200, comment.text
 
 
-def test_unassigned_intake_is_not_in_master_stage_counts(client, master_headers, city_id):
+def test_unassigned_intake_is_visible_in_master_stage_counts(
+    client, master_headers, city_id
+):
+    """Свободный ремонт (без исполнителя) мастер видит — в том числе в счётчиках.
+
+    Раньше счётчики показывали только назначенные заказы, теперь граница та же,
+    что и у списка «Все ремонты»: свои + свободные (взять себе).
+    """
     before = client.get("/api/repairs/stage-counts", headers=master_headers).json()
     created = _intake(client, master_headers, city_id, "mi-6", phone="+993 61 880066")
     assert created.status_code == 201, created.text
     after = client.get("/api/repairs/stage-counts", headers=master_headers).json()
 
-    assert after["new"] == before["new"], "своя приёмка попала в счётчики мастера"
-    assert after["all"] == before["all"]
+    assert after["new"] == before["new"] + 1, (before, after)
+    assert after["all"] == before["all"] + 1, (before, after)
+    # и виден в самом списке
+    ids = {x["id"] for x in client.get(
+        "/api/repairs", headers=master_headers, params={"stage": "all", "page_size": 50}
+    ).json()["items"]}
+    assert created.json()["id"] in ids
 
 
 def test_master_still_cannot_print_foreign_repair(

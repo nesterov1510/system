@@ -92,10 +92,15 @@ async def fetch_repairs(
                 Repair.model.ilike(like),
             )
         )
-    # Список ремонтов видят все роли целиком: мастеру нужно находить свободные
-    # заказы (без исполнителя) и брать их себе. Права на изменения проверяются
-    # отдельно (см. core/permissions.py: can_access_repair,
-    # can_assign_repair_masters).
+    # Мастер видит только свои ремонты и свободные (без исполнителя), чтобы
+    # взять заказ себе; чужие назначенные ремонты ему не показываются. Старшие
+    # роли видят всё. Права на изменения проверяются отдельно (см.
+    # core/permissions.py: can_access_repair, can_assign_repair_masters).
+    from app.core.permissions import is_master_only
+    from app.services.repair_scope import master_visible
+
+    if is_master_only(user):
+        filters.append(master_visible(user.id))
 
     base = select(Repair).where(*filters)
     total = (await db.execute(select(func.count()).select_from(base.subquery()))).scalar() or 0

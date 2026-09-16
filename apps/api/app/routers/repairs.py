@@ -51,6 +51,8 @@ from app.schemas.repair import (
 )
 from app.services import audit
 from app.services.chat import send_assignment_notice
+from app.services import repair_scope
+from app.services.repair_scope import master_visible
 from app.services.numbering import next_repair_number, new_public_token, normalize_phone
 from app.services.sms import (
     build_ready_sms,
@@ -134,11 +136,10 @@ def _master_scope(user_id) -> "object":
     Своя приёмка сюда НЕ входит: мастер видит только те заказы, которые ему
     назначили (администратор или оператор). Печать этикетки на свою приёмку
     при этом разрешена — см. `permissions.can_print`.
-    """
-    from sqlalchemy import or_, select as _select
 
-    subq = _select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
-    return or_(Repair.master_id == user_id, Repair.id.in_(subq))
+    Границы видимости списка (свои + свободные) — в `repair_scope.master_visible`.
+    """
+    return repair_scope.assigned_to(user_id)
 
 
 def _serialize(repair: Repair) -> RepairOut:
@@ -374,7 +375,7 @@ async def client_repairs(
         .order_by(Repair.accepted_at.desc())
     )
     if _is_master_only(user):
-        repairs_q = repairs_q.where(_master_scope(user.id))
+        repairs_q = repairs_q.where(master_visible(user.id))
     r = await db.execute(repairs_q)
     return [_serialize(x) for x in r.scalars().all()]
 
@@ -927,9 +928,12 @@ def _repairs_filters(
                 Repair.model.ilike(like),
             )
         )
-    # Список видят все роли целиком: мастеру нужно находить свободные ремонты
-    # (без исполнителя) и брать их себе. Права на изменения проверяются
-    # отдельно — см. `can_access_repair` / `can_assign_repair_masters`.
+    # Мастер видит только свои ремонты и свободные (без исполнителя), чтобы
+    # взять заказ себе. Чужие назначенные ремонты ему не показываются. Старшие
+    # роли видят всё. Права на изменения проверяются отдельно — см.
+    # `can_access_repair` / `can_assign_repair_masters`.
+    if _is_master_only(user):
+        filters.append(master_visible(user.id))
     return filters
 
 
@@ -1072,7 +1076,8 @@ async def stage_counts(db: DbSession, user: CurrentUser):
     """Сколько техники на каждом этапе — для бейджей на доске."""
     scope = []
     if _is_master_only(user):
-        scope.append(_master_scope(user.id))
+        # те же границы, что и у списка «Все ремонты»: свои + свободные
+        scope.append(master_visible(user.id))
     counts: dict[str, int] = {}
     for key, statuses in STAGE_STATUSES.items():
         cnt = (

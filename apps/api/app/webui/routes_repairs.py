@@ -195,8 +195,8 @@ async def repairs_list(request: Request, stage: str | None = None, q: str | None
         statuses = await get_repair_statuses(db)
         masters = await _masters_list(db)
         master_only = is_master_only(user)
-        # Мастер видит все ремонты и может брать свободные себе — поэтому
-        # колонка «Мастера» редактируется и ему, а не только старшим ролям.
+        # Мастер видит свои и свободные ремонты и может брать свободные себе —
+        # поэтому колонка «Мастера» редактируется и ему, а не только старшим ролям.
         can_assign_ui = can_assign_masters(user) or master_only
         # Конструктор блоков страницы — только админу, порядок личный.
         can_layout = user.has_role("admin")
@@ -498,8 +498,9 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
         repair = await _load_repair(db, repair_id)
         if repair is None:
             return HTMLResponse("Ремонт не найден", status_code=404)
-        # Список показывает мастеру все ремонты, поэтому и карточку открываем:
-        # свободный заказ надо посмотреть, прежде чем взять его себе.
+        # Карточку открываем по тем же границам, что и список «Все ремонты»:
+        # мастер видит свои и свободные заказы — свободный надо посмотреть,
+        # прежде чем взять его себе. Чужой назначенный ремонт недоступен.
         if not can_view_repair(user, repair):
             return HTMLResponse("Нет доступа к этому ремонту", status_code=403)
 
