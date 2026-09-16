@@ -15,6 +15,7 @@ from app.core.permissions import (
     CASHIER_ROLES,
     can_refund_payment,
     can_take_payment,
+    can_view_repair,
 )
 from app.db.models import Payment, Repair, RepairEvent, UserRole
 from app.schemas.payments import PaymentCreate, PaymentOut
@@ -43,9 +44,14 @@ def _fmt_amount(amount, symbol: str) -> str:
 
 @router.get("/repairs/{repair_id}/payments", response_model=list[PaymentOut])
 async def list_payments(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    repair = await db.get(Repair, repair_id)
-    if repair is None:
-        raise HTTPException(404, "Ремонт не найден")
+    # Платежи — деньги клиента: мастеру чужого ремонта они не показываются.
+    # Ремонт грузим общим помощником (подтягивает masters/accepted_by_user,
+    # нужные can_view_repair) и не даём ленивой загрузке уронить запрос.
+    from app.routers.repairs import _get_repair_or_404
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not can_view_repair(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     row = await db.execute(
         select(Payment).where(Payment.repair_id == repair_id).order_by(Payment.paid_at)
     )

@@ -18,6 +18,7 @@ from app.core.permissions import (
     can_edit_stock_catalog,
     can_remove_repair_part,
     can_set_repair_part_price,
+    can_view_repair,
 )
 from app.db.models import Part, Repair, RepairEvent, RepairPart, UserRole
 from app.services import audit
@@ -167,9 +168,13 @@ def _to_rp_out(rp: RepairPart) -> RepairPartOut:
 
 @router.get("/repairs/{repair_id}/parts", response_model=list[RepairPartOut])
 async def list_repair_parts(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    repair = await db.get(Repair, repair_id)
-    if repair is None:
-        raise HTTPException(404, "Ремонт не найден")
+    # Ремонт грузим общим помощником: он подтягивает masters и accepted_by_user,
+    # без которых can_view_repair не может решить, свой это заказ или чужой.
+    from app.routers.repairs import _get_repair_or_404
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not can_view_repair(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     row = await db.execute(
         select(RepairPart)
         .options(selectinload(RepairPart.part))

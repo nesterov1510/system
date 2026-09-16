@@ -635,3 +635,50 @@ def test_master_client_page_hides_client_without_visible_repairs(
     admin_cookies = _login(client, "operator@msb.local", "operator123")
     assert client.get(f"/clients/{foreign_cid}",
                       cookies=admin_cookies).status_code == 200
+
+
+def test_master_cannot_read_foreign_payments_and_parts(
+    client, operator_headers, two_masters, city_id
+):
+    """Платежи и запчасти чужого ремонта мастеру не отдаются.
+
+    GET /api/repairs/{id}/payments и /parts грузили ремонт по id и возвращали
+    всё без проверки прав: мастер читал суммы и способы оплаты чужого заказа.
+    Пустой ответ это маскировал — там, где платежей ещё не было.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-28",
+                      phone="+993 61 509997")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-29",
+                   phone="+993 61 509998")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    # платёж на чужой ремонт вносит старшая роль
+    pay = client.post(f"/api/repairs/{fid}/payments", headers=operator_headers,
+                      json={"amount": 321.5, "method": "card"})
+    assert pay.status_code == 201, pay.text
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    r = client.get(f"/api/repairs/{fid}/payments", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    r = client.get(f"/api/repairs/{fid}/parts", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    # свой ремонт читается
+    assert client.get(f"/api/repairs/{mid}/payments",
+                      headers=m1).status_code == 200
+    assert client.get(f"/api/repairs/{mid}/parts", headers=m1).status_code == 200
+
+    # старшая роль видит платёж чужого ремонта
+    r = client.get(f"/api/repairs/{fid}/payments", headers=operator_headers)
+    assert r.status_code == 200, r.status_code
+    assert [p["amount"] for p in r.json()] == [321.5], r.text
