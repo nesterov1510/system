@@ -9,6 +9,7 @@
 Старшие роли (администратор, оператор) видят всё.
 """
 import re
+import uuid
 
 import pytest
 
@@ -303,3 +304,38 @@ def test_master_cannot_take_another_masters_intake(
     assert own_action.status_code == 303, (own_action.status_code, own_action.text[:200])
     after = client.get(f"/api/repairs/{rid}", headers=operator_headers).json()
     assert after["master_id"] == two_masters["vis-m1"]["id"], after["master_id"]
+
+
+def test_free_check_fails_closed_without_loaded_acceptor():
+    """Без подгруженного приёмщика ремонт не считается свободным.
+
+    Роль приёмщика живёт в связанном пользователе. Если связь не загружена,
+    принадлежность определить нельзя — правило обязано закрыть доступ, а не
+    открыть чужой заказ. Во всех боевых путях связь подгружена
+    (`selectinload` в `_get_repair_or_404` и `_load_repair`), поэтому свободные
+    ремонты из общей очереди остаются доступны (проверено HTTP-тестами выше).
+    """
+    from app.core.permissions import (
+        can_assign_repair_masters,
+        can_view_repair,
+        is_free_repair,
+    )
+    from app.db.models import Repair, User
+
+    # id задаём явно: у неприсоединённого к сессии объекта первичный ключ ещё
+    # None, и сравнение accepted_by == user.id совпало бы как None == None.
+    acceptor = User(id=uuid.uuid4(), name="Мастер", email="u@msb.local",
+                    role="master", extra_permissions=[])
+    other = User(id=uuid.uuid4(), name="Другой", email="o@msb.local",
+                 role="master", extra_permissions=[])
+    repair = Repair(
+        id=uuid.uuid4(), client_id=uuid.uuid4(), device_type="Телевизоры",
+        brand="LG", model="43", fault_client="нет звука", status="Новый",
+        accepted_by=acceptor.id,
+    )
+    repair.masters = []
+    assert acceptor.id != other.id
+
+    assert is_free_repair(repair) is False
+    assert can_view_repair(other, repair) is False
+    assert can_assign_repair_masters(other, repair) is False

@@ -324,11 +324,14 @@ def can_view_repair(user, repair) -> bool:
 def _accepted_by_master(repair) -> bool:
     """Ремонт принят пользователем с основной ролью «мастер».
 
-    `accepted_by_user` может быть не загружен в сессии — тогда считаем приёмку
-    чужой только если связь доступна; иначе не блокируем просмотр.
+    Роль приёмщика лежит в связанном пользователе, поэтому связь
+    `accepted_by_user` должна быть подгружена вместе с ремонтом
+    (`selectinload` в `_get_repair_or_404` и `_load_repair`). Если она не
+    загружена, определить принадлежность нельзя — считаем приёмку чужой, чтобы
+    не показать мастеру чужой заказ по ошибке.
     """
     if "accepted_by_user" in inspect(repair).unloaded:
-        return False
+        return True
     acceptor = repair.accepted_by_user
     if acceptor is None:
         return False
