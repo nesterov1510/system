@@ -736,3 +736,72 @@ def test_master_cannot_change_foreign_part_orders(
                         json={"qty": 3}).status_code == 200
     assert client.delete(f"/api/repairs/{mid}/part-orders/{own_oid}",
                          headers=m1).status_code == 200
+
+
+def test_master_blocked_on_every_foreign_repair_mutation(
+    client, operator_headers, two_masters, city_id
+):
+    """Ни один маршрут мутации карточки не пускает мастера в чужой ремонт.
+
+    Тест перечисляет маршруты из самого приложения, поэтому новый обработчик
+    без проверки прав упадёт здесь, а не в проде. Дыры находились именно так:
+    платежи, запчасти и заказы запчастей отдавали или меняли данные чужого
+    ремонта, хотя соседние маршруты были закрыты.
+    """
+    from app.main import app
+
+    foreign = _intake(client, operator_headers, city_id, "vis-32",
+                      phone="+993 61 509963")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    other = two_masters["vis-m2"]["id"]
+    dummy = str(uuid.uuid4())
+
+    def sub(path: str) -> str:
+        for key, val in [("repair_id", fid), ("rp_id", dummy),
+                         ("order_id", dummy), ("payment_id", dummy)]:
+            path = path.replace("{" + key + "}", val)
+        return path
+
+    checked = 0
+    # app.routes содержит обёртки _IncludedRouter, поэтому маршруты берём из
+    # openapi — там они уже развёрнуты.
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "{repair_id}" not in path:
+            continue
+        for method in sorted(m.upper() for m in ops):
+            if method in ("GET", "HEAD", "OPTIONS"):
+                continue
+            url = sub(path)
+            is_api = url.startswith("/api")
+            kwargs = {"follow_redirects": False}
+            if is_api:
+                kwargs["headers"] = m1
+                kwargs["json"] = {"master_ids": [other], "status": "Завершён",
+                                  "message": "x", "qty": 9, "amount": 5,
+                                  "name": "x", "action": "transfer",
+                                  "user_id": other}
+            else:
+                kwargs["cookies"] = cookies
+                kwargs["data"] = {"status": "Завершён", "message": "x",
+                                  "master_id": other, "user_id": other,
+                                  "action": "transfer", "amount": "5",
+                                  "price_final": "5", "qty": "9", "name": "x"}
+                if url.endswith("/photos"):
+                    # Без файла маршрут молча пропускает загрузку и отдаёт 303,
+                    # поэтому проверку прав надо провоцировать настоящим файлом.
+                    import io
+
+                    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+                    kwargs["files"] = {"file": ("t.png", io.BytesIO(png), "image/png")}
+            r = client.request(method, url, **kwargs)
+            checked += 1
+            assert r.status_code >= 400, (
+                f"{method} {url} вернул {r.status_code} — мастер изменил чужой ремонт"
+            )
+    assert checked >= 20, f"проверено всего {checked} маршрутов — перечисление сломалось"

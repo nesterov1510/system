@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import CurrentUser, DbSession, require_roles
 from app.core.permissions import (
     STOCK_CATALOG_ROLES,
+    can_access_repair,
     can_add_repair_part,
     can_edit_stock_catalog,
     can_remove_repair_part,
@@ -190,9 +191,15 @@ async def add_repair_part(
     db: DbSession,
     user: CurrentUser,
 ):
-    repair = await db.get(Repair, repair_id)
-    if repair is None:
-        raise HTTPException(404, "Ремонт не найден")
+    # can_add_repair_part — проверка РОЛИ: по ней любой мастер мог списать
+    # деталь на чужой ремонт. Принадлежность заказа проверяется отдельно.
+    # Ремонт грузим общим помощником: он подтягивает masters/accepted_by_user,
+    # без которых can_access_repair не решает, свой это заказ или чужой.
+    from app.routers.repairs import _get_repair_or_404
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not can_access_repair(user, repair):
+        raise _forbid("Нет доступа к этому ремонту")
 
     # Права: списывать запчасть под ремонт могут не все роли.
     if not can_add_repair_part(user):
