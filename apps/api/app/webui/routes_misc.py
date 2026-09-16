@@ -10,6 +10,7 @@ from app.core.permissions import (
     can_delete_client,
     can_edit_stock_catalog,
     can_view_analytics,
+    can_view_callcenter_queue,
     has_any_role,
 )
 from app.db.models import (
@@ -203,6 +204,11 @@ async def callcenter_page(request: Request, kind: str = "all"):
     db, user, redir = await _require(request)
     if redir:
         return redir
+    # Очередь видит callcenter + админ + менеджер + оператор — та же проверка,
+    # что и у API `/api/callcenter/queue`. Без неё страница отдавала мастеру
+    # все ремонты сервиса в обход области видимости «Все ремонты».
+    if not can_view_callcenter_queue(user):
+        return HTMLResponse("Недостаточно прав для очереди call-центра", status_code=403)
     try:
         queue = await callcenter_api._queue(db, kind, limit=100)
         ctx = await base_context(

@@ -373,3 +373,17 @@ def test_intake_handed_to_another_master_is_not_own_anymore(
     assert client.get(
         f"/repairs/{rid}", cookies=_login(client, "vis-m1@msb.local")
     ).status_code == 403
+
+
+def test_master_cannot_open_callcenter_queue(client, two_masters):
+    """Очередь колл-центра мастеру недоступна ни в API, ни на веб-странице.
+
+    Веб-страница `/callcenter` звала `_queue()` напрямую, минуя проверку прав,
+    которая есть у `/api/callcenter/queue`, — и отдавала мастеру все ремонты
+    сервиса в обход области видимости «Все ремонты».
+    """
+    cookies = _login(client, "vis-m1@msb.local")
+    assert client.get("/callcenter", cookies=cookies).status_code == 403
+
+    api = client.get("/api/callcenter/queue", headers=_bearer(client, "vis-m1@msb.local"))
+    assert api.status_code == 403, api.text[:200]
