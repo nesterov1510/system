@@ -62,10 +62,3 @@ def free_to_take():
 def master_visible(user_id: uuid.UUID):
     """Что видит мастер: свои ремонты + свободные (взять себе)."""
     return or_(own(user_id), free_to_take())
-
-
-def is_unassigned(repair) -> bool:
-    """Нет ли у ремонта исполнителя (по уже загруженному объекту)."""
-    if repair.master_id is not None:
-        return False
-    return not list(getattr(repair, "masters", None) or [])
