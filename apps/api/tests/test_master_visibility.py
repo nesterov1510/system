@@ -13,6 +13,9 @@ import uuid
 
 import pytest
 
+# Статические подсказки в атрибутах placeholder — не данные заказа.
+_PLACEHOLDER_RE = re.compile(r'placeholder="[^"]*"', re.S)
+
 
 def _intake(client, headers, city_id, key, phone="+993 61 500000", master_id=None,
             name="Клиент Видимости"):
@@ -866,3 +869,74 @@ def test_master_blocked_on_admin_mutations_outside_repair_card(
                 f"справочник или настройку"
             )
     assert checked >= 30, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+def test_master_reads_no_foreign_repair_data_from_any_endpoint(
+    client, operator_headers, two_masters, city_id
+):
+    """Ни один GET не отдаёт мастеру данные чужого ремонта или его клиента.
+
+    Зеркало теста на мутации: перечисляет GET-маршруты из openapi и ищет в
+    ответах номер, id, имя и телефон чужого заказа. Так были найдены утечки в
+    clients/list, clients/lookup, clients-suggest и карточке клиента.
+    """
+    from app.main import app
+
+    foreign = _intake(client, operator_headers, city_id, "vis-33",
+                      phone="+993 61 509964", name="ЧужойКлиент509964")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+    fnum = foreign.json()["number"]
+    fcid = foreign.json()["client_id"]
+
+    listed = {row["phone"]: row["id"] for row in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    assert listed["+993 61 509964"] == fcid, listed
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    dummy = str(uuid.uuid4())
+
+    needles = [("номер", fnum), ("id ремонта", fid),
+               ("id клиента", fcid), ("имя клиента", "ЧужойКлиент509964"),
+               ("телефон клиента", "+993 61 509964")]
+    # Публичный статус открывается по токену — токен и есть доступ.
+    public_prefixes = ("/r/", "/api/public/r/")
+
+    checked = 0
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "get" not in ops:
+            continue
+        url = path
+        for key in ("repair_id", "client_id", "number", "token", "channel_id",
+                    "user_id", "notification_id", "part_id", "payment_id",
+                    "rp_id", "order_id", "city_id", "branch_id", "price_id",
+                    "equipment_id", "donor_id", "template_id", "key"):
+            val = {"repair_id": fid, "client_id": fcid, "number": fnum,
+                   "user_id": dummy}.get(key, dummy)
+            url = url.replace("{" + key + "}", val)
+        if "{" in url:
+            continue
+        kwargs = {"follow_redirects": False}
+        if url.startswith("/api"):
+            kwargs["headers"] = m1
+        else:
+            kwargs["cookies"] = cookies
+        r = client.get(url, **kwargs)
+        checked += 1
+        if r.status_code != 200 or url.startswith(public_prefixes):
+            continue
+        # Подсказки в placeholder — статический текст разметки, а не данные
+        # (в чате там пример номера: «напр. TV-ASG-2026-00001»).
+        hay = _PLACEHOLDER_RE.sub("", r.text)
+        hits = [label for label, needle in needles if needle in hay]
+        if hits:
+            pos = hay.find(needles[0][1])
+            snippet = hay[max(0, pos - 400):pos + 150]
+            assert not hits, (
+                f"GET {url} раскрыл мастеру чужой ремонт: {hits}\n"
+                f"контекст: {' '.join(snippet.split())}"
+            )
+    assert checked >= 40, f"проверено всего {checked} маршрутов — перечисление сломалось"
