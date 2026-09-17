@@ -164,18 +164,26 @@
 
 <form method="post" action="/admin/settings/label">
   <div class="msb-form-card">
-    <div class="msb-form-card__head"><h2>Принтер этикеток 58×38 мм (удалённый CUPS)</h2></div>
+    <div class="msb-form-card__head"><h2>Принтер этикеток 58×38 мм (CUPS)</h2></div>
     <div class="msb-form-card__body">
       <div class="msb-form-grid">
-        <label class="fld"><span class="lbl">IP компьютера с CUPS *</span>
-          <input type="text" name="label_ip" value="{{ label.ip or '' }}" placeholder="192.168.x.x"></label>
-        <label class="fld"><span class="lbl">Порт CUPS</span>
-          <input type="number" name="label_port" value="{{ label.port or 631 }}"></label>
+        <label class="fld"><span class="lbl">Очередь CUPS</span>
+          <select name="label_mode">
+            <option value="cups_local" {% if label.mode=='cups_local' %}selected{% endif %}>На этом сервере (достаточно имени очереди)</option>
+            <option value="cups_remote" {% if label.mode=='cups_remote' %}selected{% endif %}>На другом компьютере (нужен IP и порт 631)</option>
+          </select></label>
         <label class="fld"><span class="lbl">Имя очереди *</span>
-          <input type="text" name="label_name" value="{{ label.name or '' }}" placeholder="напр. 3B-350B"></label>
+          <input type="text" name="label_name" value="{{ label.name or '' }}" placeholder="напр. label58"></label>
+        <label class="fld"><span class="lbl">IP компьютера с CUPS (для удалённой очереди)</span>
+          <input type="text" name="label_ip" value="{{ label.ip or '' }}" placeholder="192.168.x.x"></label>
+        <label class="fld"><span class="lbl">Порт CUPS (для удалённой очереди)</span>
+          <input type="number" name="label_port" value="{{ label.port or 631 }}"></label>
         <label class="fld"><span class="lbl">Media option (если драйвер требует)</span>
           <input type="text" name="label_media" value="{{ label.media or 'Custom.58x38mm' }}"></label>
       </div>
+      <p class="hint">Локальная очередь — принтер уже подключён к CUPS этого сервера, адрес знает сам CUPS
+        (<code>lpstat -v label58</code> → <code>socket://192.168.5.105:9100</code>), поэтому IP и порт здесь не нужны.
+        Порт 9100 — это raw-порт принтера, а не порт CUPS; указывать его в MSB не требуется.</p>
       <p class="muted" style="font-size:12px;margin:0">Размер этикетки зафиксирован: 58×38 мм. Масштабирование на А4 не используется.</p>
     </div>
     <div class="msb-form-card__foot">

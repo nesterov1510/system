@@ -290,7 +290,7 @@ async def set_printer_config(db: DbSession, body: dict):
 @router.put("/printer/label")
 async def set_label_printer_config(db: DbSession, body: dict):
     """Настроить CUPS-очередь для этикеток ремонта."""
-    from app.services.settings import set_setting
+    from app.services.settings import LABEL_PRINTER_MODES, set_setting
 
     try:
         port = int(body.get("port", 631))
@@ -300,18 +300,24 @@ async def set_label_printer_config(db: DbSession, body: dict):
     if not 1 <= port <= 65535:
         raise HTTPException(400, "Некорректный порт CUPS")
 
+    mode = str(body.get("mode", "cups_remote")).strip()
+    if mode not in LABEL_PRINTER_MODES:
+        raise HTTPException(400, f"Режим должен быть одним из: {', '.join(LABEL_PRINTER_MODES)}")
+
     value = {
         "ip": str(body.get("ip", "")).strip(),
         "port": port,
-        "mode": "cups_remote",
-        "name": str(body.get("name", "3B-350B")).strip(),
+        "mode": mode,
+        "name": str(body.get("name", "")).strip(),
         "width_mm": 58,
         "height_mm": 38,
         "media": str(body.get("media", "")).strip(),
     }
     if not value["name"]:
         raise HTTPException(400, "Укажите имя очереди принтера")
-    if not value["ip"]:
+    # В локальной очереди адрес принтера знает сам CUPS (`lpstat -v label58`),
+    # поэтому IP обязателен только для удалённого CUPS.
+    if mode == "cups_remote" and not value["ip"]:
         raise HTTPException(400, "Укажите IP компьютера с CUPS")
 
     await set_setting(

@@ -264,6 +264,53 @@ def print_via_remote_cups(pdf_bytes: bytes, printer: dict) -> None:
 
 
 # --------------------------------------------------------------------------
+# Режим cups_local: очередь в CUPS на этом же сервере.
+# --------------------------------------------------------------------------
+def _local_cups_command(printer: dict, pdf_path: str) -> list[str]:
+    """Команда печати в локальную очередь CUPS.
+
+    Сетевой принтер этикеток может быть подключён к CUPS самого сервера по
+    raw-сокету: `lpstat -v label58` → `socket://192.168.5.105:9100`. Адрес и
+    порт в этом случае знает CUPS, поэтому агенту нужно только имя очереди —
+    raw-порт 9100 не является портом CUPS и в настройках MSB не указывается.
+    """
+    name = str(printer.get("name") or "").strip()
+    if not name:
+        raise RuntimeError("Не задано имя локальной CUPS-очереди")
+    cmd = ["lp", "-d", name]
+    media = str(printer.get("media") or "").strip()
+    if media:
+        cmd.extend(["-o", f"media={media}"])
+    cmd.append(pdf_path)
+    return cmd
+
+
+def print_via_local_cups(pdf_bytes: bytes, printer: dict) -> None:
+    tmp = _write_temp_pdf(pdf_bytes)
+    try:
+        cmd = _local_cups_command(printer, tmp)
+        log("печать через локальный CUPS: " + " ".join(cmd[:-1]))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "неизвестная ошибка").strip()
+            available = _cups_printers()
+            hint = ", ".join(available) if available else "нет ни одной"
+            raise RuntimeError(
+                f"Локальный CUPS отклонил задание: {detail}. "
+                f"Доступные очереди: {hint}. "
+                f"Проверьте имя очереди командой `lpstat -p` на сервере."
+            )
+        response = (result.stdout or "").strip()
+        suffix = f": {response}" if response else ""
+        log(f"локальный CUPS принял задание{suffix}")
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
 # Режим ipp: прямая печать PDF через AirPrint/IPP (порт 631).
 # --------------------------------------------------------------------------
 def _ipp_attribute(tag: int, name: str, value: bytes) -> bytes:
@@ -376,6 +423,10 @@ def print_pdf(pdf_bytes: bytes, printer: dict | None) -> str:
         # Важно: этот режим не использует глобальный MSB_PRINT_CMD основного
         # принтера — адрес и очередь берутся из самого задания.
         print_via_remote_cups(pdf_bytes, config)
+    elif mode == "cups_local":
+        # Тоже в обход MSB_PRINT_CMD: иначе этикетка уехала бы на A4-принтер,
+        # потому что в проде там `lp -d EPSON_L3250 {file}`.
+        print_via_local_cups(pdf_bytes, config)
     else:
         print_via_os(pdf_bytes, config)
     return mode

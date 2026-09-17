@@ -7,13 +7,18 @@ Default keys:
 - brand: str
 - repair_statuses: list[str]
 - printer: основной принтер бланков
-- label_printer: удалённая CUPS-очередь для этикеток 58×38 мм
+- label_printer: CUPS-очередь для этикеток 58×38 мм
 """
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DEFAULT_REPAIR_STATUSES, Setting, map_status
 from app.services.sms import DEFAULT_PICKUP_REMINDER_TEXT
+
+# Как print-agent доставляет этикетку до принтера:
+#   cups_local  — очередь в CUPS на самом сервере (нужно только имя очереди);
+#   cups_remote — очередь расшарена CUPS на другом компьютере (ip + порт 631).
+LABEL_PRINTER_MODES = ("cups_local", "cups_remote")
 
 DEFAULT_SETTINGS: dict[str, dict] = {
     "storage_months": {
@@ -242,16 +247,26 @@ async def get_printer(db: AsyncSession) -> dict:
 
 
 async def get_label_printer(db: AsyncSession) -> dict:
-    """Настройки удалённой CUPS-очереди для этикеток ремонта.
+    """Настройки CUPS-очереди для этикеток ремонта.
 
-    Формат PDF и режим маршрутизации фиксированы требованиями этого принтера;
-    из БД настраиваются только адрес, порт, очередь и media option.
+    Формат PDF фиксирован требованиями принтера (58×38 мм). Из БД настраиваются
+    режим, адрес, порт, очередь и media option.
+
+    Режимы:
+      cups_local  — очередь в CUPS на том же сервере, где работает print-agent.
+                    Нужен только `name`; адрес принтера знает сам CUPS
+                    (`lpstat -v label58` → `socket://192.168.5.105:9100`).
+      cups_remote — очередь расшарена CUPS на другом компьютере: нужны
+                    `ip`, `port` (порт CUPS, 631) и `name`.
     """
     value = dict(DEFAULT_SETTINGS["label_printer"]["value"])
     saved = await get_setting(db, "label_printer")
     if saved:
         value.update(saved)
-    value.update(mode="cups_remote", width_mm=58, height_mm=38)
+    if value.get("mode") not in LABEL_PRINTER_MODES:
+        value["mode"] = "cups_remote"
+    # Размер этикетки не настраивается — он определён физическим носителем.
+    value.update(width_mm=58, height_mm=38)
     return value
 
 

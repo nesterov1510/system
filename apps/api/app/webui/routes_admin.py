@@ -693,12 +693,19 @@ async def admin_settings_label(request: Request):
         f = await request.form()
         name = (f.get("label_name") or "").strip()
         ip = (f.get("label_ip") or "").strip()
-        if not name or not ip:
-            return HTMLResponse("Укажите IP компьютера с CUPS и имя очереди принтера", status_code=400)
+        mode = (f.get("label_mode") or "cups_remote").strip()
+        if mode not in settings_svc.LABEL_PRINTER_MODES:
+            return HTMLResponse("Неизвестный режим печати этикеток", status_code=400)
+        if not name:
+            return HTMLResponse("Укажите имя очереди принтера", status_code=400)
+        # Для локальной очереди адрес принтера знает сам CUPS: там достаточно
+        # имени очереди, поэтому IP требуется только удалённому CUPS.
+        if mode == "cups_remote" and not ip:
+            return HTMLResponse("Укажите IP компьютера с CUPS", status_code=400)
         value = {
             "ip": ip,
             "port": int(_fnum(f.get("label_port"), 631) or 631),
-            "mode": "cups_remote",
+            "mode": mode,
             "name": name,
             "width_mm": 58,
             "height_mm": 38,
@@ -886,7 +893,10 @@ async def admin_settings_label_test(request: Request):
         from app.services.public_url import public_base_url
 
         printer = await settings_svc.get_label_printer(db)
-        if not printer.get("name") or not printer.get("ip"):
+        if not printer.get("name"):
+            return HTMLResponse("Сначала настройте CUPS-принтер этикеток (имя очереди)", status_code=400)
+        # Локальной очереди адрес не нужен: принтер к CUPS уже подключён.
+        if printer.get("mode") == "cups_remote" and not printer.get("ip"):
             return HTMLResponse("Сначала настройте CUPS-принтер этикеток (IP и имя очереди)", status_code=400)
         repair_url = f"{public_base_url(request)}/repairs"
         pdf = render_repair_label_pdf(

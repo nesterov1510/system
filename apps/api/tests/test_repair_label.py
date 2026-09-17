@@ -30,14 +30,64 @@ def test_label_printer_config_and_validation(client, admin_headers):
     assert config.status_code == 200
     assert config.json()["label_printer"] == LABEL_CONFIG
 
-    # Формат и маршрут нельзя случайно переключить с требуемых 58×38/CUPS.
-    normalized = client.put(
+    # Размер этикетки определён физическим носителем — его нельзя переключить случайно.
+    resized = client.put(
         "/api/admin/printer/label",
         headers=admin_headers,
-        json={**LABEL_CONFIG, "mode": "agent", "width_mm": 5, "height_mm": 5},
+        json={**LABEL_CONFIG, "width_mm": 5, "height_mm": 5},
     )
-    assert normalized.status_code == 200
-    assert normalized.json()["label_printer"] == LABEL_CONFIG
+    assert resized.status_code == 200
+    assert resized.json()["label_printer"] == LABEL_CONFIG
+
+    # Неизвестный режим отклоняется, а не молча подменяется рабочим.
+    bad_mode = client.put(
+        "/api/admin/printer/label",
+        headers=admin_headers,
+        json={**LABEL_CONFIG, "mode": "agent"},
+    )
+    assert bad_mode.status_code == 400, bad_mode.text
+
+
+def test_local_cups_queue_needs_no_ip(client, admin_headers):
+    """label58 подключён к CUPS самого сервера — адрес знает CUPS, не MSB.
+
+    `lpstat -v label58` → `socket://192.168.5.105:9100`: 9100 это raw-порт
+    принтера, а не порт CUPS, поэтому в настройках MSB он не указывается.
+    """
+    local_config = {
+        "mode": "cups_local",
+        "name": "label58",
+        "media": "Custom.58x38mm",
+    }
+    r = client.put("/api/admin/printer/label", headers=admin_headers, json=local_config)
+    assert r.status_code == 200, r.text
+    saved = r.json()["label_printer"]
+    assert saved["mode"] == "cups_local"
+    assert saved["name"] == "label58"
+    assert saved["width_mm"] == 58 and saved["height_mm"] == 38
+
+    config = client.get("/api/admin/printer", headers=admin_headers)
+    assert config.json()["label_printer"]["mode"] == "cups_local"
+
+    # Имя очереди обязательно и в локальном режиме.
+    no_name = client.put(
+        "/api/admin/printer/label", headers=admin_headers, json={"mode": "cups_local"}
+    )
+    assert no_name.status_code == 400, no_name.text
+
+    # Удалённый CUPS без адреса по-прежнему не принимается.
+    no_ip = client.put(
+        "/api/admin/printer/label",
+        headers=admin_headers,
+        json={"mode": "cups_remote", "name": "label58"},
+    )
+    assert no_ip.status_code == 400, no_ip.text
+
+    # Восстанавливаем прежнюю конфигурацию для остальных тестов.
+    restore = client.put(
+        "/api/admin/printer/label", headers=admin_headers, json=LABEL_CONFIG
+    )
+    assert restore.status_code == 200, restore.text
 
 
 @pytest.mark.parametrize("headers_fixture", ["admin_headers", "operator_headers"])
