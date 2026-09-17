@@ -301,12 +301,22 @@
       <h3 style="margin-top:18px">Фото</h3>
       <div class="rcard-photos">
         {% for ph in photos %}
-        <img src="{{ ph.object_key and ('/media/' + ph.object_key) or '' }}" alt="">
+        {# В сетке — миниатюра, по клику открывается оригинал. Если миниатюры
+           нет (HEIC без декодера), берём оригинал: фото важнее экономии. #}
+        <a href="/media/{{ ph.object_key }}" target="_blank" rel="noopener" class="rcard-photo">
+          <img src="/media/{{ ph.thumb_key or ph.object_key }}" alt="" loading="lazy" decoding="async">
+          {% if can.edit %}
+          <form method="post" action="/repairs/{{ repair.id }}/photos/{{ ph.id }}/delete"
+                onsubmit="return confirm('Удалить фото?')">
+            <button class="act" type="submit" title="Удалить фото">✕</button>
+          </form>
+          {% endif %}
+        </a>
         {% else %}<span class="muted">нет</span>{% endfor %}
       </div>
       {% if can.edit %}
       <form method="post" action="/repairs/{{ repair.id }}/photos" enctype="multipart/form-data" class="row rcard-add">
-        <input type="file" name="file" accept="image/*" capture="environment">
+        <input type="file" name="file" accept="image/*" capture="environment" required>
         <button class="btn sm" type="submit">Загрузить</button>
       </form>
       {% endif %}

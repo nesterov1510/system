@@ -523,7 +523,9 @@ async def repair_detail(request: Request, repair_id: uuid.UUID,
             .options(selectinload(Payment.operator)).order_by(Payment.paid_at)
         )).scalars().all()
         photos = (await db.execute(
-            select(RepairPhoto).where(RepairPhoto.repair_id == repair_id)
+            select(RepairPhoto)
+            .where(RepairPhoto.repair_id == repair_id)
+            .order_by(RepairPhoto.created_at, RepairPhoto.id)
         )).scalars().all()
         currency = await get_currency(db)
         statuses = await get_repair_statuses(db)
@@ -1260,15 +1262,48 @@ async def repair_upload_photo(request: Request, repair_id: uuid.UUID):
     db, user, redir = await _require(request)
     if redir:
         return redir
+    from fastapi import HTTPException
+
     try:
         form = await request.form()
         upload = form.get("file")
-        if upload is not None and hasattr(upload, "read"):
-            caption = form.get("caption")
+        # Пустая форма раньше молча редиректила: мастер жал «Загрузить» без
+        # файла и не получал ни фото, ни сообщения.
+        filename = getattr(upload, "filename", "") or ""
+        if upload is None or not hasattr(upload, "read") or not filename:
+            return HTMLResponse(
+                "Выберите файл фото перед загрузкой.", status_code=400
+            )
+        try:
             await repairs_api.upload_photo(
                 repair_id=repair_id, db=db, user=user,
-                file=upload, caption=caption,
+                file=upload, caption=form.get("caption"),
             )
+        except HTTPException as exc:
+            # API отвечает JSON — в браузере это выглядело как
+            # {"detail":"..."} вместо внятного сообщения.
+            return HTMLResponse(str(exc.detail), status_code=exc.status_code)
+        return RedirectResponse(f"/repairs/{repair_id}#log", status_code=303)
+    finally:
+        await db.close()
+
+
+@router.post("/repairs/{repair_id}/photos/{photo_id}/delete")
+async def repair_delete_photo(request: Request, repair_id: uuid.UUID, photo_id: uuid.UUID):
+    """Удаление ошибочно загруженного фото."""
+
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    from fastapi import HTTPException
+
+    try:
+        try:
+            await repairs_api.delete_photo(
+                repair_id=repair_id, photo_id=photo_id, db=db, user=user
+            )
+        except HTTPException as exc:
+            return HTMLResponse(str(exc.detail), status_code=exc.status_code)
         return RedirectResponse(f"/repairs/{repair_id}#log", status_code=303)
     finally:
         await db.close()

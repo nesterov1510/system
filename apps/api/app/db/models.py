@@ -388,6 +388,10 @@ class RepairPhoto(Base, TimestampMixin):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=gen_uuid)
     repair_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("repairs.id"), index=True)
     object_key: Mapped[str] = mapped_column(String(512))
+    # Уменьшенная копия для сетки в карточке: оригиналы с телефона весят
+    # единицы мегабайт, а показываются в ячейке ~76 px. Пусто, если миниатюру
+    # сделать не удалось (например, HEIC без декодера) — тогда берём оригинал.
+    thumb_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     caption: Mapped[str | None] = mapped_column(String(255), nullable=True)
     uploaded_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id"), nullable=True

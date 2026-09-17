@@ -45,6 +45,10 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     "repair_parts": {
         "is_manual": "BOOLEAN DEFAULT FALSE",
     },
+    "repair_photos": {
+        # Уменьшенная копия для сетки в карточке (см. models.RepairPhoto).
+        "thumb_key": "VARCHAR(512)",
+    },
     "equipment": {
         "storage_place": "VARCHAR(255)",
     },

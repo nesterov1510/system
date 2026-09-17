@@ -65,10 +65,12 @@ from app.services.reminders import (
 )
 from app.services.settings import get_repair_statuses, get_storage_months
 from app.services.storage import (
+    make_thumbnail,
     object_key_for,
     public_url,
     remove_objects,
     save_object,
+    thumb_key_for,
 )
 from app.ws.manager import manager
 
@@ -1855,9 +1857,18 @@ async def upload_photo(
 
     await save_object(data, object_key)
 
+    # Миниатюра для сетки в карточке. Если сделать не удалось (битый файл или
+    # HEIC без декодера) — не ошибка: карточка покажет оригинал.
+    thumb_key = None
+    thumb_bytes = make_thumbnail(data)
+    if thumb_bytes is not None:
+        thumb_key = thumb_key_for(object_key)
+        await save_object(thumb_bytes, thumb_key)
+
     photo = RepairPhoto(
         repair_id=repair.id,
         object_key=object_key,
+        thumb_key=thumb_key,
         caption=caption,
         uploaded_by=user.id,
     )
@@ -1880,3 +1891,40 @@ async def upload_photo(
         created_at=photo.created_at,
         url=public_url(photo.object_key),
     )
+
+
+@router.delete("/{repair_id}/photos/{photo_id}")
+async def delete_photo(
+    repair_id: uuid.UUID, photo_id: uuid.UUID, db: DbSession, user: CurrentUser
+):
+    """Убрать фото из ремонта (вместе с файлами на диске)."""
+    repair = await _get_repair_or_404(db, repair_id)
+    if not _can_access(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
+
+    photo = await db.get(RepairPhoto, photo_id)
+    if photo is None or photo.repair_id != repair_id:
+        raise HTTPException(404, "Фото не найдено")
+
+    # Снимаем и оригинал, и миниатюру; remove_objects сам защищает от выхода
+    # за пределы каталога загрузок.
+    removed = remove_objects([k for k in (photo.object_key, photo.thumb_key) if k])
+    repair.events.append(
+        RepairEvent(
+            repair_id=repair_id,
+            type="comment",
+            actor_id=user.id,
+            data={"message": f"Удалено фото (файлов снято: {removed})"},
+        )
+    )
+    await audit.record(
+        db,
+        audit.ACTION_PHOTO_REMOVE,
+        actor_id=user.id,
+        entity="repair",
+        entity_id=repair_id,
+        meta={"photo_id": str(photo_id), "files_removed": removed},
+    )
+    await db.delete(photo)
+    await db.commit()
+    return {"ok": True}
