@@ -105,6 +105,60 @@ class LocalCupsTests(unittest.TestCase):
         via_os.assert_not_called()
 
 
+class RawTsplTests(unittest.TestCase):
+    """Принтер этикеток вне CUPS: растр TSPL уходит напрямую в 192.168.8.75:9100."""
+
+    def setUp(self):
+        self.printer = {"mode": "raw_tspl", "ip": "192.168.8.75", "port": 9100}
+
+    def test_command_requires_host(self):
+        with self.assertRaisesRegex(RuntimeError, "адрес принтера"):
+            agent._raw_tspl_command({"mode": "raw_tspl", "ip": "", "port": 9100})
+
+    def test_command_rejects_bad_port(self):
+        with self.assertRaisesRegex(RuntimeError, "порт"):
+            agent._raw_tspl_command({**self.printer, "port": 0})
+
+    def test_sends_bytes_to_socket(self):
+        sent = {}
+
+        class FakeSock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def sendall(self, data):
+                sent["data"] = data
+
+            def shutdown(self, *a):
+                pass
+
+            def settimeout(self, *a):
+                pass
+
+            def recv(self, *a):
+                return b""
+
+        with patch.object(agent.socket, "create_connection") as cc:
+            cc.return_value = FakeSock()
+            agent.print_via_raw_tspl(b"SIZE 58 mm, 38 mm\r\n", self.printer)
+        self.assertEqual(sent["data"], b"SIZE 58 mm, 38 mm\r\n")
+        cc.assert_called_once_with(("192.168.8.75", 9100), timeout=15)
+
+    def test_raw_mode_bypasses_os_and_cups(self):
+        """TSPL не должен уйти ни в lp, ни в драйвер ОС."""
+        with patch.object(agent, "print_via_raw_tspl") as raw, patch.object(
+            agent, "print_via_os"
+        ) as via_os, patch.object(agent, "print_via_local_cups") as local:
+            mode = agent.print_pdf(b"BITMAP", self.printer)
+        self.assertEqual(mode, "raw_tspl")
+        raw.assert_called_once_with(b"BITMAP", self.printer)
+        via_os.assert_not_called()
+        local.assert_not_called()
+
+
 class TwoLocalQueuesTests(unittest.TestCase):
     """Бланки A4 и этикетки — две разные очереди одного CUPS сервера MSB.
 

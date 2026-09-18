@@ -172,19 +172,20 @@
       <div class="msb-form-grid">
         <label class="fld"><span class="lbl">Режим печати</span>
           <select name="label_mode">
-            <option value="cups_local" {% if label.mode=='cups_local' %}selected{% endif %}>На этом сервере (достаточно имени очереди)</option>
-            <option value="cups_remote" {% if label.mode=='cups_remote' %}selected{% endif %}>На другом компьютере (нужен IP и порт 631)</option>
+            <option value="raw_tspl" {% if label.mode=='raw_tspl' %}selected{% endif %}>Напрямую по сети (TSPL, порт 9100)</option>
+            <option value="cups_local" {% if label.mode=='cups_local' %}selected{% endif %}>CUPS на этом сервере (имя очереди)</option>
+            <option value="cups_remote" {% if label.mode=='cups_remote' %}selected{% endif %}>CUPS на другом компьютере (IP и порт 631)</option>
           </select></label>
-        <label class="fld"><span class="lbl">Имя очереди *</span>
+        <label class="fld"><span class="lbl">Адрес принтера / компьютера с CUPS</span>
+          <input type="text" name="label_ip" value="{{ label.ip or '' }}" placeholder="напр. 192.168.8.75"></label>
+        <label class="fld"><span class="lbl">Порт (9100 raw / 631 CUPS)</span>
+          <input type="number" name="label_port" value="{{ label.port or 9100 }}"></label>
+        <label class="fld"><span class="lbl">Имя очереди CUPS</span>
           <input type="text" name="label_name" value="{{ label.name or '' }}" placeholder="напр. 3B-350B"></label>
-        <label class="fld"><span class="lbl">IP компьютера с CUPS</span>
-          <input type="text" name="label_ip" value="{{ label.ip or '' }}" placeholder="192.168.x.x"></label>
-        <label class="fld"><span class="lbl">Порт CUPS</span>
-          <input type="number" name="label_port" value="{{ label.port or 631 }}"></label>
         <label class="fld"><span class="lbl">Media option (если драйвер требует)</span>
           <input type="text" name="label_media" value="{{ label.media or 'Custom.58x38mm' }}"></label>
       </div>
-      <p class="hint">Размер этикетки зафиксирован: 58×38 мм.</p>
+      <p class="hint">Размер этикетки зафиксирован: 58×38 мм. Режим «Напрямую по сети» шлёт растр TSPL в <code>адрес:9100</code>.</p>
     </div>
     <div class="msb-form-card__foot">
       <button class="btn sec" type="submit" formaction="/admin/settings/label/test" formnovalidate>🏷 Тестовая этикетка</button>

@@ -997,9 +997,322 @@ def render_blank_pdf(
     return buf.getvalue()
 
 
+# --------------------------------------------------------------------------
+# Этикетка 58×38 для TSPL-принтера (raw-сокет, порт 9100).
+#
+# Принтер этикеток не подключён к CUPS и не понимает PDF: он слушает
+# 192.168.8.75:9100 и читает язык TSPL. Поэтому этикетка собирается как
+# монохромный растр 203 dpi (8 точек на мм) и уходит командой BITMAP.
+#
+# Кириллица и туркменские буквы при этом не зависят от прошивки принтера —
+# в растр они попадают уже из DejaVu Sans, а QR рисуется тем же qrcode, что
+# и в PDF-версии этикетки.
+#
+# Полярность BITMAP в TSPL: 1 = белое (точка не печатается), 0 = чёрное.
+# Ровно так же упаковывает биты PIL в режиме "1", поэтому растр отдаётся
+# в принтер без инверсии.
+# --------------------------------------------------------------------------
+LABEL_DOTS_PER_MM = 8.0
+TSPL_SPEED = os.environ.get("MSB_LABEL_SPEED", "4")
+TSPL_DENSITY = os.environ.get("MSB_LABEL_DENSITY", "8")
+# DIRECTION по умолчанию не отправляем — принтер печатает в своём штатном
+# направлении. Если этикетка выходит зеркальной, задают MSB_LABEL_DIRECTION=1.
+TSPL_DIRECTION = os.environ.get("MSB_LABEL_DIRECTION", "").strip()
+TSPL_GAP_MM = float(os.environ.get("MSB_LABEL_GAP_MM", "2"))
+
+
+def _label_image(width_mm: float, height_mm: float):
+    """Чистый белый растр под этикетку (ширина кратна 8 точкам, как ждёт TSPL)."""
+    from PIL import Image, ImageDraw
+
+    width = int(round(float(width_mm) * LABEL_DOTS_PER_MM))
+    height = int(round(float(height_mm) * LABEL_DOTS_PER_MM))
+    width -= width % 8
+    image = Image.new("1", (max(8, width), max(8, height)), "white")
+    return image, ImageDraw.Draw(image)
+
+
+def _ttf(size: float, bold: bool = False):
+    """Кегль в точках растра: 8 точек = 1 мм."""
+    from PIL import ImageFont
+
+    regular, bold_path = _resolve_font_paths()
+    return ImageFont.truetype(bold_path if bold else regular, max(6, int(round(size))))
+
+
+def _fit(draw, text: str, font, max_width: int) -> str:
+    """Обрезать строку под ширину поля, добавив многоточие."""
+    text = str(text or "")
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+    while text and draw.textlength(text + "…", font=font) > max_width:
+        text = text[:-1]
+    return text + "…"
+
+
+def _shrink_to_fit(draw, text: str, *, bold: bool, size: float, min_size: float, max_width: int):
+    """Подобрать кегль, при котором строка целиком входит в поле (как в PDF)."""
+    while size > min_size:
+        font = _ttf(size, bold=bold)
+        if draw.textlength(str(text), font=font) <= max_width:
+            return font, str(text)
+        size -= 1
+    return _ttf(min_size, bold=bold), _fit(draw, str(text), _ttf(min_size, bold=bold), max_width)
+
+
+def _wrap(draw, text: str, font, max_width: int, max_lines: int) -> list[str]:
+    """Перенести текст по словам; обрезанный хвост помечается многоточием."""
+    normalized = " ".join(str(text or "—").split())
+    lines: list[str] = []
+    current = ""
+    for word in normalized.split(" "):
+        candidate = f"{current} {word}".strip()
+        if lines or current:
+            if draw.textlength(candidate, font=font) > max_width:
+                lines.append(current)
+                current = word
+                continue
+        current = candidate
+    if current:
+        lines.append(current)
+    if not lines:
+        lines = ["—"]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = _fit(draw, lines[-1].rstrip("…") + "…", font, max_width)
+    return [_fit(draw, line, font, max_width) for line in lines]
+
+
+def _qr_bitmap(data: str, size_dots: int):
+    """QR нужного размера в пикселях растра (без сглаживания — принтер 203 dpi)."""
+    from PIL import Image
+
+    image = Image.open(_qr_png(data, border=2)).convert("1")
+    return image.resize((max(8, size_dots), max(8, size_dots)), Image.NEAREST)
+
+
+def _label_text_block(draw, *, x: int, y: int, lines: list[str], font, leading: int) -> int:
+    for line in lines:
+        draw.text((x, y), line, font=font, fill="black")
+        y += leading
+    return y
+
+
+def render_repair_label_bitmap(
+    *,
+    repair_number: str,
+    client_name: str,
+    client_phone: str,
+    repair_url: str,
+    complectation: str = "",
+    defects: str = "",
+    width_mm: float = 58,
+    height_mm: float = 38,
+):
+    """Растр этикетки НА ТЕХНИКУ: те же данные, что и в PDF-версии."""
+    width_mm = min(100.0, max(30.0, float(width_mm)))
+    height_mm = min(100.0, max(20.0, float(height_mm)))
+    image, draw = _label_image(width_mm, height_mm)
+
+    margin = int(round(2 * LABEL_DOTS_PER_MM))
+    qr_size = int(round(min(22.0, height_mm - 8, width_mm * 0.42) * LABEL_DOTS_PER_MM))
+    qr_x = image.width - margin - qr_size
+    text_width = max(40, qr_x - margin - int(round(1.5 * LABEL_DOTS_PER_MM)))
+
+    image.paste(_qr_bitmap(repair_url, qr_size), (qr_x, margin))
+
+    number_font, number = _shrink_to_fit(
+        draw, f"№ {repair_number}", bold=True, size=17, min_size=12, max_width=text_width
+    )
+    draw.text((margin, margin - 2), number, font=number_font, fill="black")
+
+    name_font = _ttf(18, bold=True)
+    y = _label_text_block(
+        draw,
+        x=margin,
+        y=margin + 20,
+        lines=_wrap(draw, client_name, name_font, text_width, 2),
+        font=name_font,
+        leading=21,
+    )
+
+    caption_font = _ttf(12)
+    draw.text((margin, y + 2), "Телефон", font=caption_font, fill="black")
+    phone_font = _ttf(19, bold=True)
+    phone = _fit(draw, client_phone or "—", phone_font, text_width)
+    draw.text((margin, y + 17), phone, font=phone_font, fill="black")
+
+    # Отделяем контактную часть от данных, отмеченных оператором при приёмке.
+    separator_y = image.height - int(round(15.5 * LABEL_DOTS_PER_MM))
+    draw.line(
+        [(margin, separator_y), (image.width - margin, separator_y)],
+        fill="black",
+        width=1,
+    )
+
+    details_width = image.width - 2 * margin
+    detail_font = _ttf(12, bold=True)
+    y = separator_y + 4
+    for index, text in enumerate(
+        (
+            f"Комплектация: {complectation or '—'}",
+            f"Дефекты: {defects or '—'}",
+        )
+    ):
+        y = _label_text_block(
+            draw,
+            x=margin,
+            y=y,
+            lines=_wrap(draw, text, detail_font, details_width, 2),
+            font=detail_font,
+            leading=15,
+        )
+        if index == 0:
+            y += 3
+
+    footer_font = _ttf(11, bold=True)
+    footer = "MERYOSAB electronics"
+    draw.text(
+        ((image.width - draw.textlength(footer, font=footer_font)) / 2, image.height - 16),
+        footer,
+        font=footer_font,
+        fill="black",
+    )
+    return image
+
+
+def render_client_label_bitmap(
+    *,
+    repair_number: str,
+    client_url: str,
+    storage_months: int = 3,
+    width_mm: float = 58,
+    height_mm: float = 38,
+):
+    """Растр этикетки КЛИЕНТУ: QR на публичную страницу статуса."""
+    width_mm = min(100.0, max(30.0, float(width_mm)))
+    height_mm = min(100.0, max(20.0, float(height_mm)))
+    image, draw = _label_image(width_mm, height_mm)
+
+    margin = int(round(2 * LABEL_DOTS_PER_MM))
+    qr_size = int(round(min(24.0, height_mm - 6, width_mm * 0.44) * LABEL_DOTS_PER_MM))
+    qr_x = image.width - margin - qr_size
+    text_width = max(40, qr_x - margin - int(round(1.5 * LABEL_DOTS_PER_MM)))
+
+    image.paste(_qr_bitmap(client_url, qr_size), (qr_x, margin))
+
+    number_font, number = _shrink_to_fit(
+        draw, f"№ {repair_number}", bold=True, size=18, min_size=12, max_width=text_width
+    )
+    draw.text(
+        (margin, margin - 2),
+        number,
+        font=number_font,
+        fill="black",
+    )
+    lead_font = _ttf(14, bold=True)
+    draw.text((margin, margin + 20), "Ваш статус ремонта —", font=lead_font, fill="black")
+    scan_font = _ttf(17, bold=True)
+    draw.text((margin, margin + 38), "сканируйте QR", font=scan_font, fill="black")
+
+    hint_font = _ttf(11)
+    _label_text_block(
+        draw,
+        x=margin,
+        y=margin + 62,
+        lines=_wrap(
+            draw,
+            "На странице: этап ремонта, срок готовности, условия хранения "
+            "и юридическая информация сервисного центра.",
+            hint_font,
+            text_width,
+            4,
+        ),
+        font=hint_font,
+        leading=14,
+    )
+
+    storage_font = _ttf(12, bold=True)
+    _label_text_block(
+        draw,
+        x=margin,
+        y=image.height - int(round(7.5 * LABEL_DOTS_PER_MM)),
+        lines=_wrap(
+            draw,
+            f"Хранение: {storage_months} мес. после уведомления о готовности.",
+            storage_font,
+            image.width - 2 * margin,
+            2,
+        ),
+        font=storage_font,
+        leading=15,
+    )
+
+    footer_font = _ttf(11, bold=True)
+    footer = "MERYOSAB electronics"
+    draw.text(
+        ((image.width - draw.textlength(footer, font=footer_font)) / 2, image.height - 16),
+        footer,
+        font=footer_font,
+        fill="black",
+    )
+    return image
+
+
+def tspl_bitmap_payload(
+    bitmap,
+    *,
+    width_mm: float = 58,
+    height_mm: float = 38,
+    gap_mm: float = TSPL_GAP_MM,
+    speed: str = TSPL_SPEED,
+    density: str = TSPL_DENSITY,
+    direction: str = TSPL_DIRECTION,
+) -> bytes:
+    """Собрать TSPL-задание: заголовок + BITMAP с растром + PRINT.
+
+    Данные BITMAP идут сразу после запятой без перевода строки — так их ждёт
+    принтер. Ширина строки задаётся в байтах (точки / 8).
+    """
+    width_bytes = bitmap.width // 8
+    if width_bytes * 8 != bitmap.width:
+        raise ValueError("ширина растра должна быть кратна 8 точкам")
+
+    head = [
+        f"SIZE {float(width_mm):g} mm, {float(height_mm):g} mm",
+        f"GAP {float(gap_mm):g} mm, 0 mm",
+    ]
+    if str(direction).strip():
+        head.append(f"DIRECTION {str(direction).strip()}")
+    head.extend([f"SPEED {speed}", f"DENSITY {density}", "CLS"])
+    command = "\r\n".join(head) + "\r\n"
+    command += f"BITMAP 0,0,{width_bytes},{bitmap.height},0,"
+
+    return command.encode("ascii") + bitmap.tobytes() + b"\r\nPRINT 1,1\r\n"
+
+
+def render_repair_label_tspl(*, gap_mm: float = TSPL_GAP_MM, **kwargs) -> bytes:
+    """TSPL-задание этикетки на технику (вместо PDF для raw-принтера)."""
+    return tspl_bitmap_payload(
+        render_repair_label_bitmap(**kwargs),
+        width_mm=kwargs.get("width_mm", 58),
+        height_mm=kwargs.get("height_mm", 38),
+        gap_mm=gap_mm,
+    )
+
+
+def render_client_label_tspl(*, gap_mm: float = TSPL_GAP_MM, **kwargs) -> bytes:
+    """TSPL-задание этикетки клиенту (вместо PDF для raw-принтера)."""
+    return tspl_bitmap_payload(
+        render_client_label_bitmap(**kwargs),
+        width_mm=kwargs.get("width_mm", 58),
+        height_mm=kwargs.get("height_mm", 38),
+        gap_mm=gap_mm,
+    )
+
+
 def template_to_body(template: dict) -> str:
     return json.dumps(normalize_template(template), ensure_ascii=False)
-
 
 def body_to_template(body: str) -> dict:
     try:

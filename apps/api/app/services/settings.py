@@ -23,8 +23,10 @@ from app.services.sms import DEFAULT_PICKUP_REMINDER_TEXT
 #   agent       — драйвером ОС (SumatraPDF на Windows, иначе `lp` + MSB_PRINT_CMD);
 #   ipp         — напрямую по IPP/AirPrint на http://IP:631/ipp/print.
 PRINTER_MODES = ("cups_local", "cups_remote", "agent", "ipp")
-# У этикеток нет режима agent/ipp: PDF 58×38 печатается только очередью CUPS.
-LABEL_PRINTER_MODES = ("cups_local", "cups_remote")
+# Этикетки: raw_tspl — принтер не в CUPS, слушает порт 9100 и читает TSPL,
+# агент отправляет монохромный растр напрямую; cups_local/cups_remote — PDF в
+# очередь CUPS (если термопринтер подключён к CUPS).
+LABEL_PRINTER_MODES = ("raw_tspl", "cups_local", "cups_remote")
 
 # Обе очереди живут в CUPS самого сервера MSB (`lpstat -p`):
 #   office_printer_a4 — бланки A4;
@@ -34,6 +36,10 @@ LABEL_PRINTER_MODES = ("cups_local", "cups_remote")
 # Переопределяется env MSB_PRINTER_A4 / MSB_PRINTER_LABEL и в «Админ → Принтер».
 DEFAULT_A4_QUEUE = os.environ.get("MSB_PRINTER_A4", "office_printer_a4")
 DEFAULT_LABEL_QUEUE = os.environ.get("MSB_PRINTER_LABEL", "3B-350B")
+# Принтер этикеток не в CUPS: raw-сокет 9100, язык TSPL. Адрес/порт переопределяются
+# env MSB_LABEL_HOST / MSB_LABEL_PORT и в «Админ → Принтер».
+DEFAULT_LABEL_HOST = os.environ.get("MSB_LABEL_HOST", "192.168.8.75")
+DEFAULT_LABEL_PORT = int(os.environ.get("MSB_LABEL_PORT", "9100"))
 
 # Названия A4-принтера из прошлой схемы (Epson L3250 по USB на рабочей машине).
 # На сервере такой очереди нет, поэтому они считаются устаревшими.
@@ -135,21 +141,20 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Принтер бланков A4: очередь CUPS (cups_local|cups_remote|agent|ipp)",
     },
     "label_printer": {
-        # Очередь CUPS на сервере MSB для этикеток 58×38 мм. Адрес принтера
-        # знает сам CUPS (`lpstat -v 3B-350B`), поэтому IP не нужен: достаточно
-        # имени очереди. Если имя не совпадёт с реальным, печать остановится с
-        # внятной ошибкой и списком очередей — молча на другой принтер документ
-        # не уедет.
+        # Принтер этикеток 58×38 мм. По умолчанию — raw-сокет TSPL на 9100
+        # (принтер не в CUPS): нужны ip и порт. Для CUPS-режимов (cups_local /
+        # cups_remote) вместо адреса используется имя очереди.
         "value": {
-            "ip": "",
-            "port": 631,
-            "mode": "cups_local",
+            "ip": DEFAULT_LABEL_HOST,
+            "port": DEFAULT_LABEL_PORT,
+            "mode": "raw_tspl",
             "name": DEFAULT_LABEL_QUEUE,
             "width_mm": 58,
             "height_mm": 38,
+            "gap_mm": 2,
             "media": "Custom.58x38mm",
         },
-        "description": "CUPS-принтер этикеток 58×38 мм",
+        "description": "Принтер этикеток 58×38 мм (raw TSPL или CUPS)",
     },
     "sms_server": {
         # URL/логин/пароль задаются в «Админ → SMS» или через env. В коде
@@ -283,28 +288,36 @@ async def get_printer(db: AsyncSession) -> dict:
 
 
 async def get_label_printer(db: AsyncSession) -> dict:
-    """Настройки CUPS-очереди для этикеток ремонта.
-
-    Формат PDF фиксирован требованиями принтера (58×38 мм). Из БД настраиваются
-    режим, адрес, порт, очередь и media option.
+    """Настройки принтера этикеток 58×38 мм.
 
     Режимы:
+      raw_tspl    — принтер не в CUPS: слушает `ip:port` (9100) и читает TSPL.
+                    Агент собирает монохромный растр 58×38 и отправляет его
+                    напрямую в сокет; PDF и CUPS не участвуют.
       cups_local  — очередь в CUPS на том же сервере, где работает print-agent.
-                    Нужен только `name`; адрес принтера знает сам CUPS
-                    (`lpstat -v 3B-350B` → `socket://192.168.5.105:9100`).
+                    Нужен только `name`; адрес принтера знает сам CUPS.
       cups_remote — очередь расшарена CUPS на другом компьютере: нужны
                     `ip`, `port` (порт CUPS, 631) и `name`.
+
+    Размер этикетки фиксирован носителем (58×38 мм) и не настраивается.
     """
     value = dict(DEFAULT_SETTINGS["label_printer"]["value"])
     saved = await get_setting(db, "label_printer")
     if saved:
         value.update(saved)
     if value.get("mode") not in LABEL_PRINTER_MODES:
-        value["mode"] = "cups_local"
+        value["mode"] = "raw_tspl"
     if not str(value.get("name") or "").strip():
         value["name"] = DEFAULT_LABEL_QUEUE
+    # raw-принтеру нужна точка подключения; CUPS-режимам — имя очереди.
+    if value.get("mode") == "raw_tspl" and not str(value.get("ip") or "").strip():
+        value["ip"] = DEFAULT_LABEL_HOST
     # Размер этикетки не настраивается — он определён физическим носителем.
     value.update(width_mm=58, height_mm=38)
+    try:
+        value["gap_mm"] = min(10.0, max(0.0, float(value.get("gap_mm", 2))))
+    except (TypeError, ValueError):
+        value["gap_mm"] = 2.0
     return value
 
 

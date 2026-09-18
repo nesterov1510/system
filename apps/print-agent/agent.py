@@ -2,9 +2,10 @@
 """MSB print-agent — печать бланков и этикеток из очереди на принтер.
 
 Режимы (настраиваются в админке «Принтер»):
+  - mode=raw_tspl    : принтер этикеток не в CUPS — шлём растр TSPL напрямую в
+                       адрес:9100 (например 192.168.8.75:9100). PDF не нужен.
   - mode=cups_local  : очередь в CUPS на этом же сервере (нужно только имя).
-                       Так печатают оба принтера сервера MSB:
-                       `office_printer_a4` — бланки A4, `3B-350B` — этикетки.
+                       Так печатаются бланки A4: `office_printer_a4`.
   - mode=cups_remote : печать в CUPS-очередь на другом Linux-компьютере.
   - mode=agent       : печать через драйвер ОС (Windows/SumatraPDF, `MSB_PRINT_CMD`).
   - mode=ipp         : прямая печать по AirPrint/IPP на http://IP:631/ipp/print.
@@ -92,10 +93,10 @@ def complete(token: str, job_id: str, status: str, error: str | None = None) -> 
 # --------------------------------------------------------------------------
 # Сохранение PDF (всегда, как запасной вариант).
 # --------------------------------------------------------------------------
-def save_pdf(pdf_bytes: bytes, number: str) -> str:
+def save_pdf(pdf_bytes: bytes, number: str, ext: str = "pdf") -> str:
     os.makedirs(SAVE_DIR, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in number)
-    path = os.path.join(SAVE_DIR, f"{safe}.pdf")
+    path = os.path.join(SAVE_DIR, f"{safe}.{ext}")
     with open(path, "wb") as f:
         f.write(pdf_bytes)
     return path
@@ -270,13 +271,12 @@ def print_via_remote_cups(pdf_bytes: bytes, printer: dict) -> None:
 # Режим cups_local: очередь в CUPS на этом же сервере.
 # --------------------------------------------------------------------------
 def _local_cups_command(printer: dict, pdf_path: str) -> list[str]:
-    """Команда печати в локальную очередь CUPS.
+    """Команда печати в локальную очередь CUPS (бланки A4).
 
-    Оба принтера сервера MSB подключены к его же CUPS: `office_printer_a4`
-    печатает бланки A4, `3B-350B` — этикетки 58×38 (устройство очереди видно в
-    `lpstat -v 3B-350B`). Адрес и порт знает CUPS, поэтому агенту нужно только
-    имя очереди: raw-порт принтера (например 9100) не является портом CUPS и в
-    настройках MSB не указывается.
+    Очередь бланков `office_printer_a4` подключена к CUPS самого сервера MSB —
+    адрес и порт знает CUPS, поэтому агенту нужно только имя очереди. Принтер
+    этикеток в CUPS не участвует: он говорит по TSPL и печатается режимом
+    `raw_tspl` напрямую в 9100.
     """
     name = str(printer.get("name") or "").strip()
     if not name:
@@ -310,6 +310,41 @@ def print_via_local_cups(pdf_bytes: bytes, printer: dict) -> None:
     finally:
         try:
             os.unlink(tmp)
+        except OSError:
+            pass
+
+
+# --------------------------------------------------------------------------
+# Режим raw_tspl: принтер не в CUPS, слушает порт 9100 и читает TSPL.
+# --------------------------------------------------------------------------
+def _raw_tspl_command(printer: dict) -> tuple[str, int]:
+    host = str(printer.get("ip") or "").strip()
+    if not host:
+        raise RuntimeError("Не задан адрес принтера этикеток (TSPL)")
+    try:
+        port = int(printer.get("port", 9100))
+    except (TypeError, ValueError):
+        raise RuntimeError("Некорректный порт принтера этикеток")
+    if not 1 <= port <= 65535:
+        raise RuntimeError("Некорректный порт принтера этикеток")
+    return host, port
+
+
+def print_via_raw_tspl(data: bytes, printer: dict) -> None:
+    """Отправить готовое TSPL-задание напрямую в raw-сокет 9100.
+
+    API уже собрало монохромный растр и TSPL-заголовок (SIZE/GAP/BITMAP/PRINT),
+    агент лишь передаёт байты принтеру. CUPS и PDF здесь не участвуют.
+    """
+    host, port = _raw_tspl_command(printer)
+    log(f"печать TSPL напрямую: {host}:{port} ({len(data)} байт)")
+    with socket.create_connection((host, port), timeout=15) as sock:
+        sock.sendall(data)
+        # Дать принтеру дочитать поток перед закрытием соединения.
+        try:
+            sock.shutdown(socket.SHUT_WR)
+            sock.settimeout(2)
+            sock.recv(1024)
         except OSError:
             pass
 
@@ -421,7 +456,10 @@ def print_via_ipp(pdf_bytes: bytes, printer: dict) -> None:
 def print_pdf(pdf_bytes: bytes, printer: dict | None) -> str:
     config = printer or {}
     mode = config.get("mode", "agent")
-    if mode == "ipp":
+    if mode == "raw_tspl":
+        # TSPL-задание (растр) уходит напрямую в 9100 — CUPS и PDF не нужны.
+        print_via_raw_tspl(pdf_bytes, config)
+    elif mode == "ipp":
         print_via_ipp(pdf_bytes, config)
     elif mode == "cups_remote":
         # Важно: этот режим не использует глобальный MSB_PRINT_CMD основного
@@ -451,15 +489,21 @@ def main() -> None:
             for job in jobs:
                 payload = job.get("payload") or {}
                 b64 = payload.get("pdf_base64")
+                raw_b64 = payload.get("raw_base64")
                 printer = payload.get("printer")
-                if not b64:
-                    complete(token, job["id"], "failed", "no pdf in payload")
+                if not b64 and not raw_b64:
+                    complete(token, job["id"], "failed", "no document in payload")
                     continue
                 try:
-                    pdf = base64.b64decode(b64)
-                    # Всегда сохраняем PDF (запасной вариант).
-                    saved = save_pdf(pdf, f"job-{str(job['id'])[:8]}")
-                    mode = print_pdf(pdf, printer)
+                    if raw_b64:
+                        data = base64.b64decode(raw_b64)
+                        ext = "tspl"
+                    else:
+                        data = base64.b64decode(b64)
+                        ext = "pdf"
+                    # Всегда сохраняем документ (запасной вариант).
+                    saved = save_pdf(data, f"job-{str(job['id'])[:8]}", ext=ext)
+                    mode = print_pdf(data, printer)
                     complete(token, job["id"], "done")
                     log(f"задание {str(job['id'])[:8]} напечатано (режим {mode}) → {saved}")
                 except Exception as e:  # noqa: BLE001

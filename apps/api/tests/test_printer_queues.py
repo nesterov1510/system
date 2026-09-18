@@ -1,13 +1,14 @@
-"""Две очереди CUPS на сервере MSB: `office_printer_a4` и `3B-350B`.
+"""Печать на сервере MSB: бланки A4 в CUPS, этикетки — raw TSPL по сети.
 
-Оба принтера подключены к CUPS той же машины, где работают API и print-agent:
-бланки A4 печатаются в `office_printer_a4`, этикетки 58×38 — в `3B-350B`.
-Проверяем, что режим `cups_local` доступен и для бланков (раньше у A4-принтера
-были только agent/ipp), что задания не перепутаны между очередями и что
-устаревшие настройки (Epson L3250 через драйвер ОС, этикетки через удалённый
-CUPS) приводятся к локальным очередям при старте.
+Бланки A4 печатаются в локальную очередь CUPS `office_printer_a4`. Принтер
+этикеток не подключён к CUPS: он слушает 192.168.8.75:9100 и читает TSPL,
+поэтому этикетки собираются в монохромный растр и уходят напрямую в сокет
+(режим `raw_tspl`). Проверяем, что задания не перепутаны, что raw-режиму
+нужен адрес (а не имя очереди), и что миграция приводит устаревшие настройки
+(Epson L3250 через драйвер ОС, этикетки через CUPS) к актуальной схеме.
 """
 import asyncio
+import base64
 import uuid
 
 import pytest
@@ -19,6 +20,8 @@ from app.services.settings import get_label_printer, get_printer
 
 A4_QUEUE = "office_printer_a4"
 LABEL_QUEUE = "3B-350B"
+LABEL_HOST = "192.168.8.75"
+LABEL_PORT = 9100
 
 
 def _run(coro):
@@ -91,10 +94,12 @@ def test_defaults_point_at_server_queues():
 
     assert printer["mode"] == "cups_local"
     assert printer["name"] == A4_QUEUE
-    assert label["mode"] == "cups_local"
-    assert label["name"] == LABEL_QUEUE
-    # Локальной очереди адрес не нужен: его знает CUPS.
-    assert printer["ip"] == "" and label["ip"] == ""
+    assert printer["ip"] == ""  # локальной очереди адрес не нужен
+
+    # Этикетки — не в CUPS, а напрямую по сети (TSPL, 9100).
+    assert label["mode"] == "raw_tspl"
+    assert label["ip"] == LABEL_HOST
+    assert label["port"] == LABEL_PORT
 
 
 def test_local_a4_queue_saved_without_ip(client, admin_headers):
@@ -299,3 +304,119 @@ def test_migration_keeps_deliberate_settings(client, admin_headers):
     assert printer["mode"] == "ipp"
     assert label["name"] == "Zebra_58"
     assert label["mode"] == "cups_remote"
+
+
+def test_raw_tspl_requires_host_not_queue_name(client, admin_headers):
+    """Принтеру этикеток вне CUPS нужен адрес и порт 9100, имя очереди не важно."""
+    saved = client.put(
+        "/api/admin/printer/label",
+        headers=admin_headers,
+        json={"mode": "raw_tspl", "ip": LABEL_HOST, "port": LABEL_PORT},
+    )
+    assert saved.status_code == 200, saved.text
+    value = saved.json()["label_printer"]
+    assert value["mode"] == "raw_tspl"
+    assert value["ip"] == LABEL_HOST
+    assert value["port"] == LABEL_PORT
+
+    no_ip = client.put(
+        "/api/admin/printer/label", headers=admin_headers, json={"mode": "raw_tspl"}
+    )
+    assert no_ip.status_code == 400, no_ip.text
+
+    # CUPS-режиму по-прежнему нужно имя очереди, а не адрес.
+    cups_no_name = client.put(
+        "/api/admin/printer/label", headers=admin_headers, json={"mode": "cups_local"}
+    )
+    assert cups_no_name.status_code == 400, cups_no_name.text
+
+
+def test_label_job_is_tspl_raster_for_raw_printer(
+    client, admin_headers, operator_headers, city_id
+):
+    """В raw-режиме задание этикетки — растр TSPL (SIZE/BITMAP/PRINT), не PDF."""
+    r = client.put(
+        "/api/admin/printer/label",
+        headers=admin_headers,
+        json={"mode": "raw_tspl", "ip": LABEL_HOST, "port": LABEL_PORT},
+    )
+    assert r.status_code == 200, r.text
+
+    created = client.post(
+        "/api/repairs",
+        headers={**operator_headers, "Idempotency-Key": f"tspl-{uuid.uuid4().hex[:8]}"},
+        json={
+            "city_id": city_id,
+            "client": {
+                "full_name": "ТСПЛ Тест",
+                "phone": f"+993 65 {uuid.uuid4().int % 100000:05d}",
+                "consent_pdn": True,
+                "consent_storage": True,
+            },
+            "device_type": "ТВ",
+            "brand": "LG",
+            "model": "43UR",
+            "fault_client": "нет звука",
+        },
+    )
+    assert created.status_code == 201, created.text
+    repair_id = created.json()["id"]
+
+    label = client.post(f"/api/repairs/{repair_id}/print-label", headers=admin_headers)
+    assert label.status_code == 200, label.text
+    body = label.json()
+    assert body["document_format"] == "tspl"
+    assert "raw_base64" in body and "pdf_base64" not in body
+
+    tspl = base64.b64decode(body["raw_base64"])
+    assert tspl.startswith(b"SIZE 58 mm, 38 mm\r\n")
+    assert b"BITMAP 0,0,58,304,0," in tspl
+    assert tspl.endswith(b"PRINT 1,1\r\n")
+    # 58 байт на строку * 304 строк растра.
+    bitmap_len = (58 * 304)
+    assert len(tspl) > bitmap_len
+
+    job = next(
+        j
+        for j in client.get("/api/print/jobs", headers=admin_headers).json()
+        if j.get("repair_id") == repair_id
+    )
+    payload = job["payload"]
+    assert payload["printer"]["mode"] == "raw_tspl"
+    assert payload["printer"]["ip"] == LABEL_HOST
+    assert payload["printer"]["port"] == LABEL_PORT
+    assert payload["document_format"] == "tspl"
+
+
+def test_migration_converts_cups_label_to_raw_tspl(client, admin_headers):
+    """Этикетки из CUPS-режима переводятся на raw TSPL при старте."""
+    from app.db.datamigrate import MIGRATIONS, raw_tspl_label_v1
+    from app.services.settings import set_setting
+
+    assert MIGRATIONS["raw_tspl_label_v1"] is raw_tspl_label_v1
+
+    async def _arrange():
+        async with async_session_factory() as db:
+            await set_setting(
+                db, "label_printer",
+                {
+                    "ip": "", "port": 631, "mode": "cups_local", "name": LABEL_QUEUE,
+                    "width_mm": 58, "height_mm": 38, "media": "Custom.58x38mm",
+                },
+            )
+
+    async def _migrate():
+        async with async_session_factory() as db:
+            return await raw_tspl_label_v1(db)
+
+    _run(_arrange())
+    changed = _run(_migrate())
+    assert "label_printer" in changed, changed
+
+    _printer, label = _run(_read_settings())
+    assert label["mode"] == "raw_tspl"
+    assert label["ip"] == LABEL_HOST
+    assert label["port"] == LABEL_PORT
+
+    # Повторный запуск не трогает уже raw-настройку.
+    assert _run(_migrate()) == {"ok": True}

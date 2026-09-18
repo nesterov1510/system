@@ -217,11 +217,51 @@ async def align_cups_queues(db: AsyncSession) -> dict:
     return changed or {"ok": True}
 
 
+async def raw_tspl_label_v1(db: AsyncSession) -> dict:
+    """Принтер этикеток — не в CUPS: raw-сокет TSPL 192.168.8.75:9100.
+
+    Этикеточный принтер не подключён к CUPS: он слушает порт 9100 и читает
+    язык TSPL, поэтому режим `cups_local` из `cups_local_queues_v1` для него
+    неработоспособен. Переводим этикетки на `raw_tspl` с адресом из env
+    `MSB_LABEL_HOST`/`MSB_LABEL_PORT` (по умолчанию 192.168.8.75:9100). Бланки
+    A4 при этом остаются в очереди `office_printer_a4`.
+
+    Если администратор уже настроил `raw_tspl` вручную, не трогаем.
+    """
+    from app.services.settings import (
+        DEFAULT_LABEL_HOST,
+        DEFAULT_LABEL_PORT,
+        DEFAULT_LABEL_QUEUE,
+    )
+
+    label = await get_setting(db, "label_printer") or {}
+    if str(label.get("mode") or "") == "raw_tspl":
+        return {"ok": True}
+
+    value = dict(label)
+    value.update(
+        mode="raw_tspl",
+        ip=DEFAULT_LABEL_HOST,
+        port=DEFAULT_LABEL_PORT,
+        name=value.get("name") or DEFAULT_LABEL_QUEUE,
+        width_mm=58,
+        height_mm=38,
+        gap_mm=2,
+        media="Custom.58x38mm",
+    )
+    await set_setting(db, "label_printer", value, "Принтер этикеток 58×38 мм (raw TSPL)")
+    return {
+        "label_printer": f"{label.get('mode') or '—'}/{label.get('name') or '—'} → "
+        f"raw_tspl/{DEFAULT_LABEL_HOST}:{DEFAULT_LABEL_PORT}"
+    }
+
+
 # Реестр миграций: имя -> функция. Порядок не важен (каждая идемпотентна).
 MIGRATIONS = {
     "client_phone_norm_v2": reindex_client_phones,
     "repair_statuses_v2": migrate_repair_statuses,
     "cups_local_queues_v1": align_cups_queues,
+    "raw_tspl_label_v1": raw_tspl_label_v1,
 }
 
 

@@ -316,17 +316,17 @@ async def set_label_printer_config(db: DbSession, body: dict):
     """Настроить CUPS-очередь для этикеток ремонта."""
     from app.services.settings import LABEL_PRINTER_MODES, set_setting
 
-    try:
-        port = int(body.get("port", 631))
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Порт CUPS должен быть числом")
-
-    if not 1 <= port <= 65535:
-        raise HTTPException(400, "Некорректный порт CUPS")
-
-    mode = str(body.get("mode", "cups_local")).strip()
+    mode = str(body.get("mode", "raw_tspl")).strip()
     if mode not in LABEL_PRINTER_MODES:
         raise HTTPException(400, f"Режим должен быть одним из: {', '.join(LABEL_PRINTER_MODES)}")
+
+    default_port = 9100 if mode == "raw_tspl" else 631
+    try:
+        port = int(body.get("port", default_port))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Порт должен быть числом")
+    if not 1 <= port <= 65535:
+        raise HTTPException(400, "Некорректный порт")
 
     value = {
         "ip": str(body.get("ip", "")).strip(),
@@ -335,22 +335,34 @@ async def set_label_printer_config(db: DbSession, body: dict):
         "name": str(body.get("name", "")).strip(),
         "width_mm": 58,
         "height_mm": 38,
+        "gap_mm": _clamp_gap(body.get("gap_mm")),
         "media": str(body.get("media", "")).strip(),
     }
-    if not value["name"]:
-        raise HTTPException(400, "Укажите имя очереди принтера")
-    # В локальной очереди адрес принтера знает сам CUPS (`lpstat -v 3B-350B`),
-    # поэтому IP обязателен только для удалённого CUPS.
-    if mode == "cups_remote" and not value["ip"]:
-        raise HTTPException(400, "Укажите IP компьютера с CUPS")
+    if mode == "raw_tspl":
+        # Принтер не в CUPS: ему нужен адрес и raw-порт 9100, имя не важно.
+        if not value["ip"]:
+            raise HTTPException(400, "Укажите адрес принтера этикеток")
+    else:
+        # CUPS-режимам нужна очередь; удалённому CUPS — ещё и адрес.
+        if not value["name"]:
+            raise HTTPException(400, "Укажите имя очереди принтера")
+        if mode == "cups_remote" and not value["ip"]:
+            raise HTTPException(400, "Укажите IP компьютера с CUPS")
 
     await set_setting(
         db,
         "label_printer",
         value,
-        "CUPS-принтер этикеток ремонта",
+        "Принтер этикеток 58×38 мм (raw TSPL или CUPS)",
     )
     return {"label_printer": value}
+
+
+def _clamp_gap(value, default: float = 2.0) -> float:
+    try:
+        return min(10.0, max(0.0, float(value)))
+    except (TypeError, ValueError):
+        return default
 
 
 @router.post("/printer/test")
@@ -412,38 +424,49 @@ async def test_label_print(db: DbSession):
     """Поставить в очередь тестовую этикетку заданного физического размера."""
     import base64
 
-    from app.services.print import render_repair_label_pdf
+    from app.services.print import render_repair_label_pdf, render_repair_label_tspl
     from app.services.settings import get_label_printer
 
     printer = await get_label_printer(db)
-    if not printer.get("name"):
-        raise HTTPException(400, "Не настроен CUPS-принтер этикеток (имя очереди)")
-    # Локальной очереди адрес не нужен: принтер уже подключён к CUPS сервера.
-    if printer.get("mode") == "cups_remote" and not printer.get("ip"):
-        raise HTTPException(400, "Не задан IP компьютера с CUPS-принтером этикеток")
+    if printer.get("mode") == "raw_tspl":
+        if not str(printer.get("ip") or "").strip():
+            raise HTTPException(400, "Не задан адрес принтера этикеток (TSPL)")
+    else:
+        if not printer.get("name"):
+            raise HTTPException(400, "Не настроен CUPS-принтер этикеток (имя очереди)")
+        if printer.get("mode") == "cups_remote" and not printer.get("ip"):
+            raise HTTPException(400, "Не задан IP компьютера с CUPS-принтером этикеток")
 
     from app.services.public_url import public_base_url
 
     repair_url = f"{public_base_url()}/repairs"
-    try:
-        pdf = render_repair_label_pdf(
-            repair_number="ТЕСТ-58x38",
+    common = dict(
+        repair_number="ТЕСТ-58x38",
         client_name="Тестовый клиент",
         client_phone="+993 61 000000",
-        repair_url=repair_url,
         complectation="Пульт, Шнур питания",
         defects="Царапины, Линии на экране",
-            width_mm=printer.get("width_mm", 58),
-            height_mm=printer.get("height_mm", 38),
-        )
+        width_mm=printer.get("width_mm", 58),
+        height_mm=printer.get("height_mm", 38),
+    )
+    is_tspl = printer.get("mode") == "raw_tspl"
+    try:
+        if is_tspl:
+            data = render_repair_label_tspl(
+                **common, repair_url=repair_url, gap_mm=printer.get("gap_mm", 2)
+            )
+        else:
+            data = render_repair_label_pdf(**common, repair_url=repair_url)
     except FontNotAvailable as exc:
         raise HTTPException(503, str(exc))
+    document_key = "raw_base64" if is_tspl else "pdf_base64"
     job = PrintJob(
         repair_id=None,
         template_id="label-test",
         payload={
             "document_kind": "repair_label",
-            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "document_format": "tspl" if is_tspl else "pdf",
+            document_key: base64.b64encode(data).decode("ascii"),
             "printer": printer,
             "repair_url": repair_url,
         },

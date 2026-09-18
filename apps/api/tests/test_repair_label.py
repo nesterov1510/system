@@ -13,6 +13,7 @@ LABEL_CONFIG = {
     "name": "3B-350B",
     "width_mm": 58,
     "height_mm": 38,
+    "gap_mm": 2,
     "media": "Custom.58x38mm",
 }
 

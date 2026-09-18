@@ -704,25 +704,30 @@ async def admin_settings_label(request: Request):
         f = await request.form()
         name = (f.get("label_name") or "").strip()
         ip = (f.get("label_ip") or "").strip()
-        mode = (f.get("label_mode") or "cups_local").strip()
+        mode = (f.get("label_mode") or "raw_tspl").strip()
         if mode not in settings_svc.LABEL_PRINTER_MODES:
             return HTMLResponse("Неизвестный режим печати этикеток", status_code=400)
-        if not name:
-            return HTMLResponse("Укажите имя очереди принтера", status_code=400)
-        # Для локальной очереди адрес принтера знает сам CUPS: там достаточно
-        # имени очереди, поэтому IP требуется только удалённому CUPS.
-        if mode == "cups_remote" and not ip:
-            return HTMLResponse("Укажите IP компьютера с CUPS", status_code=400)
+        default_port = 9100 if mode == "raw_tspl" else 631
+        if mode == "raw_tspl":
+            # Принтер не в CUPS: нужен адрес и raw-порт 9100, имя не важно.
+            if not ip:
+                return HTMLResponse("Укажите адрес принтера этикеток", status_code=400)
+        else:
+            if not name:
+                return HTMLResponse("Укажите имя очереди принтера", status_code=400)
+            if mode == "cups_remote" and not ip:
+                return HTMLResponse("Укажите IP компьютера с CUPS", status_code=400)
         value = {
             "ip": ip,
-            "port": int(_fnum(f.get("label_port"), 631) or 631),
+            "port": int(_fnum(f.get("label_port"), default_port) or default_port),
             "mode": mode,
             "name": name,
             "width_mm": 58,
             "height_mm": 38,
+            "gap_mm": 2,
             "media": (f.get("label_media") or "Custom.58x38mm").strip(),
         }
-        await settings_svc.set_setting(db, "label_printer", value, "CUPS-принтер этикеток 58×38 мм")
+        await settings_svc.set_setting(db, "label_printer", value, "Принтер этикеток 58×38 мм (raw TSPL или CUPS)")
         return RedirectResponse("/admin/settings?section=printer&saved=1", status_code=303)
     finally:
         await db.close()
@@ -900,27 +905,39 @@ async def admin_settings_label_test(request: Request):
     if redir:
         return redir
     try:
-        from app.services.print import render_repair_label_pdf
+        from app.services.print import render_repair_label_pdf, render_repair_label_tspl
         from app.services.public_url import public_base_url
 
         printer = await settings_svc.get_label_printer(db)
-        if not printer.get("name"):
-            return HTMLResponse("Сначала настройте CUPS-принтер этикеток (имя очереди)", status_code=400)
-        # Локальной очереди адрес не нужен: принтер к CUPS уже подключён.
-        if printer.get("mode") == "cups_remote" and not printer.get("ip"):
-            return HTMLResponse("Сначала настройте CUPS-принтер этикеток (IP и имя очереди)", status_code=400)
+        is_tspl = printer.get("mode") == "raw_tspl"
+        if is_tspl:
+            if not str(printer.get("ip") or "").strip():
+                return HTMLResponse("Сначала укажите адрес принтера этикеток", status_code=400)
+        else:
+            if not printer.get("name"):
+                return HTMLResponse("Сначала настройте CUPS-принтер этикеток (имя очереди)", status_code=400)
+            if printer.get("mode") == "cups_remote" and not printer.get("ip"):
+                return HTMLResponse("Сначала настройте CUPS-принтер этикеток (IP и имя очереди)", status_code=400)
         repair_url = f"{public_base_url(request)}/repairs"
-        pdf = render_repair_label_pdf(
+        common = dict(
             repair_number="ТЕСТ-58x38", client_name="Тестовый клиент",
-            client_phone="+993 61 000000", repair_url=repair_url,
+            client_phone="+993 61 000000",
             complectation="Пульт, Шнур питания", defects="Царапины, Линии на экране",
             width_mm=printer.get("width_mm", 58), height_mm=printer.get("height_mm", 38),
         )
+        if is_tspl:
+            data = render_repair_label_tspl(
+                **common, repair_url=repair_url, gap_mm=printer.get("gap_mm", 2)
+            )
+        else:
+            data = render_repair_label_pdf(**common, repair_url=repair_url)
+        document_key = "raw_base64" if is_tspl else "pdf_base64"
         job = PrintJob(
             repair_id=None, template_id="label-test",
             payload={
                 "document_kind": "repair_label",
-                "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+                "document_format": "tspl" if is_tspl else "pdf",
+                document_key: base64.b64encode(data).decode("ascii"),
                 "printer": printer, "repair_url": repair_url,
             },
             status="queued",
