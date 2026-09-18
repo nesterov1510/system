@@ -10,7 +10,7 @@
 """
 import io
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from PIL import Image
@@ -208,17 +208,51 @@ def test_card_uses_thumbnails_with_lazy_loading(client, admin_headers, repair_id
     assert 'target="_blank"' in card
 
 
-def test_photos_are_ordered_by_upload_time(client, admin_headers, repair_id):
-    """Порядок в карточке — по времени загрузки, а не как вернёт БД."""
-    ids = []
+def test_card_orders_photos_by_created_at(client, admin_headers, repair_id):
+    """Порядок фото в карточке — по created_at, а не как строки легли в БД.
+
+    Загружаем три фото, а затем проставляем им created_at в обратном порядке.
+    Без order_by запрос вернул бы их в порядке вставки, и расхождение стало бы
+    видно — именно так тест ловит отсутствие сортировки.
+    """
+    import asyncio
+    import re
+    from datetime import datetime, timedelta
+
+    from sqlalchemy import select
+
+    from app.db.models import RepairPhoto
+    from app.db.session import async_session_factory
+
+    uploaded = []
     for _ in range(3):
         r = _upload(client, admin_headers, repair_id)
         assert r.status_code == 201, r.text
-        ids.append(r.json()["id"])
+        # url → /media/repairs/<id>/<stem>.png; в сетке карточки лежит
+        # миниатюра того же stem: /media/repairs/<id>/thumbs/<stem>.jpg
+        stem = PurePosixPath(r.json()["url"]).stem
+        uploaded.append(f"/media/repairs/{repair_id}/thumbs/{stem}.jpg")
 
-    got = [p["id"] for p in client.get(
-        f"/api/repairs/{repair_id}/photos", headers=admin_headers
-    ).json()]
-    # API отдаёт в порядке создания; карточка использует тот же критерий.
-    assert got == sorted(got, key=got.index)
-    assert len(got) == 3
+    async def _reverse_dates():
+        async with async_session_factory() as db:
+            rows = (await db.execute(
+                select(RepairPhoto).where(RepairPhoto.repair_id == uuid.UUID(repair_id))
+            )).scalars().all()
+            base = datetime(2026, 1, 1, 12, 0, 0)
+            # Последнее загруженное делаем самым ранним по created_at.
+            for offset, photo in enumerate(reversed(rows)):
+                photo.created_at = base + timedelta(minutes=offset)
+            await db.commit()
+
+    asyncio.run(_reverse_dates())
+
+    _login_webui(client)
+    card = client.get(f"/repairs/{repair_id}").text
+    got = re.findall(r'<img src="(/media/[^"]+)"', card)
+
+    assert len(got) == 3, f"ожидалось 3 фото в карточке, найдено {len(got)}"
+    assert got == list(reversed(uploaded)), (
+        "карточка должна показывать фото по created_at, а не в порядке вставки:\n"
+        f"  в разметке: {got}\n"
+        f"  ожидалось:  {list(reversed(uploaded))}"
+    )
