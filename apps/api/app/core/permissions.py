@@ -8,7 +8,9 @@
 Здесь — единственное место, где описано, кто что может. Роутеры обязаны
 использовать эти функции, а не писать проверки ролей по месту.
 """
-from app.db.models import UserRole
+from sqlalchemy import inspect
+
+from app.db.models import RepairStatus, UserRole
 
 ADMIN = UserRole.ADMIN.value
 MANAGER = UserRole.MANAGER.value
@@ -84,7 +86,7 @@ FEATURES: list[dict] = [
     {
         "key": "finish",
         "label": "Закрытие ремонтов",
-        "desc": "Переводить ремонт в «Готово к выдаче» и отправлять клиенту SMS.",
+        "desc": "Переводить ремонт в «Завершён» и отправлять клиенту SMS.",
         "roles": FINISH_ROLES,
     },
     {
@@ -188,16 +190,29 @@ def can_edit_stock_catalog(user) -> bool:
 def can_add_repair_part(user) -> bool:
     """Списать запчасть под конкретный ремонт.
 
-    Мастер может списывать деталь на ремонт, который ведёт сам, — но только
-    без указания своей цены (цену подставляет складская). Право на произвольную
-    цену есть у старших ролей.
+    Мастер может списывать деталь на ремонт, который ведёт сам, и указать к
+    ней свою цену (см. `can_set_repair_part_price`). Если цену не указал —
+    подставляется складская.
     """
     return has_any_role(user, *SENIOR_ROLES, MASTER, CALLCENTER)
 
 
-def can_set_repair_part_price(user) -> bool:
-    """Задать/переопределить цену запчасти в ремонте."""
-    return has_any_role(user, *SENIOR_ROLES)
+def can_set_repair_part_price(user, repair=None) -> bool:
+    """Задать/переопределить цену запчасти в ремонте.
+
+    Старшие роли — всегда. Мастер — в своём заказе: он ведёт ремонт и знает,
+    по какой цене ставил деталь, иначе ему приходилось бы звать оператора
+    из-за каждой позиции.
+
+    Чужой заказ мастеру по-прежнему недоступен: принадлежность проверяет
+    `can_access_repair`, поэтому произвольно менять себестоимость чужих
+    ремонтов он не может. Без переданного ремонта право мастеру не выдаётся.
+    """
+    if has_any_role(user, *SENIOR_ROLES):
+        return True
+    if repair is None:
+        return False
+    return is_master_only(user) and can_access_repair(user, repair)
 
 
 def can_remove_repair_part(user) -> bool:
@@ -218,12 +233,34 @@ def can_edit_device_info(user) -> bool:
 
 
 def can_assign_masters(user) -> bool:
-    """Назначать/менять мастеров и помощников на ремонт."""
+    """Назначать/менять мастеров и помощников на ЛЮБОЙ ремонт (админ/оператор)."""
     return has_any_role(user, *ASSIGN_ROLES) or has_feature(user, "assign")
 
 
+def can_assign_repair_masters(user, repair) -> bool:
+    """Может ли пользователь менять состав мастеров ЭТОГО ремонта.
+
+    Администратор и оператор — всегда. Мастер — в трёх случаях:
+
+    * ремонт свободен (`is_free_repair`): тогда он берёт его себе (и может
+      сразу добавить себе помощника);
+    * ремонт уже его (`is_own_repair`): назначен напрямую или через список
+      мастеров — тогда он добирает напарников и помощников, либо он сам
+      оформил приёмку и исполнитель ещё не назначен.
+
+    Чужой занятый ремонт мастер себе не забирает — в том числе чужую приёмку
+    без исполнителя (она занята принявшим её мастером) и тот заказ, который он
+    сам принял, но передал другому мастеру.
+    """
+    if can_assign_masters(user):
+        return True
+    if not has_any_role(user, MASTER):
+        return False
+    return is_own_repair(user, repair) or is_free_repair(repair)
+
+
 def can_finish_repair(user) -> bool:
-    """Перевести в «Готово к выдаче» и отправить клиенту SMS."""
+    """Перевести в «Завершён» и отправить клиенту SMS."""
     return has_any_role(user, *FINISH_ROLES) or has_feature(user, "finish")
 
 
@@ -237,9 +274,14 @@ def can_print(user, repair) -> bool:
     """Напечатать бланк/этикетку: мастер — свой ремонт либо своя приёмка в очереди."""
     if has_any_role(user, *PRINT_QUEUE_ROLES) or not has_any_role(user, MASTER):
         return True
-    if repair.master_id == user.id or any(
-        link.user_id == user.id for link in repair.masters
-    ):
+    if repair.master_id == user.id:
+        return True
+    # Список исполнителей должен быть подгружен вместе с ремонтом. Если связь
+    # не загружена, ленивое чтение в async-коде падает в MissingGreenlet —
+    # считаем ремонт чужим, чтобы проверка прав отвечала 403, а не 500.
+    if "masters" in inspect(repair).unloaded:
+        return False
+    if any(link.user_id == user.id for link in repair.masters):
         return True
     # Мастер принял технику сам, а исполнителя назначает администратор/оператор:
     # на этом этапе этикетку напечатать необходимо (её клеят на технику при
@@ -254,11 +296,11 @@ def can_print(user, repair) -> bool:
 
 
 def can_access_repair(user, repair) -> bool:
-    """Мастера видят только назначенные им ремонты; остальные роли — все.
+    """Может ли пользователь ИЗМЕНЯТЬ этот ремонт.
 
-    Намеренно строго: своя приёмка без назначения в карточку не пускает —
-    иначе у мастера в списке висят заказы, которые ему не отдавали. Этикетка
-    при этом печатается (см. `can_print`).
+    Мастер — только свои заказы (назначен напрямую или через список
+    мастеров); старшие роли — любые. Проверка используется мутациями:
+    смена статуса, финансы, запчасти, комментарии.
     """
     if not is_master_only(user):
         return True
@@ -266,6 +308,81 @@ def can_access_repair(user, repair) -> bool:
         return True
     # Ремонт могут вести несколько мастеров — доступ есть у каждого из них.
     return any(m.user_id == user.id for m in repair.masters)
+
+
+def can_view_repair(user, repair) -> bool:
+    """Может ли пользователь ОТКРЫТЬ ремонт (только чтение).
+
+    Мастер видит свои ремонты и свободные (которые можно взять себе) — те же
+    границы, что и у списка «Все ремонты» (см.
+    `services/repair_scope.master_visible`). Чужой ремонт с назначенным
+    исполнителем ему недоступен, в том числе тот, что он сам принял при
+    приёмке, но передал другому мастеру.
+
+    Старшие роли и колл-центр видят всё. Менять чужой ремонт по-прежнему
+    нельзя: мутации проверяются `can_access_repair`, а деньги/статусы/
+    назначения — своими функциями прав.
+    """
+    if not is_master_only(user):
+        return True
+    return is_own_repair(user, repair) or is_free_repair(repair)
+
+
+def _has_no_executor(repair) -> bool:
+    """У ремонта нет исполнителя: ни прямого назначения, ни списка мастеров."""
+    return repair.master_id is None and not list(getattr(repair, "masters", None) or [])
+
+
+def is_own_repair(user, repair) -> bool:
+    """Свой ли это ремонт для данного мастера.
+
+    Зеркалит `services/repair_scope.own()`: исполнитель (напрямую или через
+    список мастеров, в том числе помощник) **либо** собственная приёмка — но
+    только пока исполнитель не назначен. С назначением исполнителя заказ
+    становится заказом исполнителя, и у приёмщика он уже не «свой» (та же
+    граница, что у права печати своей приёмки — `can_print`).
+    """
+    if repair.master_id == user.id:
+        return True
+    if any(m.user_id == user.id for m in (repair.masters or [])):
+        return True
+    return repair.accepted_by == user.id and _has_no_executor(repair)
+
+
+def _accepted_by_master(repair) -> bool:
+    """Ремонт принят пользователем с основной ролью «мастер».
+
+    Роль приёмщика лежит в связанном пользователе, поэтому связь
+    `accepted_by_user` должна быть подгружена вместе с ремонтом
+    (`selectinload` в `_get_repair_or_404` и `_load_repair`). Если она не
+    загружена, определить принадлежность нельзя — считаем приёмку чужой, чтобы
+    не показать мастеру чужой заказ по ошибке.
+    """
+    if "accepted_by_user" in inspect(repair).unloaded:
+        return True
+    acceptor = repair.accepted_by_user
+    if acceptor is None:
+        return False
+    return acceptor.role == MASTER
+
+
+def is_free_repair(repair) -> bool:
+    """Свободен ли ремонт — может ли любой мастер взять его себе.
+
+    Зеркалит `services/repair_scope.free_to_take()` по уже загруженному объекту:
+    исполнителя нет, принял не мастер (приёмка оператора/админа или публичной
+    приёмки, ушедшая в общую очередь), ремонт не завершён и не выдан.
+
+    Чужая приёмка без исполнителя свободной НЕ считается: её принял другой
+    мастер, она уже занята им (он же печатает на неё этикетку).
+    """
+    if not _has_no_executor(repair):
+        return False
+    if _accepted_by_master(repair):
+        return False
+    if repair.status == RepairStatus.DONE or repair.issued_at is not None:
+        return False
+    return True
 
 
 def can_delete_repair(user) -> bool:

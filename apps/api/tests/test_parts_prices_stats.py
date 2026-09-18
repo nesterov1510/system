@@ -69,14 +69,25 @@ def test_operator_sees_work_pages(client, operator_headers):
     assert r2.status_code == 200
 
 
-def test_master_sees_only_own_repairs(client, master_headers, created_repair):
-    # created_repair без мастера -> мастер не должен его видеть.
-    own = client.get("/api/repairs", headers=master_headers)
+def test_master_sees_all_repairs_but_cannot_edit_foreign(
+    client, master_headers, created_repair
+):
+    """Список у мастера общий (свободные заказы надо видеть), правки — нет."""
+    own = client.get(
+        "/api/repairs", headers=master_headers, params={"page_size": 100}
+    )
     assert own.status_code == 200
-    assert all(x["id"] != created_repair["id"] for x in own.json()["items"])
+    assert any(x["id"] == created_repair["id"] for x in own.json()["items"])
 
+    # Карточку открыть можно — это чтение.
     get = client.get(f"/api/repairs/{created_repair['id']}", headers=master_headers)
-    assert get.status_code == 403
+    assert get.status_code == 200
+    # А вот менять чужой ремонт (диагноз, статус) мастеру нельзя.
+    assert client.patch(
+        f"/api/repairs/{created_repair['id']}",
+        headers=master_headers,
+        json={"fault_master": "не мой ремонт"},
+    ).status_code == 403
 
 
 def test_repairs_list_paginated_with_stage(client, admin_headers, created_repair):
@@ -90,7 +101,7 @@ def test_repairs_list_paginated_with_stage(client, admin_headers, created_repair
     assert body["page"] == 1
     assert body["page_size"] == 5
     assert body["items"], "ожидали как минимум один ремонт в «new»"
-    assert all(x["status"] == "Принято" for x in body["items"])
+    assert all(x["status"] == "Новый" for x in body["items"])
     assert len(body["items"]) <= 5, "page_size не соблюдён"
 
     # created_repair обязан быть в срезе «new», но не обязательно на первой

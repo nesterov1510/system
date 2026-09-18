@@ -88,6 +88,45 @@ def phone_digits(phone: str) -> str:
     return "".join(ch for ch in (phone or "") if ch.isdigit())
 
 
+# Коды операторов Туркменистана. Полный номер: +993 + код (2 цифры) + 6 цифр.
+TM_OPERATOR_CODES: tuple[str, ...] = (
+    "12", "60", "61", "62", "63", "64", "65", "71", "72",
+)
+TM_PHONE_FORMAT = "+993 + код оператора (12, 60, 61, 62, 63, 64, 65, 71, 72) + 6 цифр"
+
+
+def validate_tm_phone(phone: str) -> str | None:
+    """Проверить туркменский номер. ``None`` — номер верный, иначе текст ошибки.
+
+    Требуется ровно ``+993`` + код оператора из :data:`TM_OPERATOR_CODES` +
+    6 цифр. Местные сокращённые варианты («8 61 234567», «61 234567») тоже
+    проходят — они приводятся :func:`normalize_phone` к тому же виду, что и
+    полный номер. Текст ошибки написан для оператора приёмки и показывается
+    прямо в форме.
+    """
+    digits = phone_digits(phone)
+    if not digits:
+        return "Введите номер телефона"
+    norm = normalize_phone(phone)
+    if not norm.startswith(DEFAULT_COUNTRY_CODE):
+        return f"Номер должен начинаться с +{DEFAULT_COUNTRY_CODE}. Формат: {TM_PHONE_FORMAT}"
+    body = norm[len(DEFAULT_COUNTRY_CODE):]
+    if len(body) < 2:
+        return f"Введите код оператора. Формат: {TM_PHONE_FORMAT}"
+    code = body[:2]
+    if code not in TM_OPERATOR_CODES:
+        return (
+            f"Неверный код оператора «{code}». "
+            f"Допустимые коды: {', '.join(TM_OPERATOR_CODES)}"
+        )
+    rest = body[2:]
+    if len(rest) < 6:
+        return f"После кода оператора нужно ввести ещё {6 - len(rest)} цифр(ы) — всего 6 цифр"
+    if len(rest) > 6:
+        return f"После кода оператора должно быть ровно 6 цифр, а введено {len(rest)}"
+    return None
+
+
 def normalize_phone(phone: str) -> str:
     """Привести телефон к каноническому виду для уникального индекса `phone_norm`.
 

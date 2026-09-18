@@ -1,0 +1,120 @@
+"""Область видимости ремонтов для мастера.
+
+Мастер (только роль `master`, без старших ролей) видит:
+
+1. **свои** ремонты — где он исполнитель (назначен напрямую через
+   `Repair.master_id` или через список `repair_masters`, в том числе как
+   помощник), а также собственную приёмку — но только ПОКА исполнитель не
+   назначен;
+2. **свободные** — которые можно взять себе: исполнитель не назначен, принял
+   не мастер (приёмка оператора/админа или публичная приёмка), и ремонт ещё не
+   завершён и не выдан.
+
+Что намеренно НЕ видно мастеру:
+
+* чужие ремонты с назначенным исполнителем — в том числе те, что он сам принял
+  при приёмке, но передал другому мастеру: с назначением исполнителя заказ
+  становится заказом исполнителя;
+* чужая приёмка без исполнителя — её принял другой мастер, она уже занята им
+  (он же печатает на неё этикетку, см. `permissions.can_print`);
+* завершённые и выданные ремонты без исполнителя — брать там нечего.
+
+Условия вынесены сюда, чтобы список «Все ремонты», доска, бейджи этапов и
+сводка по деньгам фильтровались одинаково и не разъезжались.
+"""
+import uuid
+
+from sqlalchemy import and_, not_, or_, select
+
+from app.db.models import Repair, RepairMaster, RepairStatus, User, UserRole
+
+
+def assigned_to(user_id: uuid.UUID):
+    """Ремонт назначен мастеру напрямую или через список исполнителей."""
+    subq = select(RepairMaster.repair_id).where(RepairMaster.user_id == user_id)
+    return or_(Repair.master_id == user_id, Repair.id.in_(subq))
+
+
+def _no_executor():
+    """У ремонта нет исполнителя: ни прямого назначения, ни списка мастеров."""
+    return and_(
+        Repair.master_id.is_(None),
+        Repair.id.not_in(select(RepairMaster.repair_id)),
+    )
+
+
+def own(user_id: uuid.UUID):
+    """Свои ремонты: исполнитель (в т.ч. помощник) либо своя приёмка в очереди.
+
+    Приёмка принадлежит принявшему её мастеру, только пока исполнитель не
+    назначен. Как только заказ передали другому мастеру, он становится заказом
+    исполнителя — у приёмщика он больше не «свой» (та же граница, что у права
+    печати своей приёмки, см. `permissions.can_print`).
+    """
+    return or_(
+        assigned_to(user_id),
+        and_(Repair.accepted_by == user_id, _no_executor()),
+    )
+
+
+def _accepted_by_master():
+    """Ремонт принят пользователем, чья основная роль — мастер."""
+    return Repair.accepted_by.in_(
+        select(User.id).where(User.role == UserRole.MASTER.value)
+    )
+
+
+def free_to_take():
+    """Свободный ремонт — тот, который мастер вправе взять себе.
+
+    Исполнителя нет, принял не мастер (значит это приёмка оператора/админа или
+    публичной приёмки, ушедшая в общую очередь), и ремонт не завершён и не выдан.
+    """
+    return and_(
+        _no_executor(),
+        not_(_accepted_by_master()),
+        Repair.status != RepairStatus.DONE,
+        Repair.issued_at.is_(None),
+    )
+
+
+def master_visible(user_id: uuid.UUID):
+    """Что видит мастер: свои ремонты + свободные (взять себе)."""
+    return or_(own(user_id), free_to_take())
+
+
+async def repair_audience(db, repair: Repair) -> list[uuid.UUID]:
+    """Кому можно присылать live-события по этому ремонту.
+
+    Та же граница, что у списка «Все ремонты»: старшие роли видят всё, мастер —
+    только свои ремонты, плюс свободный заказ видят все (его можно взять себе).
+
+    Без этого `manager.broadcast` рассылал номер и статус каждого ремонта всем
+    подключённым сокетам, и мастер получал в live-ленту чужие заказы, которых
+    нет в его списке.
+    """
+    from app.core.permissions import is_master_only
+
+    executor_ids: set[uuid.UUID] = set()
+    if repair.master_id is not None:
+        executor_ids.add(repair.master_id)
+    rows = await db.execute(
+        select(RepairMaster.user_id).where(RepairMaster.repair_id == repair.id)
+    )
+    executor_ids.update(rows.scalars().all())
+
+    # Свободный заказ есть в списке у каждого мастера — ему событие положено.
+    is_free = (
+        await db.execute(select(Repair.id).where(Repair.id == repair.id, free_to_take()))
+    ).scalar_one_or_none() is not None
+
+    audience: list[uuid.UUID] = []
+    users = (await db.execute(select(User).where(User.active.is_(True)))).scalars().all()
+    for u in users:
+        if not is_master_only(u):
+            audience.append(u.id)  # старшие роли видят всё
+        elif is_free or u.id in executor_ids:
+            audience.append(u.id)  # свободный заказ либо свой
+        elif not executor_ids and u.id == repair.accepted_by:
+            audience.append(u.id)  # своя приёмка, пока исполнитель не назначен
+    return audience

@@ -1,0 +1,1034 @@
+"""Видимость ремонтов для мастера во вкладке «Все ремонты».
+
+Мастер видит только:
+* свои ремонты — назначенные напрямую или через список исполнителей;
+* свободные — без исполнителя, чтобы взять заказ себе.
+
+Чужие ремонты с назначенным исполнителем не показываются ни в таблице, ни на
+доске, ни в счётчиках этапов, и карточка такого ремонта не открывается.
+Старшие роли (администратор, оператор) видят всё.
+"""
+import re
+import uuid
+
+import pytest
+
+# Статические подсказки в атрибутах placeholder — не данные заказа.
+_PLACEHOLDER_RE = re.compile(r'placeholder="[^"]*"', re.S)
+
+
+def _intake(client, headers, city_id, key, phone="+993 61 500000", master_id=None,
+            name="Клиент Видимости"):
+    """Приёмка через API (как в остальных тестах приёмки)."""
+    body = {
+        "city_id": city_id,
+        "client": {"full_name": name, "phone": phone, "consent_pdn": True},
+        "device_type": "Телевизоры",
+        "brand": "LG",
+        "model": "32LK6100",
+        "fault_client": "нет изображения",
+    }
+    if master_id is not None:
+        body["master_id"] = master_id
+    return client.post(
+        "/api/repairs", headers={**headers, "Idempotency-Key": key}, json=body
+    )
+
+
+@pytest.fixture(scope="session")
+def two_masters(client, admin_headers):
+    out = {}
+    for key, name, email in (
+        ("vis-m1", "Мастер Первый", "vis-m1@msb.local"),
+        ("vis-m2", "Мастер Второй", "vis-m2@msb.local"),
+    ):
+        r = client.post(
+            "/api/admin/users", headers=admin_headers,
+            json={"name": name, "email": email, "password": "pass123", "role": "master"},
+        )
+        assert r.status_code == 201, r.text
+        out[key] = r.json()
+    return out
+
+
+def _login(client, email, password="pass123"):
+    r = client.post(
+        "/login",
+        data={"email": email, "password": password, "next_url": "/repairs"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and "/login" not in r.headers["location"]
+    return dict(r.cookies)
+
+
+def _assign(client, operator_headers, repair_id, master_id):
+    r = client.patch(
+        f"/api/repairs/{repair_id}", headers=operator_headers,
+        json={"master_ids": [master_id]},
+    )
+    assert r.status_code == 200, r.text
+
+
+def _table_ids(client, cookies):
+    """id ремонтов, показанных на странице «Все ремонты».
+
+    Номера в таблице нет (колонки: дата, техника, неисправность…), поэтому
+    проверяем по ссылкам на карточки.
+    """
+    r = client.get("/repairs", cookies=cookies)
+    assert r.status_code == 200
+    return set(re.findall(r"/repairs/([0-9a-f-]{36})", r.text))
+
+
+def test_master_table_shows_own_and_unassigned(
+    client, operator_headers, two_masters, city_id
+):
+    mine = _intake(client, operator_headers, city_id, "vis-1", phone="+993 61 500001")
+    assert mine.status_code == 201
+    foreign = _intake(client, operator_headers, city_id, "vis-2", phone="+993 61 500002")
+    assert foreign.status_code == 201
+    free = _intake(client, operator_headers, city_id, "vis-3", phone="+993 61 500003")
+    assert free.status_code == 201
+
+    _assign(client, operator_headers, mine.json()["id"], two_masters["vis-m1"]["id"])
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+
+    cookies = _login(client, "vis-m1@msb.local")
+    shown = _table_ids(client, cookies)
+
+    assert mine.json()["id"] in shown, "свой ремонт не показан"
+    assert free.json()["id"] in shown, "свободный ремонт не показан"
+    assert foreign.json()["id"] not in shown, "показан чужой назначенный ремонт"
+
+
+def test_master_board_shows_own_and_unassigned(
+    client, operator_headers, two_masters, city_id
+):
+    mine = _intake(client, operator_headers, city_id, "vis-4", phone="+993 61 500004")
+    foreign = _intake(client, operator_headers, city_id, "vis-5", phone="+993 61 500005")
+    free = _intake(client, operator_headers, city_id, "vis-6", phone="+993 61 500006")
+    _assign(client, operator_headers, mine.json()["id"], two_masters["vis-m1"]["id"])
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+
+    cookies = _login(client, "vis-m1@msb.local")
+    r = client.get("/repairs?view=board", cookies=cookies)
+    assert r.status_code == 200
+    shown = set(re.findall(r"/repairs/([0-9a-f-]{36})", r.text))
+    assert mine.json()["id"] in shown
+    assert free.json()["id"] in shown
+    assert foreign.json()["id"] not in shown
+
+
+def test_master_can_open_unassigned_and_take_it(
+    client, operator_headers, two_masters, city_id
+):
+    free = _intake(client, operator_headers, city_id, "vis-7", phone="+993 61 500007")
+    rid = free.json()["id"]
+    cookies = _login(client, "vis-m1@msb.local")
+
+    assert client.get(f"/repairs/{rid}", cookies=cookies).status_code == 200
+
+    r = client.post(
+        f"/repairs/{rid}/master-action",
+        data={"action": "master", "user_id": two_masters["vis-m1"]["id"], "next": "/repairs"},
+        cookies=cookies,
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, (r.status_code, r.text[:200])
+
+    # ремонт стал своим — остаётся в списке первого мастера
+    assert rid in _table_ids(client, cookies)
+
+    # ремонт занят — значит из списка второго мастера он пропадает
+    cookies2 = _login(client, "vis-m2@msb.local")
+    assert rid not in _table_ids(client, cookies2)
+
+
+def test_master_cannot_open_foreign_assigned_card(
+    client, operator_headers, two_masters, city_id
+):
+    foreign = _intake(client, operator_headers, city_id, "vis-8", phone="+993 61 500008")
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+
+    cookies = _login(client, "vis-m1@msb.local")
+    assert client.get(f"/repairs/{foreign.json()['id']}", cookies=cookies).status_code == 403
+
+
+def test_helper_also_sees_the_repair(client, operator_headers, two_masters, city_id):
+    """Назначенный помощником мастер видит ремонт как свой."""
+    repair = _intake(client, operator_headers, city_id, "vis-9", phone="+993 61 500009")
+    r = client.patch(
+        f"/api/repairs/{repair.json()['id']}", headers=operator_headers,
+        json={"helper_ids": [two_masters["vis-m1"]["id"]]},
+    )
+    assert r.status_code == 200, r.text
+
+    cookies = _login(client, "vis-m1@msb.local")
+    assert repair.json()["id"] in _table_ids(client, cookies)
+
+
+def test_senior_roles_still_see_everything(
+    client, operator_headers, admin_headers, two_masters, city_id
+):
+    a = _intake(client, operator_headers, city_id, "vis-10", phone="+993 61 500010")
+    b = _intake(client, operator_headers, city_id, "vis-11", phone="+993 61 500011")
+    _assign(client, operator_headers, a.json()["id"], two_masters["vis-m1"]["id"])
+    _assign(client, operator_headers, b.json()["id"], two_masters["vis-m2"]["id"])
+
+    ids = {x["id"] for x in client.get(
+        "/api/repairs", headers=operator_headers, params={"stage": "all", "page_size": 100}
+    ).json()["items"]}
+    assert {a.json()["id"], b.json()["id"]} <= ids
+
+    admin_ids = {x["id"] for x in client.get(
+        "/api/repairs", headers=admin_headers, params={"stage": "all", "page_size": 100}
+    ).json()["items"]}
+    assert {a.json()["id"], b.json()["id"]} <= admin_ids
+
+
+def test_master_search_does_not_leak_foreign_repairs(
+    client, operator_headers, two_masters, city_id
+):
+    """Поиск тоже ограничен: по номеру чужой ремонт не находится."""
+    foreign = _intake(client, operator_headers, city_id, "vis-12", phone="+993 61 500012")
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+
+    r = client.get(
+        "/api/repairs",
+        headers={
+            "Authorization": "Bearer " + client.post(
+                "/api/auth/login",
+                json={"email": "vis-m1@msb.local", "password": "pass123"},
+            ).json()["access_token"]
+        },
+        params={"q": foreign.json()["number"], "stage": "all", "page_size": 50},
+    )
+    assert r.status_code == 200
+    assert foreign.json()["id"] not in {x["id"] for x in r.json()["items"]}
+
+
+def _bearer(client, email):
+    token = client.post(
+        "/api/auth/login", json={"email": email, "password": "pass123"}
+    ).json()["access_token"]
+    return {"Authorization": "Bearer " + token}
+
+
+def _api_ids(client, headers):
+    return {
+        x["id"] for x in client.get(
+            "/api/repairs", headers=headers, params={"stage": "all", "page_size": 100}
+        ).json()["items"]
+    }
+
+
+def test_own_intake_without_executor_is_not_free_for_others(
+    client, operator_headers, two_masters, city_id
+):
+    """Приёмка, которую мастер принял на себя, занята им — не «свободная».
+
+    Исполнитель при этом не назначен, поэтому раньше ремонт уходил в общую
+    очередь и второй мастер видел чужую работу.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-13", phone="+993 61 500013")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert r.json()["master_id"] is None, "исполнитель не назначен"
+
+    # Принимающий видит свой ремонт.
+    assert rid in _table_ids(client, _login(client, "vis-m1@msb.local"))
+    # Второй мастер — нет: приёмка чужая.
+    assert rid not in _table_ids(client, _login(client, "vis-m2@msb.local"))
+    assert rid not in _api_ids(client, _bearer(client, "vis-m2@msb.local"))
+    # Старшая роль видит всё.
+    assert rid in _api_ids(client, operator_headers)
+
+
+def test_finished_unassigned_repair_is_not_in_master_list(
+    client, operator_headers, two_masters, city_id
+):
+    """Завершённый ремонт без исполнителя брать нечего — он не в очереди."""
+    r = _intake(client, operator_headers, city_id, "vis-14", phone="+993 61 500014")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    done = client.patch(
+        f"/api/repairs/{rid}", headers=operator_headers, json={"status": "Завершён"}
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "Завершён"
+
+    for email in ("vis-m1@msb.local", "vis-m2@msb.local"):
+        assert rid not in _table_ids(client, _login(client, email))
+        assert rid not in _api_ids(client, _bearer(client, email))
+    assert rid in _api_ids(client, operator_headers)
+
+
+def test_master_cannot_take_another_masters_intake(
+    client, operator_headers, two_masters, city_id
+):
+    """Чужую приёмку без исполнителя второй мастер себе не переписывает.
+
+    Ремонта нет в его списке, и прямое действие «Взять себе» тоже закрыто:
+    приёмку оформил другой мастер, заказ уже занят им.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-15", phone="+993 61 500015")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    cookies2 = _login(client, "vis-m2@msb.local")
+
+    action = client.post(
+        f"/repairs/{rid}/master-action",
+        data={
+            "action": "master",
+            "user_id": two_masters["vis-m2"]["id"],
+            "next": "/repairs",
+        },
+        cookies=cookies2,
+        follow_redirects=False,
+    )
+    assert action.status_code == 403, (action.status_code, action.text[:200])
+
+    # исполнитель не сменился — приёмка осталась у того, кто её оформил
+    current = client.get(f"/api/repairs/{rid}", headers=operator_headers).json()
+    assert current["master_id"] is None, current["master_id"]
+
+    # сам приёмщик по-прежнему может назначить себя исполнителем
+    own_action = client.post(
+        f"/repairs/{rid}/master-action",
+        data={
+            "action": "master",
+            "user_id": two_masters["vis-m1"]["id"],
+            "next": "/repairs",
+        },
+        cookies=_login(client, "vis-m1@msb.local"),
+        follow_redirects=False,
+    )
+    assert own_action.status_code == 303, (own_action.status_code, own_action.text[:200])
+    after = client.get(f"/api/repairs/{rid}", headers=operator_headers).json()
+    assert after["master_id"] == two_masters["vis-m1"]["id"], after["master_id"]
+
+
+def test_free_check_fails_closed_without_loaded_acceptor():
+    """Без подгруженного приёмщика ремонт не считается свободным.
+
+    Роль приёмщика живёт в связанном пользователе. Если связь не загружена,
+    принадлежность определить нельзя — правило обязано закрыть доступ, а не
+    открыть чужой заказ. Во всех боевых путях связь подгружена
+    (`selectinload` в `_get_repair_or_404` и `_load_repair`), поэтому свободные
+    ремонты из общей очереди остаются доступны (проверено HTTP-тестами выше).
+    """
+    from app.core.permissions import (
+        can_assign_repair_masters,
+        can_view_repair,
+        is_free_repair,
+    )
+    from app.db.models import Repair, User
+
+    # id задаём явно: у неприсоединённого к сессии объекта первичный ключ ещё
+    # None, и сравнение accepted_by == user.id совпало бы как None == None.
+    acceptor = User(id=uuid.uuid4(), name="Мастер", email="u@msb.local",
+                    role="master", extra_permissions=[])
+    other = User(id=uuid.uuid4(), name="Другой", email="o@msb.local",
+                 role="master", extra_permissions=[])
+    repair = Repair(
+        id=uuid.uuid4(), client_id=uuid.uuid4(), device_type="Телевизоры",
+        brand="LG", model="43", fault_client="нет звука", status="Новый",
+        accepted_by=acceptor.id,
+    )
+    repair.masters = []
+    assert acceptor.id != other.id
+
+    assert is_free_repair(repair) is False
+    assert can_view_repair(other, repair) is False
+    assert can_assign_repair_masters(other, repair) is False
+
+
+def test_intake_handed_to_another_master_is_not_own_anymore(
+    client, operator_headers, two_masters, city_id
+):
+    """Приёмка, переданная другому мастеру, у приёмщика больше не «своя».
+
+    Мастер А оформил приёмку, администратор назначил исполнителем мастера Б,
+    ремонт завершили и не оплатили. Раньше `own()` считал ремонт своим по
+    `accepted_by` безусловно — и приёмщик видел завершённый неоплаченный
+    заказ другого мастера.
+    """
+    m1 = _bearer(client, "vis-m1@msb.local")
+    r = _intake(client, m1, city_id, "vis-16", phone="+993 61 500016")
+    assert r.status_code == 201, r.text
+    rid = r.json()["id"]
+    assert r.json()["master_id"] is None
+
+    _assign(client, operator_headers, rid, two_masters["vis-m2"]["id"])
+    done = client.patch(
+        f"/api/repairs/{rid}", headers=operator_headers, json={"status": "Завершён"}
+    )
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == "Завершён"
+    assert done.json()["paid"] is False
+
+    # исполнитель видит свой заказ
+    assert rid in _table_ids(client, _login(client, "vis-m2@msb.local"))
+    # приёмщик — уже нет: заказ передан другому мастеру
+    assert rid not in _table_ids(client, _login(client, "vis-m1@msb.local"))
+    assert rid not in _api_ids(client, m1)
+    assert client.get(
+        f"/repairs/{rid}", cookies=_login(client, "vis-m1@msb.local")
+    ).status_code == 403
+
+
+def test_master_cannot_open_callcenter_queue(client, two_masters):
+    """Очередь колл-центра мастеру недоступна ни в API, ни на веб-странице.
+
+    Веб-страница `/callcenter` звала `_queue()` напрямую, минуя проверку прав,
+    которая есть у `/api/callcenter/queue`, — и отдавала мастеру все ремонты
+    сервиса в обход области видимости «Все ремонты».
+    """
+    cookies = _login(client, "vis-m1@msb.local")
+    assert client.get("/callcenter", cookies=cookies).status_code == 403
+
+    api = client.get("/api/callcenter/queue", headers=_bearer(client, "vis-m1@msb.local"))
+    assert api.status_code == 403, api.text[:200]
+
+
+def test_master_client_list_is_scoped(client, operator_headers, two_masters, city_id):
+    """Список клиентов мастеру — только те, у кого есть доступные ему ремонты.
+
+    Эндпоинт `/api/repairs/clients/list` отдавал мастеру всю базу клиентов
+    сервиса с телефонами и счётчиками чужих ремонтов, хотя страница `/clients`
+    была ограничена. Границы должны совпадать со списком «Все ремонты».
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-17", phone="+993 61 500017")
+    assert foreign.status_code == 201, foreign.status_code
+    _assign(client, operator_headers, foreign.json()["id"], two_masters["vis-m2"]["id"])
+    foreign_client = foreign.json()["client_id"]
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+    listed = {x["id"] for x in client.get("/api/repairs/clients/list", headers=m1).json()}
+    assert foreign_client not in listed, "чужой клиент виден в списке"
+
+    # счётчик ремонтов у видимого клиента считает только доступные мастеру
+    own = _intake(client, operator_headers, city_id, "vis-18", phone="+993 61 500018")
+    assert own.status_code == 201, own.text
+    _assign(client, operator_headers, own.json()["id"], two_masters["vis-m1"]["id"])
+    listed = {x["id"]: x["repairs_count"] for x in client.get(
+        "/api/repairs/clients/list", headers=m1).json()}
+    assert own.json()["client_id"] in listed
+
+    # старшая роль видит всех клиентов
+    admin_listed = {x["id"] for x in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    assert foreign_client in admin_listed
+
+
+def test_master_client_lookup_returns_only_visible_repairs(
+    client, operator_headers, two_masters, city_id
+):
+    """Поиск клиента по телефону не отдаёт мастеру чужие заказы этого клиента.
+
+    Проверены обе ветки: единственный клиент (список его ремонтов) и несколько
+    совпадений (счётчики ремонтов у кандидатов).
+    """
+    # два ремонта одного клиента: один назначен vis-m1, другой — vis-m2
+    a = _intake(client, operator_headers, city_id, "vis-19", phone="+993 61 500019")
+    assert a.status_code == 201, a.text
+    b = _intake(client, operator_headers, city_id, "vis-20", phone="+993 61 500019")
+    assert b.status_code == 201, b.text
+    _assign(client, operator_headers, a.json()["id"], two_masters["vis-m1"]["id"])
+    _assign(client, operator_headers, b.json()["id"], two_masters["vis-m2"]["id"])
+
+    # клиент, у которого нет ни одного доступного vis-m1 ремонта
+    hidden = _intake(client, operator_headers, city_id, "vis-21", phone="+993 61 509977")
+    assert hidden.status_code == 201, hidden.text
+    _assign(client, operator_headers, hidden.json()["id"], two_masters["vis-m2"]["id"])
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    # такому клиенту имя и телефон не раскрываются
+    hid = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": "+993 61 509977"}
+    )
+    assert hid.status_code == 200, hid.text
+    assert hid.json().get("found") is False, hid.text[:300]
+    assert "client" not in hid.json(), hid.text[:300]
+    # старшая роль того же клиента находит
+    assert client.get(
+        "/api/repairs/clients/lookup", headers=operator_headers,
+        params={"phone": "+993 61 509977"}).json()["found"] is True
+
+    r = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": "+993 61 500019"}
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    ids = {x["id"] for x in data["repairs"]}
+    assert a.json()["id"] in ids, "свой заказ не вернулся"
+    assert b.json()["id"] not in ids, "чужой заказ вернулся мастеру"
+    assert data["repairs_count"] == 1, data["repairs_count"]
+
+    # Ветка с несколькими совпадениями: счётчик считается только по доступным
+    # мастеру ремонтам, поэтому у клиента с чужим заказом он меньше полного.
+    # Номера берём из незанятого префикса 5099: база в тестах общая для сессии,
+    # и широкий поиск зацепил бы клиентов из других тестов.
+    SEARCH = "61 5099"
+    for i in range(3):
+        c_i = _intake(client, operator_headers, city_id, f"vis-cand-{i}",
+                      phone=f"+993 61 5099{10 + i}")
+        assert c_i.status_code == 201, c_i.text
+        # второй ремонт того же клиента уходит другому мастеру
+        extra = _intake(client, operator_headers, city_id, f"vis-cand-x-{i}",
+                        phone=f"+993 61 5099{10 + i}")
+        assert extra.status_code == 201, extra.text
+        _assign(client, operator_headers, extra.json()["id"], two_masters["vis-m2"]["id"])
+
+    cand = client.get(
+        "/api/repairs/clients/lookup", headers=m1, params={"phone": SEARCH}
+    )
+    assert cand.status_code == 200, cand.text
+    assert cand.json().get("multiple") is True, cand.text[:300]
+    rows = {r["phone"]: r["repairs_count"] for r in cand.json()["candidates"]}
+    assert len(rows) == 3, rows
+    for phone, count in rows.items():
+        assert count == 1, (phone, count, rows)
+
+    # старшая роль видит оба ремонта каждого клиента
+    admin_rows = {r["phone"]: r["repairs_count"] for r in client.get(
+        "/api/repairs/clients/lookup", headers=operator_headers,
+        params={"phone": SEARCH}).json()["candidates"]}
+    for phone in rows:
+        assert admin_rows[phone] == 2, (phone, admin_rows[phone])
+
+
+def test_master_clients_suggest_hides_foreign_clients(
+    client, operator_headers, two_masters, city_id
+):
+    """Автокомплит заказчика не подсказывает мастеру владельцев чужих заказов.
+
+    Эндпоинт доступен любому сотруднику, который открывает приёмку, и раньше
+    отдавал имена и телефоны всех клиентов сервиса.
+    """
+    # Имена берём уникальные: подсказка ограничена восемью строками, и широкий
+    # поиск по общему имени в общей для сессии базе давал бы непредсказуемый срез.
+    hidden = _intake(client, operator_headers, city_id, "vis-22",
+                     phone="+993 61 509988", name="ЧужойПодсказка509988")
+    assert hidden.status_code == 201, hidden.text
+    _assign(client, operator_headers, hidden.json()["id"], two_masters["vis-m2"]["id"])
+
+    mine = _intake(client, operator_headers, city_id, "vis-23",
+                   phone="+993 61 509989", name="СвойПодсказка509989")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"], two_masters["vis-m1"]["id"])
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    # поиск по имени своего клиента — находится
+    r = client.get("/web/clients-suggest", cookies=cookies,
+                   params={"q": "СвойПодсказка509989"})
+    assert r.status_code == 200, r.text
+    assert {row["phone"] for row in r.json()} == {"+993 61 509989"}, r.text
+
+    # поиск по имени чужого клиента — пусто
+    r2 = client.get("/web/clients-suggest", cookies=cookies,
+                    params={"q": "ЧужойПодсказка509988"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json() == [], r2.text
+
+    # поиск по цифрам чужого номера — тоже пусто
+    r3 = client.get("/web/clients-suggest", cookies=cookies, params={"q": "509988"})
+    assert r3.status_code == 200, r3.text
+    assert r3.json() == [], r3.text
+
+    # старшая роль видит обоих
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    r4 = client.get("/web/clients-suggest", cookies=admin_cookies, params={"q": "50998"})
+    assert r4.status_code == 200, r4.text
+    admin_phones = {row["phone"] for row in r4.json()}
+    assert {"+993 61 509988", "+993 61 509989"} <= admin_phones, admin_phones
+
+
+def test_master_cannot_touch_foreign_repair_actions(
+    client, operator_headers, two_masters, city_id
+):
+    """Действия в карточке чужого ремонта мастеру закрыты — без 500.
+
+    Печать клиентской этикетки раньше падала в MissingGreenlet (500), потому
+    что связь `masters` не подгружалась, а `can_print` читала её лениво.
+    Регистрация «без печати» вообще не проверяла права: любой сотрудник писал
+    событие в историю чужого заказа.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-24",
+                      phone="+993 61 509991")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-25",
+                   phone="+993 61 509992")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    # чужой ремонт: 403, а не 500
+    r = client.post(f"/repairs/{fid}/print-client-label", cookies=cookies)
+    assert r.status_code == 403, r.status_code
+
+    r = client.post(f"/api/repairs/{fid}/print-failure", cookies=cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code == 403, r.status_code
+
+    # свой ремонт: не 403 и не 500 (принтер в тестах не настроен — допустим 400)
+    r = client.post(f"/repairs/{mid}/print-client-label", cookies=cookies)
+    assert r.status_code not in (403, 500), r.status_code
+
+    r = client.post(f"/api/repairs/{mid}/print-failure", cookies=cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code not in (403, 500), r.status_code
+
+    # старшая роль печатает любой ремонт
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    r = client.post(f"/api/repairs/{fid}/print-failure", cookies=admin_cookies,
+                    json={"reason": "проверка"})
+    assert r.status_code not in (403, 500), r.status_code
+
+
+def test_master_client_page_hides_client_without_visible_repairs(
+    client, operator_headers, two_masters, city_id
+):
+    """Карточка клиента без доступных мастеру ремонтов не открывается.
+
+    Список ремонтов на странице фильтровался, но имя и телефон клиента
+    показывались всегда — по прямой ссылке раскрывался владелец чужих заказов,
+    хотя в списке клиентов он не показывается.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-26",
+                      phone="+993 61 509995")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+
+    mine = _intake(client, operator_headers, city_id, "vis-27",
+                   phone="+993 61 509996")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+
+    # id клиентов берём из списка, доступного старшей роли
+    listed = {row["phone"]: row["id"] for row in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    foreign_cid = listed["+993 61 509995"]
+    mine_cid = listed["+993 61 509996"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+
+    r = client.get(f"/clients/{foreign_cid}", cookies=cookies)
+    assert r.status_code == 404, r.status_code
+    assert "+993 61 509995" not in r.text
+
+    r2 = client.get(f"/clients/{mine_cid}", cookies=cookies)
+    assert r2.status_code == 200, r2.status_code
+    assert "+993 61 509996" in r2.text
+
+    # старшая роль открывает обе карточки
+    admin_cookies = _login(client, "operator@msb.local", "operator123")
+    assert client.get(f"/clients/{foreign_cid}",
+                      cookies=admin_cookies).status_code == 200
+
+
+def test_master_cannot_read_foreign_payments_and_parts(
+    client, operator_headers, two_masters, city_id
+):
+    """Платежи и запчасти чужого ремонта мастеру не отдаются.
+
+    GET /api/repairs/{id}/payments и /parts грузили ремонт по id и возвращали
+    всё без проверки прав: мастер читал суммы и способы оплаты чужого заказа.
+    Пустой ответ это маскировал — там, где платежей ещё не было.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-28",
+                      phone="+993 61 509997")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-29",
+                   phone="+993 61 509998")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    # платёж на чужой ремонт вносит старшая роль
+    pay = client.post(f"/api/repairs/{fid}/payments", headers=operator_headers,
+                      json={"amount": 321.5, "method": "card"})
+    assert pay.status_code == 201, pay.text
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    r = client.get(f"/api/repairs/{fid}/payments", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    r = client.get(f"/api/repairs/{fid}/parts", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    # свой ремонт читается
+    assert client.get(f"/api/repairs/{mid}/payments",
+                      headers=m1).status_code == 200
+    assert client.get(f"/api/repairs/{mid}/parts", headers=m1).status_code == 200
+
+    # старшая роль видит платёж чужого ремонта
+    r = client.get(f"/api/repairs/{fid}/payments", headers=operator_headers)
+    assert r.status_code == 200, r.status_code
+    assert [p["amount"] for p in r.json()] == [321.5], r.text
+
+
+def test_master_cannot_change_foreign_part_orders(
+    client, operator_headers, two_masters, city_id
+):
+    """Заказы запчастей чужого ремонта мастеру не подвластны.
+
+    PATCH и DELETE /api/repairs/{id}/part-orders/{order_id} грузили заказ по id
+    и проверяли только совпадение repair_id — прав не проверяли вовсе, хотя
+    чтение и добавление заказа были закрыты.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-30",
+                      phone="+993 61 509961")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    mine = _intake(client, operator_headers, city_id, "vis-31",
+                   phone="+993 61 509962")
+    assert mine.status_code == 201, mine.text
+    _assign(client, operator_headers, mine.json()["id"],
+            two_masters["vis-m1"]["id"])
+    mid = mine.json()["id"]
+
+    order = client.post(f"/api/repairs/{fid}/part-orders", headers=operator_headers,
+                        json={"name": "Пульт", "qty": 1, "price": 50})
+    assert order.status_code == 201, order.text
+    oid = order.json()["id"]
+
+    own_order = client.post(f"/api/repairs/{mid}/part-orders", headers=operator_headers,
+                            json={"name": "Кабель", "qty": 1, "price": 10})
+    assert own_order.status_code == 201, own_order.text
+    own_oid = own_order.json()["id"]
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+
+    r = client.patch(f"/api/repairs/{fid}/part-orders/{oid}", headers=m1,
+                     json={"qty": 99})
+    assert r.status_code == 403, r.status_code
+
+    r = client.delete(f"/api/repairs/{fid}/part-orders/{oid}", headers=m1)
+    assert r.status_code == 403, r.status_code
+
+    # заказ не изменился
+    rows = client.get(f"/api/repairs/{fid}/part-orders",
+                      headers=operator_headers).json()
+    assert [(x["name"], x["qty"]) for x in rows] == [("Пульт", 1)], rows
+
+    # свой заказ мастер правит и удаляет
+    assert client.patch(f"/api/repairs/{mid}/part-orders/{own_oid}", headers=m1,
+                        json={"qty": 3}).status_code == 200
+    assert client.delete(f"/api/repairs/{mid}/part-orders/{own_oid}",
+                         headers=m1).status_code == 200
+
+
+def test_master_blocked_on_every_foreign_repair_mutation(
+    client, operator_headers, two_masters, city_id
+):
+    """Ни один маршрут мутации карточки не пускает мастера в чужой ремонт.
+
+    Тест перечисляет маршруты из самого приложения, поэтому новый обработчик
+    без проверки прав упадёт здесь, а не в проде. Дыры находились именно так:
+    платежи, запчасти и заказы запчастей отдавали или меняли данные чужого
+    ремонта, хотя соседние маршруты были закрыты.
+    """
+    from app.main import app
+
+    foreign = _intake(client, operator_headers, city_id, "vis-32",
+                      phone="+993 61 509963")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    other = two_masters["vis-m2"]["id"]
+    dummy = str(uuid.uuid4())
+
+    def sub(path: str) -> str:
+        for key, val in [("repair_id", fid), ("rp_id", dummy),
+                         ("order_id", dummy), ("payment_id", dummy)]:
+            path = path.replace("{" + key + "}", val)
+        return path
+
+    checked = 0
+    # app.routes содержит обёртки _IncludedRouter, поэтому маршруты берём из
+    # openapi — там они уже развёрнуты.
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "{repair_id}" not in path:
+            continue
+        for method in sorted(m.upper() for m in ops):
+            if method in ("GET", "HEAD", "OPTIONS"):
+                continue
+            url = sub(path)
+            is_api = url.startswith("/api")
+            kwargs = {"follow_redirects": False}
+            if is_api:
+                kwargs["headers"] = m1
+                kwargs["json"] = {"master_ids": [other], "status": "Завершён",
+                                  "message": "x", "qty": 9, "amount": 5,
+                                  "name": "x", "action": "transfer",
+                                  "user_id": other}
+            else:
+                kwargs["cookies"] = cookies
+                kwargs["data"] = {"status": "Завершён", "message": "x",
+                                  "master_id": other, "user_id": other,
+                                  "action": "transfer", "amount": "5",
+                                  "price_final": "5", "qty": "9", "name": "x"}
+                if url.endswith("/photos"):
+                    # Без файла маршрут молча пропускает загрузку и отдаёт 303,
+                    # поэтому проверку прав надо провоцировать настоящим файлом.
+                    import io
+
+                    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+                    kwargs["files"] = {"file": ("t.png", io.BytesIO(png), "image/png")}
+            r = client.request(method, url, **kwargs)
+            checked += 1
+            assert r.status_code >= 400, (
+                f"{method} {url} вернул {r.status_code} — мастер изменил чужой ремонт"
+            )
+    assert checked >= 20, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+# Маршруты, которые legitimately доступны любому авторизованному сотруднику:
+# собственный профиль, свои уведомления, чат. Всё остальное мастеру закрыто.
+_STAFF_ALLOWED = (
+    "/api/auth/login", "/api/auth/refresh", "/api/auth/me",
+    "/api/chat/direct/{user_id}", "/api/chat/channels/{channel_id}/read",
+    "/api/chat/channels/{channel_id}/messages",
+    "/api/notifications/{notification_id}/read",
+    "/login", "/logout", "/chat/send", "/chat/direct/{user_id}",
+    "/notifications/read-all", "/notifications/{notification_id}/read",
+    "/profile", "/profile-password",
+)
+
+
+def test_master_blocked_on_admin_mutations_outside_repair_card(
+    client, operator_headers, two_masters, city_id
+):
+    """Мутации вне карточки ремонта мастеру закрыты.
+
+    Проверяются справочники и настройки: города, филиалы, сотрудники,
+    оборудование, склад, прайс, AI-сводки. Раньше это подтверждалось только
+    разовым прогоном — теперь новый маршрут без роли упадёт в тесте.
+    """
+    from app.main import app
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    dummy = str(uuid.uuid4())
+
+    checked = 0
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "{repair_id}" in path or path in _STAFF_ALLOWED:
+            continue
+        for method in sorted(m.upper() for m in ops):
+            if method in ("GET", "HEAD", "OPTIONS"):
+                continue
+            url = path
+            for key in ("city_id", "branch_id", "user_id", "template_id",
+                        "price_id", "part_id", "equipment_id", "donor_id",
+                        "notification_id", "channel_id", "client_id", "key"):
+                url = url.replace("{" + key + "}", dummy)
+            is_api = url.startswith("/api")
+            kwargs = {"follow_redirects": False}
+            if is_api:
+                kwargs["headers"] = m1
+                kwargs["json"] = {"name": "x", "email": "x@msb.local",
+                                  "password": "pass123", "role": "master",
+                                  "value": "1", "price": 1, "qty": 1,
+                                  "device_type": "x", "work": "y"}
+            else:
+                kwargs["cookies"] = cookies
+                kwargs["data"] = {"name": "x", "value": "1", "price": "1",
+                                  "qty": "1", "full_name": "x", "phone": "+993 61 000000"}
+            r = client.request(method, url, **kwargs)
+            checked += 1
+            assert r.status_code >= 400, (
+                f"{method} {url} вернул {r.status_code} — мастер изменил "
+                f"справочник или настройку"
+            )
+    assert checked >= 30, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+def test_master_reads_no_foreign_repair_data_from_any_endpoint(
+    client, operator_headers, two_masters, city_id
+):
+    """Ни один GET не отдаёт мастеру данные чужого ремонта или его клиента.
+
+    Зеркало теста на мутации: перечисляет GET-маршруты из openapi и ищет в
+    ответах номер, id, имя и телефон чужого заказа. Так были найдены утечки в
+    clients/list, clients/lookup, clients-suggest и карточке клиента.
+    """
+    from app.main import app
+
+    foreign = _intake(client, operator_headers, city_id, "vis-33",
+                      phone="+993 61 509964", name="ЧужойКлиент509964")
+    assert foreign.status_code == 201, foreign.text
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+    fid = foreign.json()["id"]
+    fnum = foreign.json()["number"]
+    fcid = foreign.json()["client_id"]
+
+    listed = {row["phone"]: row["id"] for row in client.get(
+        "/api/repairs/clients/list", headers=operator_headers).json()}
+    assert listed["+993 61 509964"] == fcid, listed
+
+    cookies = _login(client, "vis-m1@msb.local")
+    m1 = _bearer(client, "vis-m1@msb.local")
+    dummy = str(uuid.uuid4())
+
+    needles = [("номер", fnum), ("id ремонта", fid),
+               ("id клиента", fcid), ("имя клиента", "ЧужойКлиент509964"),
+               ("телефон клиента", "+993 61 509964")]
+    # Публичный статус открывается по токену — токен и есть доступ.
+    public_prefixes = ("/r/", "/api/public/r/")
+
+    checked = 0
+    for path, ops in sorted(app.openapi()["paths"].items()):
+        if "get" not in ops:
+            continue
+        url = path
+        for key in ("repair_id", "client_id", "number", "token", "channel_id",
+                    "user_id", "notification_id", "part_id", "payment_id",
+                    "rp_id", "order_id", "city_id", "branch_id", "price_id",
+                    "equipment_id", "donor_id", "template_id", "key"):
+            val = {"repair_id": fid, "client_id": fcid, "number": fnum,
+                   "user_id": dummy}.get(key, dummy)
+            url = url.replace("{" + key + "}", val)
+        if "{" in url:
+            continue
+        kwargs = {"follow_redirects": False}
+        if url.startswith("/api"):
+            kwargs["headers"] = m1
+        else:
+            kwargs["cookies"] = cookies
+        r = client.get(url, **kwargs)
+        checked += 1
+        if url.startswith(public_prefixes):
+            continue
+        # Редирект тоже уносит данные: в заголовке Location так утекал UUID
+        # чужого ремонта из /repairs/by-number.
+        hay = r.headers.get("location", "")
+        if r.status_code == 200:
+            # Подсказки в placeholder — статический текст разметки, а не
+            # данные (в чате там пример номера: «напр. TV-ASG-2026-00001»).
+            hay += _PLACEHOLDER_RE.sub("", r.text)
+        if not hay:
+            continue
+        # То, что тест сам подставил в URL, утечкой не считается: ответ лишь
+        # возвращает уже известный ему идентификатор обратно.
+        checks = [(label, needle) for label, needle in needles if needle not in url]
+        hits = [label for label, needle in checks if needle in hay]
+        if hits:
+            pos = hay.find(hits and next(n for l, n in checks if l == hits[0]))
+            snippet = hay[max(0, pos - 400):pos + 150]
+            assert not hits, (
+                f"GET {url} раскрыл мастеру чужой ремонт: {hits}\n"
+                f"контекст: {' '.join(snippet.split())}"
+            )
+    assert checked >= 40, f"проверено всего {checked} маршрутов — перечисление сломалось"
+
+
+def test_repair_events_reach_only_who_may_see_the_repair(
+    client, operator_headers, two_masters, city_id
+):
+    """Live-события по ремонту идут только тем, кому этот ремонт виден.
+
+    `manager.broadcast` рассылал номер и статус каждого ремонта всем
+    подключённым сокетам, поэтому мастер получал в live-ленту чужие заказы,
+    которых нет в его списке «Все ремонты».
+    """
+    import asyncio
+
+    from app.db.models import Repair
+    from app.db.session import async_session_factory
+    from app.services.repair_scope import repair_audience
+
+    r = _intake(client, operator_headers, city_id, "vis-ws-1",
+                phone="+993 61 509977", name="WS Клиент 509977")
+    assert r.status_code == 201, r.text
+    rid = uuid.UUID(r.json()["id"])
+    m1, m2 = two_masters["vis-m1"]["id"], two_masters["vis-m2"]["id"]
+
+    async def audience():
+        async with async_session_factory() as db:
+            repair = await db.get(Repair, rid)
+            return {str(x) for x in await repair_audience(db, repair)}
+
+    # Свободный заказ есть в списке у каждого мастера — событие ему положено.
+    free = asyncio.run(audience())
+    assert m1 in free and m2 in free, f"свободный ремонт виден всем: {free}"
+
+    _assign(client, operator_headers, str(rid), m2)
+
+    assigned = asyncio.run(audience())
+    assert m2 in assigned, "исполнитель должен получать события по своему ремонту"
+    assert m1 not in assigned, "чужой мастер не должен получать события по ремонту"
+
+
+def test_master_cannot_read_foreign_repair_through_chat_preview(
+    client, operator_headers, two_masters, city_id
+):
+    """Упоминание номера в чате не раскрывает чужой ремонт.
+
+    `_repair_preview` искал ремонт по номеру без проверки видимости, поэтому
+    любой участник публичного канала получал статус, устройство, бренд и модель
+    заказа, который ему недоступен. Номера последовательные — это был оракул на
+    всю базу.
+    """
+    foreign = _intake(client, operator_headers, city_id, "vis-chat-1",
+                      phone="+993 61 509988", name="Чат Клиент 509988")
+    assert foreign.status_code == 201, foreign.text
+    fnum = foreign.json()["number"]
+    _assign(client, operator_headers, foreign.json()["id"],
+            two_masters["vis-m2"]["id"])
+
+    m1 = _bearer(client, "vis-m1@msb.local")
+    assert client.get(f"/api/repairs/{foreign.json()['id']}",
+                      headers=m1).status_code == 403
+
+    channels = client.get("/api/chat/channels", headers=m1).json()
+    public = next(c for c in channels if c["kind"] == "public")
+
+    posted = client.post(
+        f"/api/chat/channels/{public['id']}/messages", headers=m1,
+        json={"text": f"Что со статусом {fnum}?"},
+    )
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["repair_preview"] is None, posted.json()["repair_preview"]
+
+    history = client.get(
+        f"/api/chat/channels/{public['id']}/messages", headers=m1).json()
+    leaked = [m["repair_preview"] for m in history
+              if m.get("repair_preview") and m["repair_preview"].get("number") == fnum]
+    assert leaked == [], leaked
+
+    # Тому, кому ремонт виден, превью по-прежнему показывается.
+    admin_view = client.get(
+        f"/api/chat/channels/{public['id']}/messages",
+        headers={"Authorization": f"Bearer {client.post('/api/auth/login', json={'email': 'admin@msb.local', 'password': 'admin123'}).json()['access_token']}"},
+    ).json()
+    assert any(m.get("repair_preview") and m["repair_preview"].get("number") == fnum
+               for m in admin_view), "админ должен видеть превью"

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101820">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}MSB-CBMRS{% endblock %} — MSB-CBMRS</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/msb/base.css">
+  <link rel="stylesheet" href="/static/msb/forms.css">
+  <style>
+    /* Самостоятельная оболочка для страниц без входа (приёмка без аккаунта).
+       Те же блоки, что и в base.html, но без бокового меню и шапки сотрудника. */
+    .plain-wrap{min-height:100vh;background:#eef1f4}
+    .plain-head{display:flex;align-items:center;gap:12px;padding:16px 18px;background:#fff;border-bottom:1px solid #e3e8ed}
+    .plain-head .badge{width:46px;height:36px;display:grid;place-items:center;border-radius:11px;background:linear-gradient(145deg,#ff932e,#ff6a00);color:#fff;font-weight:900}
+    .plain-head strong{display:block;font-size:15px}
+    .plain-head small{display:block;color:#7d8a96;font-size:12px;margin-top:1px}
+    .plain-content{padding:18px 14px 48px}
+    .plain-error{max-width:1100px;margin:0 auto 14px;background:#fdecec;border:1px solid #f5b5b5;color:#a02020;border-radius:14px;padding:13px 16px;font-weight:700}
+  </style>
+  {% block page_css %}{% endblock %}
+</head>
+<body data-no-clients-ac>
+  <div class="plain-wrap">
+    <header class="plain-head">
+      <span class="badge" aria-hidden="true">🧰</span>
+      <div>
+        <strong>{% block page_name %}MSB-CBMRS{% endblock %}</strong>
+        <small>Вход в систему не требуется</small>
+      </div>
+    </header>
+    <main class="plain-content">
+      {% if error %}<div class="plain-error" role="alert">{{ error }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% block page_js %}{% endblock %}
+</body>
+</html>

@@ -6,9 +6,10 @@
 (модуля `storage_s3` в репозитории нет) отдаём внятную ошибку с указанием,
 что нужно сделать.
 """
+import io
 import logging
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.core.config import settings
 
@@ -54,6 +55,46 @@ async def save_local(data: bytes, object_key: str) -> None:
 async def save_object(data: bytes, object_key: str) -> None:
     _guard_s3()
     await save_local(data, object_key)
+
+
+# --------------------------------------------------------------------------
+# Миниатюры. Оригиналы с телефона весят единицы мегабайт, а в карточке
+# показываются в ячейке ~76 px — грузить их целиком на мобильном накладно.
+# --------------------------------------------------------------------------
+THUMB_MAX_SIZE = 320
+
+
+def thumb_key_for(object_key: str) -> str:
+    """Ключ миниатюры: `repairs/<id>/<file>.jpg` → `repairs/<id>/thumbs/<file>.jpg`."""
+    path = PurePosixPath(object_key)
+    return str(path.parent / "thumbs" / (path.stem + ".jpg"))
+
+
+def make_thumbnail(data: bytes) -> bytes | None:
+    """Уменьшенная копия изображения в JPEG либо None, если сделать не удалось.
+
+    None — не ошибка загрузки: карточка покажет оригинал. Так происходит,
+    например, с HEIC, который Pillow без системного декодера не читает.
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:  # Pillow не установлен — работаем без миниатюр
+        log.warning("Pillow недоступен — миниатюры создаваться не будут")
+        return None
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            # Телефон пишет поворот в EXIF, а не в пиксели.
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((THUMB_MAX_SIZE, THUMB_MAX_SIZE))
+            if img.mode not in ("RGB", "L"):
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=82, optimize=True)
+            return buf.getvalue()
+    except Exception as exc:  # noqa: BLE001 - битый/неподдерживаемый файл
+        log.info("миниатюру сделать не удалось: %s", exc)
+        return None
 
 
 def public_url(object_key: str) -> str:

@@ -32,7 +32,9 @@ from app.services.print import (
     body_to_template,
     render_blank_pdf,
     render_client_label_pdf,
+    render_client_label_tspl,
     render_repair_label_pdf,
+    render_repair_label_tspl,
 )
 from app.services import audit
 from app.services.public_url import public_repair_url, public_status_url
@@ -68,6 +70,79 @@ def _label_complectation(value: dict | None) -> str:
         if text:
             parts.append(text)
     return ", ".join(parts)
+
+
+def _ensure_label_printer_ready(printer: dict) -> None:
+    """Проверить, что принтер этикеток настроен для своего режима."""
+    mode = printer.get("mode")
+    if mode == "raw_tspl":
+        if not str(printer.get("ip") or "").strip():
+            raise HTTPException(400, "Не задан адрес принтера этикеток (TSPL)")
+        return
+    if mode == "cups_remote" and not printer.get("ip"):
+        raise HTTPException(400, "Не задан IP компьютера с принтером этикеток")
+    if not printer.get("name"):
+        raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
+
+
+def _render_label(
+    printer: dict,
+    *,
+    kind: str,
+    repair_number: str,
+    url: str,
+    client_name: str = "",
+    client_phone: str = "",
+    complectation: str = "",
+    defects: str = "",
+    storage_months: int = 3,
+) -> tuple[bytes, bool]:
+    """Отдать байты этикетки и флаг is_tspl (raw-сокет против PDF в CUPS)."""
+    width_mm = printer.get("width_mm", 58)
+    height_mm = printer.get("height_mm", 38)
+    if printer.get("mode") == "raw_tspl":
+        if kind == "repair":
+            data = render_repair_label_tspl(
+                repair_number=repair_number,
+                client_name=client_name,
+                client_phone=client_phone,
+                repair_url=url,
+                complectation=complectation,
+                defects=defects,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                gap_mm=printer.get("gap_mm", 2),
+            )
+        else:
+            data = render_client_label_tspl(
+                repair_number=repair_number,
+                client_url=url,
+                storage_months=storage_months,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                gap_mm=printer.get("gap_mm", 2),
+            )
+        return data, True
+    if kind == "repair":
+        data = render_repair_label_pdf(
+            repair_number=repair_number,
+            client_name=client_name,
+            client_phone=client_phone,
+            repair_url=url,
+            complectation=complectation,
+            defects=defects,
+            width_mm=width_mm,
+            height_mm=height_mm,
+        )
+    else:
+        data = render_client_label_pdf(
+            repair_number=repair_number,
+            client_url=url,
+            storage_months=storage_months,
+            width_mm=width_mm,
+            height_mm=height_mm,
+        )
+    return data, False
 
 
 def _fmt(dt) -> str:
@@ -116,7 +191,16 @@ async def build_context(db, repair: Repair, request: Request | None = None) -> d
     legal_text = await get_legal_text(db)
     consent_repair_text = await get_consent_repair_text(db)
     print_stub = await get_print_stub(db)
-    device = " ".join(filter(None, [repair.device_type, repair.brand, repair.model]))
+    # Тип техники печатается в правом верхнем углу бланка, поэтому в поле
+    # «M_Model» остаются только марка и модель.
+    device = " ".join(filter(None, [repair.brand, repair.model]))
+    # Доставка: район + необязательный комментарий из приёмки.
+    if repair.is_delivery:
+        delivery_text = " · ".join(
+            filter(None, [repair.delivery_district, repair.delivery_comment])
+        ) or "доставка"
+    else:
+        delivery_text = ""
     complectation = (
         ", ".join(repair.complectation.get("items", []))
         if repair.complectation
@@ -186,6 +270,8 @@ async def build_context(db, repair: Repair, request: Request | None = None) -> d
         "client_name": repair.client.full_name,
         "client_phone": repair.client.phone,
         "device": device,
+        "device_type": repair.device_type or "",
+        "delivery_text": delivery_text,
         "serial": repair.serial or "—",
         "complectation": complectation,
         "fault": repair.fault_client or "—",
@@ -307,34 +393,31 @@ async def create_label_print_job(
         raise HTTPException(403, "Нет доступа к этому ремонту")
 
     printer = await get_label_printer(db)
-    if printer.get("mode") == "cups_remote" and not printer.get("ip"):
-        raise HTTPException(400, "Не задан IP компьютера с принтером этикеток")
-    if not printer.get("name"):
-        raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
+    _ensure_label_printer_ready(printer)
 
     repair_url = public_repair_url(repair.id, request)
-    width_mm = printer.get("width_mm", 58)
-    height_mm = printer.get("height_mm", 38)
     try:
-        pdf = render_repair_label_pdf(
+        data, is_tspl = _render_label(
+            printer,
+            kind="repair",
             repair_number=repair.number,
+            url=repair_url,
             client_name=repair.client.full_name,
             client_phone=repair.client.phone,
-            repair_url=repair_url,
             complectation=_label_complectation(repair.complectation),
             defects=repair.condition_notes or "",
-            width_mm=width_mm,
-            height_mm=height_mm,
         )
     except FontNotAvailable as exc:
         raise HTTPException(503, str(exc))
 
+    document_key = "raw_base64" if is_tspl else "pdf_base64"
     job = PrintJob(
         repair_id=repair.id,
         template_id="repair-label-58x38",
         payload={
             "document_kind": "repair_label",
-            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "document_format": "tspl" if is_tspl else "pdf",
+            document_key: base64.b64encode(data).decode("ascii"),
             "printer": printer,
             "repair_url": repair_url,
         },
@@ -361,7 +444,8 @@ async def create_label_print_job(
     return {
         "job_id": job.id,
         "status": job.status,
-        "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+        "document_format": "tspl" if is_tspl else "pdf",
+        document_key: base64.b64encode(data).decode("ascii"),
         "repair_url": repair_url,
     }
 
@@ -382,7 +466,7 @@ async def create_client_label_print_job(
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
-        .options(selectinload(Repair.client))
+        .options(selectinload(Repair.client), selectinload(Repair.masters))
     )
     repair = row.scalar_one_or_none()
     if repair is None:
@@ -391,32 +475,29 @@ async def create_client_label_print_job(
         raise HTTPException(403, "Нет доступа к этому ремонту")
 
     printer = await get_label_printer(db)
-    if printer.get("mode") == "cups_remote" and not printer.get("ip"):
-        raise HTTPException(400, "Не задан IP компьютера с принтером этикеток")
-    if not printer.get("name"):
-        raise HTTPException(400, "Не задано имя CUPS-очереди принтера этикеток")
+    _ensure_label_printer_ready(printer)
 
     status_url = public_status_url(repair.public_token, request)
     storage_months = await get_storage_months(db)
-    width_mm = printer.get("width_mm", 58)
-    height_mm = printer.get("height_mm", 38)
     try:
-        pdf = render_client_label_pdf(
+        data, is_tspl = _render_label(
+            printer,
+            kind="client",
             repair_number=repair.number,
-            client_url=status_url,
+            url=status_url,
             storage_months=storage_months,
-            width_mm=width_mm,
-            height_mm=height_mm,
         )
     except FontNotAvailable as exc:
         raise HTTPException(503, str(exc))
 
+    document_key = "raw_base64" if is_tspl else "pdf_base64"
     job = PrintJob(
         repair_id=repair.id,
         template_id="client-label-58x38",
         payload={
             "document_kind": "client_label",
-            "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+            "document_format": "tspl" if is_tspl else "pdf",
+            document_key: base64.b64encode(data).decode("ascii"),
             "printer": printer,
             "status_url": status_url,
         },
@@ -443,7 +524,8 @@ async def create_client_label_print_job(
     return {
         "job_id": job.id,
         "status": job.status,
-        "pdf_base64": base64.b64encode(pdf).decode("ascii"),
+        "document_format": "tspl" if is_tspl else "pdf",
+        document_key: base64.b64encode(data).decode("ascii"),
         "status_url": status_url,
     }
 
@@ -462,11 +544,16 @@ async def report_print_failure(
     row = await db.execute(
         select(Repair)
         .where(Repair.id == repair_id)
-        .options(selectinload(Repair.client))
+        .options(selectinload(Repair.client), selectinload(Repair.masters))
     )
     repair = row.scalar_one_or_none()
     if repair is None:
         raise HTTPException(404, "Ремонт не найден")
+    # Отметить «зарегистрировано без печати» вправе только тот, кто может
+    # печатать этот ремонт: иначе любой сотрудник писал событие в историю
+    # чужого заказа и рассылал уведомления администраторам.
+    if not _can_print(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
 
     reason = (body or {}).get("reason") or "Печать не удалась дважды подряд"
 

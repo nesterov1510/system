@@ -38,7 +38,7 @@
         {% endfor %}
       </div>
     </div>
-    <div style="align-self:end"><button class="btn green" type="submit">Создать</button></div>
+    <div style="align-self:end"><button class="btn primary" type="submit">➕ Создать сотрудника</button></div>
   </form>
 </div>
 
@@ -66,14 +66,14 @@
         </td>
         <td>{% if u.active %}<span class="chip green">активен</span>{% else %}<span class="chip red">отключён</span>{% endif %}</td>
         <td class="wrap">
-          <form method="post" action="/admin/users/{{ u.id }}/toggle" style="display:inline"
+          <div class="user-actions">
+          <form method="post" action="/admin/users/{{ u.id }}/toggle"
                 onsubmit="return confirm('{{ 'Отключить' if u.active else 'Включить' }} сотрудника?')">
-            <button class="btn sm sec" type="submit">{{ 'Отключить' if u.active else 'Включить' }}</button>
+            <button class="btn sm sec" type="submit">{{ '⛔ Отключить' if u.active else '✅ Включить' }}</button>
           </form>
-          <details style="display:inline">
-            <summary class="btn sm ghost" style="display:inline-block">✏️ Карточка</summary>
-            <form method="post" action="/admin/users/{{ u.id }}/update" class="form-grid"
-                  style="margin-top:8px;background:#fafbfc;border:1px solid #e4e8ed;border-radius:10px;padding:10px 12px;min-width:320px">
+          <details>
+            <summary class="btn sm ghost">✏️ Карточка</summary>
+            <form method="post" action="/admin/users/{{ u.id }}/update" class="form-grid user-panel">
               <label class="fld"><span class="lbl">Имя</span><input type="text" name="name" value="{{ u.name }}" required></label>
               <label class="fld"><span class="lbl">Email</span><input type="email" name="email" value="{{ u.email }}" required></label>
               <label class="fld"><span class="lbl">Телефон</span><input type="tel" name="phone" value="{{ u.phone or '' }}"></label>
@@ -101,23 +101,22 @@
                   {% endfor %}
                 </div>
               </div>
-              <div><button class="btn sm green" type="submit">Сохранить карточку</button></div>
+              <div><button class="btn sm green" type="submit">💾 Сохранить карточку</button></div>
             </form>
           </details>
-          <details style="display:inline">
-            <summary class="btn sm ghost" style="display:inline-block">Сбросить пароль</summary>
-            <form method="post" action="/admin/users/{{ u.id }}/reset-password" class="row" style="margin-top:6px">
-              <input type="text" name="new_password" placeholder="новый пароль" style="max-width:160px">
-              <button class="btn sm" type="submit">OK</button>
+          <details>
+            <summary class="btn sm ghost">🔑 Сбросить пароль</summary>
+            <form method="post" action="/admin/users/{{ u.id }}/reset-password" class="user-inline">
+              <input type="text" name="new_password" placeholder="новый пароль">
+              <button class="btn sm primary" type="submit">Сбросить</button>
             </form>
           </details>
-          <details style="display:inline">
-            <summary class="btn sm ghost" style="display:inline-block">🔐 Права</summary>
+          <details>
+            <summary class="btn sm ghost">🔐 Права</summary>
             {% if u.has_role('admin') %}
             <div class="muted" style="margin-top:6px;font-size:12px">Администратор имеет все права — настраивать не нужно.</div>
             {% else %}
-            <form method="post" action="/admin/users/{{ u.id }}/permissions"
-                  style="margin-top:6px;background:#fafbfc;border:1px solid #e4e8ed;border-radius:10px;padding:10px 12px;max-width:360px">
+            <form method="post" action="/admin/users/{{ u.id }}/permissions" class="user-panel user-panel--narrow">
               <p class="muted" style="font-size:11.5px;margin:0 0 8px">
                 Права, которые даёт роль, отмечены серым — они не снимаются.
                 Остальные можно выдать дополнительно.
@@ -137,11 +136,12 @@
             {% endif %}
           </details>
           {% if u.active %}
-          <form method="post" action="/admin/users/{{ u.id }}/delete" style="display:inline"
+          <form method="post" action="/admin/users/{{ u.id }}/delete"
                 onsubmit="return confirm('Отключить сотрудника {{ u.name }}? Войти он больше не сможет.')">
-            <button class="btn sm red" type="submit">Удалить</button>
+            <button class="btn sm red" type="submit">🗑 Удалить</button>
           </form>
           {% endif %}
+          </div>
         </td>
       </tr>
     {% endfor %}

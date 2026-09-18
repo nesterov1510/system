@@ -62,4 +62,97 @@
     const form = event.target.closest && event.target.closest("[data-ichip-auto]");
     if (form) form.submit();
   });
+
+  /* ------------------------------------------------------------------ *
+   * Окна-списки чипов паспорта (Состояние / Комплектация / Доставка).
+   * Открываются двойным кликом по чипу; на сенсорном экране, где двойного
+   * клика нет, достаточно одного касания.
+   * ------------------------------------------------------------------ */
+  const scrim = document.querySelector("[data-pop-scrim]");
+  const noHover = window.matchMedia && window.matchMedia("(hover: none)").matches;
+
+  // Показ/скрытие — классом .is-open (плюс hidden для доступности): у окон
+  // задан display, поэтому один атрибут hidden их не прячет.
+  const show = (el, on) => {
+    el.classList.toggle("is-open", on);
+    el.hidden = !on;
+  };
+
+  const closePopups = () => {
+    document.querySelectorAll("[data-pop-modal]").forEach((modal) => show(modal, false));
+    const menu = document.querySelector("[data-mpop]");
+    if (menu) show(menu, false);
+    if (scrim) show(scrim, false);
+  };
+
+  const openModal = (selector) => {
+    const modal = document.querySelector(selector);
+    if (!modal) return;
+    closePopups();
+    show(modal, true);
+    if (scrim) show(scrim, true);
+    const first = modal.querySelector("input:not([type=hidden]), select, textarea");
+    if (first) first.focus();
+  };
+
+  document.addEventListener("dblclick", (event) => {
+    const chip = event.target.closest("[data-popchip]");
+    if (!chip) return;
+    event.preventDefault();
+    openModal(chip.dataset.popchip);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!noHover) return;
+    const chip = event.target.closest("[data-popchip]");
+    if (chip) openModal(chip.dataset.popchip);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-pop-close]") || event.target.closest("[data-pop-scrim]")) {
+      closePopups();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closePopups();
+  });
+
+  /* ------------------------------------------------------------------ *
+   * Меню действий мастера: клик по имени — «передать / назначить
+   * мастером / назначить помощником / убрать с ремонта».
+   * ------------------------------------------------------------------ */
+  const mForm = document.querySelector("[data-mact-form]");
+  const mPop = document.querySelector("[data-mpop]");
+
+  if (mForm && mPop) {
+    document.addEventListener("click", (event) => {
+      const chip = event.target.closest("[data-mchip]");
+      if (chip) {
+        const kind = chip.dataset.mkind || "";
+        mForm.elements.user_id.value = chip.dataset.mchip || "";
+        const slot = mPop.querySelector("[data-mname-slot]");
+        if (slot) slot.textContent = chip.dataset.mname || "";
+        mPop.querySelectorAll("[data-mact]").forEach((btn) => {
+          // Убирать нечего, если мастер на ремонте не значится.
+          if (btn.dataset.mact === "remove") btn.disabled = !kind;
+        });
+        show(mPop, true);
+        const box = chip.getBoundingClientRect();
+        const width = mPop.offsetWidth || 240;
+        const left = Math.max(10, Math.min(box.left, window.innerWidth - width - 10));
+        mPop.style.left = left + "px";
+        mPop.style.top = (box.bottom + 6) + "px";
+        return;
+      }
+      const action = event.target.closest("[data-mact]");
+      if (action) {
+        mForm.elements.action.value = action.dataset.mact;
+        show(mPop, false);
+        mForm.submit();
+        return;
+      }
+      if (!event.target.closest("[data-mpop]")) show(mPop, false);
+    });
+  }
 })();

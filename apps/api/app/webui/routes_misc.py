@@ -10,6 +10,7 @@ from app.core.permissions import (
     can_delete_client,
     can_edit_stock_catalog,
     can_view_analytics,
+    can_view_callcenter_queue,
     has_any_role,
 )
 from app.db.models import (
@@ -33,7 +34,7 @@ from app.webui.catalog import DEVICE_CLASSES
 from app.webui.deps import bound_user, get_web_user
 from app.webui.helpers import base_context
 from app.webui.templating import render_async
-from app.webui.data import is_master_only, master_scope
+from app.webui.data import is_master_only
 
 router = APIRouter(tags=["webui-pages"])
 
@@ -75,7 +76,12 @@ async def clients_page(request: Request, q: str | None = None, just: str | None 
             like = f"%{q.strip()}%"
             stmt = stmt.where(or_(Client.full_name.ilike(like), Client.phone.ilike(like)))
         if is_master_only(user):
-            stmt = stmt.where(Repair.id.isnot(None)).where(master_scope(user.id))
+            # Те же границы, что у списка «Все ремонты»: клиент показывается,
+            # только если у него есть доступные мастеру ремонты, и счётчик
+            # считается лишь по ним.
+            from app.services.repair_scope import master_visible
+
+            stmt = stmt.where(Repair.id.isnot(None)).where(master_visible(user.id))
         rows = (await db.execute(stmt)).all()
         clients = [{"c": c, "count": cnt} for c, cnt in rows]
         ctx = await base_context(
@@ -135,9 +141,18 @@ async def client_detail(request: Request, client_id: uuid.UUID):
             .options(selectinload(Repair.master))
             .order_by(Repair.accepted_at.desc())
         )
-        if is_master_only(user):
-            stmt = stmt.where(master_scope(user.id))
+        master_only = is_master_only(user)
+        if master_only:
+            from app.services.repair_scope import master_visible
+
+            stmt = stmt.where(master_visible(user.id))
         repairs = (await db.execute(stmt)).scalars().all()
+        if master_only and not repairs:
+            # Согласовано со списком клиентов и поиском по телефону: без
+            # доступных мастеру ремонтов клиент не раскрывается. Иначе по
+            # прямой ссылке открывались имя и телефон владельца чужих заказов,
+            # хотя в списке такой клиент не показывается.
+            return HTMLResponse("Клиент не найден", status_code=404)
         from app.services.settings import get_currency
         currency = await get_currency(db)
         ctx = await base_context(
@@ -203,6 +218,11 @@ async def callcenter_page(request: Request, kind: str = "all"):
     db, user, redir = await _require(request)
     if redir:
         return redir
+    # Очередь видит callcenter + админ + менеджер + оператор — та же проверка,
+    # что и у API `/api/callcenter/queue`. Без неё страница отдавала мастеру
+    # все ремонты сервиса в обход области видимости «Все ремонты».
+    if not can_view_callcenter_queue(user):
+        return HTMLResponse("Недостаточно прав для очереди call-центра", status_code=403)
     try:
         queue = await callcenter_api._queue(db, kind, limit=100)
         ctx = await base_context(
@@ -362,6 +382,11 @@ async def parts_create(request: Request):
     if redir:
         return redir
     try:
+        # Роль проверяется здесь, а не в parts_api.create_part: там она
+        # объявлена как Depends, а при прямом вызове функции зависимости
+        # FastAPI не выполняются. У соседних маршрутов склада проверка есть.
+        if not can_edit_stock_catalog(user):
+            return HTMLResponse("Недостаточно прав для склада", status_code=403)
         f = await request.form()
 
         def num(k):
@@ -849,5 +874,42 @@ async def profile_save(request: Request):
         )
         html = await render_async("profile.html", **ctx)
         return HTMLResponse(html, status_code=400)
+    finally:
+        await db.close()
+
+# --------------------------------------------------------------------------
+# Конструктор блоков страницы (порядок сохраняется лично пользователю)
+# --------------------------------------------------------------------------
+def _layout_next(raw: str | None) -> str:
+    """Куда вернуться после сохранения: только относительный путь сайта."""
+    nxt = (raw or "").strip()
+    if not nxt.startswith("/") or nxt.startswith("//"):
+        return "/dashboard"
+    return nxt
+
+
+@router.post("/ui/layout")
+async def save_page_layout(request: Request):
+    """Сохранить порядок блоков страницы для текущего пользователя.
+
+    Порядок приходит из конструктора: `page` — страница из
+    `layout.PAGE_BLOCKS`, `order` — имена блоков через запятую в новом
+    порядке. Раскладка личная (user_id), поэтому чужие страницы не меняются.
+    """
+    db, user, redir = await _require(request)
+    if redir:
+        return redir
+    try:
+        from app.webui.layout import PAGE_BLOCKS, save_layout
+
+        form = await request.form()
+        page = (form.get("page") or "").strip()
+        if page not in PAGE_BLOCKS:
+            return HTMLResponse("Неизвестная страница", status_code=400)
+        if not user.has_role("admin"):
+            return HTMLResponse("Конструктор доступен только администратору", status_code=403)
+        blocks = [b.strip() for b in (form.get("order") or "").split(",") if b.strip()]
+        await save_layout(db, user.id, page, blocks)
+        return RedirectResponse(_layout_next(form.get("next")), status_code=303)
     finally:
         await db.close()

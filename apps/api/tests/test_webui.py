@@ -165,7 +165,7 @@ def test_intake_flow_creates_repair_and_redirects_to_list(client):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Веб Тестов",
-        "phone": "+993 61 7778899",
+        "phone": "+993 61 200006",
         "device_type": "Телевизоры",
         "brand": "Samsung",
         "model": "QE55",
@@ -186,7 +186,9 @@ def test_intake_autoprints_label_not_blank(client, admin_headers):
     """При приёмке автоматически ставится в очередь ЭТИКЕТКА (repair_label), а не бланк."""
     cookies = _login(client)
     # Включаем CUPS-принтер этикеток — иначе автопечать молча пропускается.
+    # Режим форма отправляет всегда (select), здесь он задан явно.
     r = client.post("/admin/settings/label", cookies=cookies, data={
+        "label_mode": "cups_remote",
         "label_name": "Zebra_58",
         "label_ip": "192.168.5.99",
         "label_port": "631",
@@ -194,11 +196,15 @@ def test_intake_autoprints_label_not_blank(client, admin_headers):
     }, follow_redirects=False)
     assert r.status_code == 303, r.text
 
+    queued_before = {
+        j["id"] for j in client.get("/api/print/jobs", headers=admin_headers).json()
+    }
+
     cities = client.get("/api/lookups/cities", cookies=cookies).json()
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Этикетка Тест",
-        "phone": "+993 61 0001122",
+        "phone": "+993 61 200001",
         "device_type": "Телевизоры",
         "brand": "LG",
         "model": "50UP",
@@ -208,17 +214,27 @@ def test_intake_autoprints_label_not_blank(client, admin_headers):
     }, follow_redirects=False)
     assert r.status_code == 303, r.text
 
+    # Смотрим только на задания этой приёмки: очередь печати общая для всех
+    # тестов, и в ней лежат этикетки других конфигураций принтера.
     jobs = client.get("/api/print/jobs", headers=admin_headers).json()
-    labels = [j for j in jobs if (j.get("payload") or {}).get("document_kind") == "repair_label"]
-    assert labels, "после приёмки в очереди печати должна быть этикетка"
+    fresh = [j for j in jobs if j["id"] not in queued_before]
+    kinds = [
+        (j.get("payload") or {}).get("document_kind")
+        for j in fresh
+    ]
+    labels = [j for j in fresh if (j.get("payload") or {}).get("document_kind") in ("repair_label", "client_label")]
+    assert labels, f"после приёмки в очереди печати должна быть этикетка: {kinds}"
     assert all((j.get("payload") or {}).get("printer", {}).get("mode") == "cups_remote" for j in labels)
+    assert all((j.get("payload") or {}).get("printer", {}).get("name") == "Zebra_58" for j in labels)
+    blanks = [j for j in fresh if j not in labels]
+    assert not blanks, f"бланк A4 не должен печататься при auto=label: {kinds}"
 
 
 def test_board_view_renders(client):
     cookies = _login(client)
     r = client.get("/repairs?view=board", cookies=cookies)
     assert r.status_code == 200
-    assert "kanban" in r.text or "kcol" in r.text
+    assert 'class="board"' in r.text
 
 
 def test_repairs_table_compact_columns_and_hints(client):
@@ -229,7 +245,7 @@ def test_repairs_table_compact_columns_and_hints(client):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Колонка Клиент",
-        "phone": "+993 63 5556677",
+        "phone": "+993 63 200011",
         "device_type": "Телевизоры",
         "brand": "LG",
         "model": "UQ80",
@@ -276,7 +292,7 @@ def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "SMS Клиент",
-        "phone": "+993 61 7788990",
+        "phone": "+993 61 200008",
         "device_type": "Телевизоры",
         "brand": "Sony",
         "model": "X80",
@@ -295,10 +311,10 @@ def test_notify_client_from_list_marks_ready_and_sends_sms(client, monkeypatch):
     assert n.status_code == 303, n.text
     assert "just=notified" in n.headers["location"]
     assert "sms=1" in n.headers["location"]
-    assert sent["phone"] == "+993 61 7788990"
+    assert sent["phone"] == "+993 61 200008"
     assert "закончен" in sent["text"].lower() or "готов" in sent["text"].lower()
     body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
-    assert body["status"] == "Готово к выдаче"
+    assert body["status"] == "Завершён"
     assert body["reminder_next_at"] is not None
 
 
@@ -309,7 +325,7 @@ def test_repair_card_is_one_page_with_chip_editors(client):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Чип Клиент",
-        "phone": "+993 61 7788001",
+        "phone": "+993 61 200007",
         "device_type": "Телевизоры",
         "brand": "Philips",
         "model": "PUS88",
@@ -352,7 +368,7 @@ def test_finish_from_card_does_not_send_sms(client, monkeypatch):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Без SMS",
-        "phone": "+993 61 7788991",
+        "phone": "+993 61 200009",
         "device_type": "Телевизоры",
         "brand": "Sony",
         "model": "X85",
@@ -366,7 +382,7 @@ def test_finish_from_card_does_not_send_sms(client, monkeypatch):
     assert n.status_code == 303, n.text
     assert sent == []
     body = client.get(f"/api/repairs/{rid}", cookies=cookies).json()
-    assert body["status"] == "Готово к выдаче"
+    assert body["status"] == "Завершён"
     assert body["reminder_next_at"] is None
 
 
@@ -376,7 +392,7 @@ def test_public_status_page_has_no_internal_data(client):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Публик Клиент",
-        "phone": "+993 62 0001122",
+        "phone": "+993 62 200010",
         "device_type": "Другое",
         "fault_client": "неисправность клиента",
         "consent_pdn": "1", "consent_storage": "1",
@@ -586,7 +602,7 @@ def test_intake_brand_model_sn_saved_uppercase(client, admin_headers):
     r = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Капс Клиент",
-        "phone": "+993 61 4455667",
+        "phone": "+993 61 200004",
         "device_type": "Телевизоры",
         "brand_manual": "samsung",
         "model_manual": "qe55q70",
@@ -605,7 +621,7 @@ def test_intake_brand_model_sn_saved_uppercase(client, admin_headers):
     r2 = client.post("/repairs/new", cookies=cookies, data={
         "city_id": cities[0]["id"],
         "full_name": "Строка Клиент",
-        "phone": "+993 61 4455668",
+        "phone": "+993 61 200005",
         "device_type": "Мониторы",
         "identity_raw": "dell - p2419h - sn-aa-11",
         "fault_client": "полосы",
@@ -637,8 +653,8 @@ def test_intake_monitors_and_boxes_get_own_numbers(client, admin_headers):
     assert "Мониторы" in form.text
 
     cases = [
-        ("Мониторы", "Dell", "P2419H", "+993 61 3334455", "MN-"),
-        ("ТВ-приставки", "Xiaomi", "MiBoxS", "+993 61 3334466", "BX-"),
+        ("Мониторы", "Dell", "P2419H", "+993 61 200002", "MN-"),
+        ("ТВ-приставки", "Xiaomi", "MiBoxS", "+993 61 200003", "BX-"),
     ]
     for device_type, brand, model, phone, prefix in cases:
         r = client.post("/repairs/new", cookies=cookies, data={

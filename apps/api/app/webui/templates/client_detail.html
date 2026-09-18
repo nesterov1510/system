@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ client.full_name }}{% endblock %}
 {% block page_name %}Клиент{% endblock %}
-{% block topbar_actions %}<a class="btn sm" href="/repairs/new">➕ Приёмка</a>{% endblock %}
+{% block topbar_actions %}<a class="btn sm primary" href="/repairs/new">➕ Приёмка</a>{% endblock %}
 {% block content %}
 <div class="card" style="margin-bottom:16px"><div class="card-b">
   <h1 style="margin:0">{{ client.full_name }}</h1>

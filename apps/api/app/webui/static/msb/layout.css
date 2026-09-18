@@ -1,0 +1,232 @@
+/* ── Конструктор страницы ─────────────────────────────────────────────────── */
+/* Админ переставляет блоки страницы и колонки таблицы; порядок сохраняется
+   лично ему (user_page_layouts). Панель свёрнута: видна одна кнопка, по
+   нажатию раскрываются режимы, подсказка и кнопки сохранения.               */
+
+/* Внутри панели всё, что скрыто атрибутом hidden, не показываем — иначе
+   display:grid/flex перебивает браузерное [hidden]{display:none}. */
+.lay-bar [hidden] {
+  display: none !important;
+}
+
+/* Свёрнутый вид: аккуратная кнопка-пилюля справа. */
+.lay-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 12px;
+}
+.lay-bar.is-open {
+  display: block;
+}
+.lay-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 15px;
+  border: 1px solid #f0c9a3;
+  border-radius: 999px;
+  background: #fffaf5;
+  color: #a8530a;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.lay-expand:hover {
+  border-color: #ff9d3d;
+  background: #fff1e3;
+}
+.lay-expand__ico {
+  font-size: 14px;
+  line-height: 1;
+}
+.lay-bar.is-open .lay-expand {
+  border-color: #ff7a00;
+  background: #ff9330;
+  color: #fff;
+}
+
+/* Раскрытая панель. */
+.lay-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f6dcc2;
+  border-radius: 14px;
+  background: #fffaf5;
+}
+.lay-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.lay-panel__title {
+  color: #a8530a;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.lay-panel__modes {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.lay-mode {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #f0c9a3;
+  border-radius: 9px;
+  background: #fff;
+  color: #a8530a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.lay-mode:hover {
+  background: #fff1e3;
+}
+.lay-mode.is-active {
+  border-color: #ff7a00;
+  background: #ff9330;
+  color: #fff;
+}
+.lay-x {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #f0c9a3;
+  border-radius: 9px;
+  background: #fff;
+  color: #a8530a;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+.lay-x:hover {
+  background: #fff1e3;
+}
+.lay-panel__hint {
+  margin: 0;
+  color: #8a6d1a;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.lay-panel__acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.lay-panel.is-editing {
+  border-color: #ff9d3d;
+  background: #fff3e8;
+}
+
+/* ── Режим правки блоков ─────────────────────────────────────────────────── */
+.is-lay [data-block] {
+  position: relative;
+  outline: 2px dashed #ffc48a;
+  outline-offset: 4px;
+  border-radius: 14px;
+  cursor: grab;
+}
+.is-lay [data-block].is-dragging {
+  outline-color: #ff7a00;
+  opacity: 0.5;
+}
+/* Компактная строка управления блоком: название + ↑ ↓. */
+.lay-ctl {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 5px;
+  margin: -2px 0 8px;
+  padding: 4px 6px;
+  border: 1px solid #ffd9b0;
+  border-radius: 9px;
+  background: #fff7ef;
+  cursor: grab;
+}
+.lay-ctl__t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #a8530a;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.lay-btn {
+  width: 30px;
+  height: 28px;
+  border: 1px solid #f0c9a3;
+  border-radius: 8px;
+  background: #fff;
+  color: #a8530a;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1;
+  cursor: pointer;
+}
+.lay-btn:hover {
+  background: #ffe9d4;
+}
+
+/* ── Режим правки колонок таблицы ────────────────────────────────────────── */
+/* В таблицах CSS `order` не работает: layout.js переставляет заголовки и
+   ячейки по data-col. Здесь — подсветка режима и ручки ← →. */
+.is-lay-cols {
+  outline: 2px dashed #ffc48a;
+  outline-offset: 4px;
+}
+.is-lay-cols thead th {
+  cursor: grab;
+}
+.is-lay-cols thead th.is-dragging {
+  background: #fff3e8;
+  opacity: 0.5;
+}
+.lay-ctl--col {
+  display: inline-flex;
+  gap: 3px;
+  margin: 0 6px 0 0;
+  padding: 2px;
+  vertical-align: middle;
+  border: 1px solid #ffd9b0;
+  border-radius: 8px;
+  background: #fff7ef;
+  cursor: grab;
+}
+.lay-ctl--col .lay-btn {
+  width: 24px;
+  height: 22px;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .lay-bar {
+    justify-content: stretch;
+  }
+  .lay-expand {
+    width: 100%;
+    justify-content: center;
+  }
+  .lay-panel__modes {
+    width: 100%;
+    margin-left: 0;
+  }
+  .lay-panel__modes .lay-mode {
+    flex: 1 1 auto;
+  }
+  .lay-panel__acts .btn {
+    flex: 1 1 auto;
+  }
+}

@@ -22,6 +22,9 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
         "contact2_relation": "VARCHAR(128)",
         "is_delivery": "BOOLEAN DEFAULT FALSE",
         "delivery_district": "VARCHAR(255)",
+        # Необязательный комментарий к доставке (окно «Доставка» в приёмке).
+        "delivery_comment": "TEXT",
+        "delivery_courier_phone": "VARCHAR(32)",
         "master_payout": "NUMERIC(12, 2)",
         # Ежедневные SMS-напоминания «заберите технику» (см. services/reminders.py).
         "reminder_next_at": "TIMESTAMP",
@@ -41,6 +44,10 @@ NEW_COLUMNS: dict[str, dict[str, str]] = {
     },
     "repair_parts": {
         "is_manual": "BOOLEAN DEFAULT FALSE",
+    },
+    "repair_photos": {
+        # Уменьшенная копия для сетки в карточке (см. models.RepairPhoto).
+        "thumb_key": "VARCHAR(512)",
     },
     "equipment": {
         "storage_place": "VARCHAR(255)",

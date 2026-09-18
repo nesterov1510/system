@@ -10,13 +10,19 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import utcnow
-from app.db.models import Part, Payment, Repair
+from app.db.models import Part, Payment, Repair, RepairStatus
 
 MIN_SAMPLE = 3
 ASHGABAT = ZoneInfo("Asia/Ashgabat")
 
-CLOSED_STATUSES = ("Выдано", "Архив", "Отказ")
-IN_PROCESS_STATUSES = ("Принято", "Диагностика", "Согласование", "В ремонте")
+# Ремонты, по которым техника уже у клиента: статус «Завершён» сам по себе
+# этого не означает, поэтому смотрим на дату выдачи.
+ISSUED_CLAUSE = Repair.issued_at.isnot(None)
+NOT_ISSUED_CLAUSE = Repair.issued_at.is_(None)
+# Статусы «работа идёт» (техника в сервисе, ремонт не завершён).
+IN_PROCESS_STATUSES = tuple(RepairStatus.ACTIVE)
+# Ремонты, готовые к выдаче: завершены, но клиент ещё не забрал технику.
+READY_CLAUSES = [Repair.status == RepairStatus.DONE, NOT_ISSUED_CLAUSE]
 
 DASHBOARD_FILTER_LABELS = {
     "all": "Все ремонты",
@@ -91,36 +97,32 @@ def dashboard_filter_clauses(key: str | None) -> list:
         return []
     now = utcnow()
     if key == "ready":
-        return [Repair.status == "Готово к выдаче"]
+        return list(READY_CLAUSES)
     if key == "waiting-parts":
-        return [Repair.status == "Ожидание запчастей"]
+        return [Repair.status == RepairStatus.WAITING_PARTS]
     if key == "today":
         return [Repair.accepted_at >= _today_start_utc()]
     if key == "in-repair":
         return [Repair.status.in_(IN_PROCESS_STATUSES)]
     if key == "not-picked-up":
+        # Готово больше трёх дней назад, а клиент так и не пришёл.
         three = now - timedelta(days=3)
         return [
-            or_(
-                Repair.status == "Не забрано",
-                and_(
-                    Repair.status == "Готово к выдаче",
-                    Repair.issued_at.is_(None),
-                    Repair.ready_at.isnot(None),
-                    Repair.ready_at < three,
-                    or_(Repair.storage_until.is_(None), Repair.storage_until >= now),
-                ),
-            )
+            Repair.status == RepairStatus.DONE,
+            NOT_ISSUED_CLAUSE,
+            Repair.ready_at.isnot(None),
+            Repair.ready_at < three,
+            or_(Repair.storage_until.is_(None), Repair.storage_until >= now),
         ]
     if key == "disposable":
         return [
             Repair.storage_until.isnot(None),
             Repair.storage_until < now,
-            Repair.status.notin_(list(CLOSED_STATUSES)),
+            NOT_ISSUED_CLAUSE,
         ]
     if key == "warranty":
         return [
-            Repair.status == "Выдано",
+            ISSUED_CLAUSE,
             Repair.warranty_text.isnot(None),
             Repair.warranty_text != "",
         ]
@@ -173,9 +175,7 @@ async def overview(db: AsyncSession) -> dict:
     total = (await db.execute(select(func.count(Repair.id)))).scalar_one()
     active = (
         await db.execute(
-            select(func.count(Repair.id)).where(
-                Repair.status.notin_(["Выдано", "Отказ", "Архив"])
-            )
+            select(func.count(Repair.id)).where(NOT_ISSUED_CLAUSE)
         )
     ).scalar_one()
     overdue = (
@@ -183,7 +183,7 @@ async def overview(db: AsyncSession) -> dict:
             select(func.count(Repair.id)).where(
                 Repair.storage_until.isnot(None),
                 Repair.storage_until < now,
-                Repair.status.notin_(["Выдано", "Отказ", "Архив"]),
+                NOT_ISSUED_CLAUSE,
             )
         )
     ).scalar_one()

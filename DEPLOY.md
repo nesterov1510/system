@@ -152,7 +152,11 @@ SEED_ADMIN_PHONE=+99300000000
 MSB_API_URL=http://127.0.0.1:8085
 MSB_EMAIL=admin@msb.local
 MSB_PASSWORD=${ADMIN_PASSWORD}
-MSB_PRINT_CMD='lp -d EPSON_L3250 {file}'
+# Бланки A4 — очередь CUPS этого сервера (lpstat -p). Этикетки — raw TSPL
+# напрямую в 192.168.8.75:9100. MSB_PRINT_CMD не используется.
+MSB_PRINTER_A4=office_printer_a4
+MSB_LABEL_HOST=192.168.8.75
+MSB_LABEL_PORT=9100
 MSB_POLL_SECONDS=3
 MSB_SAVE_DIR=/home/windowrepair-ae/msb/apps/print-agent/printed
 EOF
@@ -381,44 +385,47 @@ grep '^SEED_ADMIN_PASSWORD=' .env
 
 ---
 
-## 9. Print-agent и Epson L3250 (опционально)
+## 9. Print-agent: бланки в CUPS, этикетки — raw TSPL
 
-> Второй принтер `3B-350B` для этикеток 58×38, расшаренный через CUPS на
-> `192.168.5.238`, настраивается отдельно по инструкции
+> Бланки A4 печатаются в локальную очередь CUPS `office_printer_a4`. Принтер
+> этикеток **не** в CUPS: он слушает raw-сокет `192.168.8.75:9100` и читает
+> TSPL, поэтому этикетки уходят туда напрямую (режим `raw_tspl`). Подробнее —
 > [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
 
-Не запускайте `msb-print-agent`, пока принтер не установлен в ОС. Если агент
-будет работать на другом компьютере рядом с принтером, на нём нужно указать
-`MSB_API_URL=http://192.168.8.81:8085`. Ниже описан вариант на этом же Linux-
-сервере.
+Не запускайте `msb-print-agent`, пока принтеры не доступны. Если агент будет
+работать на другом компьютере рядом с принтером, на нём нужно указать
+`MSB_API_URL=http://192.168.8.81:8085`. Ниже описан вариант на этом же
+Linux-сервере.
 
-### 9.1. Установка CUPS и принтера
+### 9.1. CUPS для бланков A4
 
 ```bash
 sudo apt install -y cups cups-client
 sudo systemctl enable --now cups
 
-lpstat -t
+lpstat -p -d
 lpinfo -v
 ```
 
-Для сетевого принтера с поддержкой IPP Everywhere (замените IP принтера):
+Для сетевого A4-принтера с поддержкой IPP Everywhere (замените IP принтера):
 
 ```bash
-sudo lpadmin -p EPSON_L3250 -E \
+sudo lpadmin -p office_printer_a4 -E \
   -v ipp://192.168.8.X/ipp/print -m everywhere
-sudo lpoptions -d EPSON_L3250
 lpstat -p -d
 ```
-
-Если `-m everywhere` не поддерживается устройством, установите драйвер Epson и
-создайте очередь через CUPS. Точное имя очереди из `lpstat -p` должно совпадать
-с именем после `-d` в `MSB_PRINT_CMD`.
 
 Тест CUPS:
 
 ```bash
-printf 'MSB printer test\n' | lp -d EPSON_L3250
+printf 'MSB printer test\n' | lp -d office_printer_a4
+```
+
+Этикеточный принтер в CUPS добавлять **не нужно**: он разговаривает по TSPL и
+доступен напрямую. Проверка:
+
+```bash
+nc -zv 192.168.8.75 9100
 ```
 
 ### 9.2. Учётная запись агента
@@ -430,11 +437,14 @@ printf 'MSB printer test\n' | lp -d EPSON_L3250
 ```ini
 MSB_EMAIL=printer@msb.local
 MSB_PASSWORD=ВСТАВЬТЕ_ПАРОЛЬ_ПОЛЬЗОВАТЕЛЯ
-MSB_PRINT_CMD='lp -d EPSON_L3250 {file}'
 ```
 
 Пароль без пробелов и shell-символов проще всего получить командой
 `openssl rand -hex 16`.
+
+`MSB_PRINT_CMD` не нужен: бланки идут в очередь `cups_local`, этикетки — в
+raw-сокет. Если строка осталась в `.env` от прежней схемы
+(`lp -d EPSON_L3250 {file}`), удалите её, чтобы она не вводила в заблуждение.
 
 ### 9.3. Установка и запуск агента
 

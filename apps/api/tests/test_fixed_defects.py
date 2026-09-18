@@ -108,22 +108,42 @@ def test_master_cannot_set_own_payout_and_price(client, master_ctx):
         assert r.status_code == 403, f"{field}: {r.status_code} {r.text}"
 
 
-def test_master_cannot_set_part_price_but_can_add_part(client, master_ctx):
+def test_master_sets_part_price_in_own_repair(client, master_ctx):
+    """В своём заказе мастер указывает цену запчасти сам.
+
+    Раньше цену принимали только старшие роли, и мастер, добавив деталь,
+    не мог проставить к ней стоимость — карточка оставалась без себестоимости,
+    пока её не допишет оператор.
+    """
     rid = master_ctx["repair"]["id"]
-    # Свою цену задать нельзя — иначе исказится себестоимость.
     r = client.post(
         f"/api/repairs/{rid}/parts",
         headers=master_ctx["headers"],
-        json={"name": "Деталь мастера", "qty": 1, "price": 777},
-    )
-    assert r.status_code == 403, r.text
-    # Без цены — можно: берётся складская цена.
-    r = client.post(
-        f"/api/repairs/{rid}/parts",
-        headers=master_ctx["headers"],
-        json={"name": "Деталь мастера", "qty": 1},
+        json={"name": "Деталь мастера", "qty": 2, "price": 777},
     )
     assert r.status_code == 201, r.text
+    assert r.json()["price"] == 777, r.json()
+
+    # Без цены по-прежнему можно: подставляется складская.
+    r = client.post(
+        f"/api/repairs/{rid}/parts",
+        headers=master_ctx["headers"],
+        json={"name": "Деталь без цены", "qty": 1},
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_master_cannot_set_part_price_in_foreign_repair(
+    client, master_ctx, operator_headers, city_id
+):
+    """Право на цену действует только в своём заказе — чужой не открывается."""
+    other = _mk_repair(client, operator_headers, city_id, f"perm-f-{uuid.uuid4().hex[:8]}")
+    r = client.post(
+        f"/api/repairs/{other['id']}/parts",
+        headers=master_ctx["headers"],
+        json={"name": "Деталь в чужой", "qty": 1, "price": 777},
+    )
+    assert r.status_code == 403, r.text
 
 
 def test_master_cannot_remove_part(client, admin_headers, master_ctx):
@@ -296,10 +316,18 @@ def test_invalid_status_rejected(client, operator_headers, city_id):
     r = client.patch(
         f"/api/repairs/{repair['id']}",
         headers=operator_headers,
-        json={"status": "В ремонте"},
+        json={"status": "В работе"},
     )
     assert r.status_code == 200, r.text
-    assert r.json()["status"] == "В ремонте"
+    assert r.json()["status"] == "В работе"
+
+    # Устаревший статус из старого списка больше не принимается.
+    r = client.patch(
+        f"/api/repairs/{repair['id']}",
+        headers=operator_headers,
+        json={"status": "Готово к выдаче"},
+    )
+    assert r.status_code == 422, r.text
 
 
 # --------------------------------------------------------------------------

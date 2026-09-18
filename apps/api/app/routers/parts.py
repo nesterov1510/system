@@ -14,10 +14,12 @@ from sqlalchemy.orm import selectinload
 from app.core.deps import CurrentUser, DbSession, require_roles
 from app.core.permissions import (
     STOCK_CATALOG_ROLES,
+    can_access_repair,
     can_add_repair_part,
     can_edit_stock_catalog,
     can_remove_repair_part,
     can_set_repair_part_price,
+    can_view_repair,
 )
 from app.db.models import Part, Repair, RepairEvent, RepairPart, UserRole
 from app.services import audit
@@ -167,9 +169,13 @@ def _to_rp_out(rp: RepairPart) -> RepairPartOut:
 
 @router.get("/repairs/{repair_id}/parts", response_model=list[RepairPartOut])
 async def list_repair_parts(repair_id: uuid.UUID, db: DbSession, user: CurrentUser):
-    repair = await db.get(Repair, repair_id)
-    if repair is None:
-        raise HTTPException(404, "Ремонт не найден")
+    # Ремонт грузим общим помощником: он подтягивает masters и accepted_by_user,
+    # без которых can_view_repair не может решить, свой это заказ или чужой.
+    from app.routers.repairs import _get_repair_or_404
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not can_view_repair(user, repair):
+        raise HTTPException(403, "Нет доступа к этому ремонту")
     row = await db.execute(
         select(RepairPart)
         .options(selectinload(RepairPart.part))
@@ -185,20 +191,26 @@ async def add_repair_part(
     db: DbSession,
     user: CurrentUser,
 ):
-    repair = await db.get(Repair, repair_id)
-    if repair is None:
-        raise HTTPException(404, "Ремонт не найден")
+    # can_add_repair_part — проверка РОЛИ: по ней любой мастер мог списать
+    # деталь на чужой ремонт. Принадлежность заказа проверяется отдельно.
+    # Ремонт грузим общим помощником: он подтягивает masters/accepted_by_user,
+    # без которых can_access_repair не решает, свой это заказ или чужой.
+    from app.routers.repairs import _get_repair_or_404
+
+    repair = await _get_repair_or_404(db, repair_id)
+    if not can_access_repair(user, repair):
+        raise _forbid("Нет доступа к этому ремонту")
 
     # Права: списывать запчасть под ремонт могут не все роли.
     if not can_add_repair_part(user):
         raise _forbid("Недостаточно прав, чтобы добавлять запчасти к ремонту")
 
-    # Цену запчасти вправе задавать только старшие роли: иначе мастер может
-    # списать деталь по произвольной (заниженной/завышенной) цене и исказить
-    # себестоимость и прибыль.
+    # Цену вправе указать старшая роль либо мастер в своём заказе — ремонт к
+    # этому моменту уже загружен, и can_access_repair выше подтвердил, что
+    # заказ его. В чужом ремонте мастер цену по-прежнему не задаёт.
     wants_price = payload.price is not None
-    if wants_price and not can_set_repair_part_price(user):
-        raise _forbid("Цену запчасти указывает администратор, менеджер или оператор")
+    if wants_price and not can_set_repair_part_price(user, repair):
+        raise _forbid("Цену запчасти в этом ремонте вам указать нельзя")
 
     is_manual = False
     if payload.part_id:

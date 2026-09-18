@@ -6,6 +6,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from app.db.models import RepairStatus, map_status
 from app.db.session import async_session_factory
 from app.routers import public as public_api
 from app.webui.templating import render_async
@@ -13,8 +14,7 @@ from app.webui.templating import render_async
 router = APIRouter(tags=["webui-public"])
 
 # Порядок этапов для полоски прогресса на публичной странице.
-PROGRESS = ["Принято", "Диагностика", "Согласование", "Ожидание запчастей",
-            "В ремонте", "Готово к выдаче", "Выдано"]
+PROGRESS = list(RepairStatus.ALL)
 
 
 @router.get("/r/{token}", response_class=HTMLResponse)
@@ -30,9 +30,10 @@ async def public_page(request: Request, token: str):
             )
             return HTMLResponse(html, status_code=status_code)
 
-        # Индекс прогресса (терминальные статусы).
-        idx = PROGRESS.index(data.status) if data.status in PROGRESS else \
-              (6 if data.status in ("Выдано",) else 2)
+        # Индекс прогресса. Устаревшие статусы приводим к актуальным, чтобы
+        # старые ремонты не «зависали» на середине полоски.
+        status = map_status(data.status) or data.status
+        idx = PROGRESS.index(status) if status in PROGRESS else 2
         ctx = {
             "request": request, "user": None, "d": data,
             "progress": PROGRESS, "progress_idx": idx,

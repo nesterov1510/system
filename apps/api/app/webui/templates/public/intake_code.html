@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Код доступа — Приёмка</title>
+  <link rel="stylesheet" href="/static/msb/base.css">
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:linear-gradient(155deg,#0d151c,#192d39)}
+    .card{width:min(420px,100%);background:#fff;border-radius:20px;padding:28px;box-shadow:0 28px 70px rgba(6,12,18,.35)}
+    .logo{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+    .logo .badge{width:52px;height:40px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(145deg,#ff932e,#ff6a00);color:#fff;font-weight:900}
+    h1{font-size:19px;margin:0 0 6px}
+    p.muted{color:#7d8a96;font-size:13.5px;margin:0 0 18px;line-height:1.5}
+    label{display:block;font-size:13px;font-weight:700;color:#38444f;margin-bottom:6px}
+    input{width:100%;box-sizing:border-box;padding:13px 14px;border:1.5px solid #dbe2e9;border-radius:12px;font-size:16px;letter-spacing:.06em}
+    button{margin-top:16px;width:100%;min-height:46px;border:0;border-radius:12px;background:linear-gradient(145deg,#ff9330,#ff6a00);color:#fff;font-size:15px;font-weight:800;cursor:pointer}
+    .err{background:#fdecec;border:1px solid #f5b5b5;color:#a02020;border-radius:12px;padding:11px 14px;font-weight:700;font-size:13.5px;margin-bottom:14px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo"><span class="badge" aria-hidden="true">🧰</span><div><strong>MSB</strong></div></div>
+    <h1>Приёмка техники</h1>
+    <p class="muted">Страница доступна по коду. Код выдаёт администратор сервисного центра.</p>
+    {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
+    <form method="get" action="/intake">
+      <label for="key">Код доступа</label>
+      <input id="key" name="key" type="text" autocomplete="off" inputmode="text" required autofocus>
+      <button type="submit">Продолжить</button>
+    </form>
+  </div>
+</body>
+</html>

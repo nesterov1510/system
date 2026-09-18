@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import CurrentUser, DbSession
 from app.core.permissions import can_view_callcenter_queue
-from app.db.models import Repair, RepairMaster
+from app.db.models import Repair, RepairMaster, RepairStatus
 from app.routers.repairs import _serialize
 
 router = APIRouter(prefix="/callcenter", tags=["callcenter"])
@@ -25,21 +25,25 @@ async def _queue(db, kind: str, limit: int):
     )
 
     if kind == "agree":
-        # Нужно позвонить клиенту для согласования цены.
-        q = q.where(Repair.status == "Согласование")
+        # Нужно позвонить клиенту для согласования цены: ремонт ещё в работе,
+        # а итоговая цена не выставлена.
+        q = q.where(
+            Repair.status.in_(list(RepairStatus.ACTIVE)),
+            Repair.price_final.is_(None),
+        )
     elif kind == "ready":
-        # Сказать, что готово.
-        q = q.where(Repair.status == "Готово к выдаче")
+        # Сказать, что готово: завершён, но клиент ещё не забрал технику.
+        q = q.where(Repair.status == RepairStatus.DONE, Repair.issued_at.is_(None))
     elif kind == "overdue":
         # Просрочка хранения (не выдано и срок вышел).
         q = q.where(
             Repair.storage_until.isnot(None),
             Repair.storage_until < now,
-            Repair.status.notin_(["Выдано", "Отказ", "Архив"]),
+            Repair.issued_at.is_(None),
         )
     else:
-        # "all": всё активное, кроме закрытого.
-        q = q.where(Repair.status.notin_(["Выдано", "Отказ", "Архив"]))
+        # "all": всё, что ещё стоит в сервисе.
+        q = q.where(Repair.issued_at.is_(None))
 
     q = q.order_by(Repair.accepted_at.desc()).limit(limit)
     row = await db.execute(q)
