@@ -6,19 +6,38 @@ Default keys:
 - sla_defaults: dict
 - brand: str
 - repair_statuses: list[str]
-- printer: основной принтер бланков
-- label_printer: CUPS-очередь для этикеток 58×38 мм
+- printer: очередь CUPS для бланков A4
+- label_printer: очередь CUPS для этикеток 58×38 мм
 """
+import os
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import DEFAULT_REPAIR_STATUSES, Setting, map_status
 from app.services.sms import DEFAULT_PICKUP_REMINDER_TEXT
 
-# Как print-agent доставляет этикетку до принтера:
-#   cups_local  — очередь в CUPS на самом сервере (нужно только имя очереди);
-#   cups_remote — очередь расшарена CUPS на другом компьютере (ip + порт 631).
+# Как print-agent доставляет документ до принтера:
+#   cups_local  — очередь в CUPS на самом сервере MSB (нужно только имя очереди);
+#   cups_remote — очередь расшарена CUPS на другом компьютере (ip + порт 631);
+#   agent       — драйвером ОС (SumatraPDF на Windows, иначе `lp` + MSB_PRINT_CMD);
+#   ipp         — напрямую по IPP/AirPrint на http://IP:631/ipp/print.
+PRINTER_MODES = ("cups_local", "cups_remote", "agent", "ipp")
+# У этикеток нет режима agent/ipp: PDF 58×38 печатается только очередью CUPS.
 LABEL_PRINTER_MODES = ("cups_local", "cups_remote")
+
+# Обе очереди живут в CUPS самого сервера MSB (`lpstat -p`):
+#   office_printer_a4 — бланки A4;
+#   3B-350B           — этикетки 58×38 мм.
+# Имя очереди — не адрес: если его нет в CUPS, печать падает с явной ошибкой и
+# списком доступных очередей, поэтому значение по умолчанию безопасно.
+# Переопределяется env MSB_PRINTER_A4 / MSB_PRINTER_LABEL и в «Админ → Принтер».
+DEFAULT_A4_QUEUE = os.environ.get("MSB_PRINTER_A4", "office_printer_a4")
+DEFAULT_LABEL_QUEUE = os.environ.get("MSB_PRINTER_LABEL", "3B-350B")
+
+# Названия A4-принтера из прошлой схемы (Epson L3250 по USB на рабочей машине).
+# На сервере такой очереди нет, поэтому они считаются устаревшими.
+LEGACY_A4_NAMES = ("", "epson l3250", "epson_l3250")
 
 DEFAULT_SETTINGS: dict[str, dict] = {
     "storage_months": {
@@ -111,18 +130,21 @@ DEFAULT_SETTINGS: dict[str, dict] = {
         "description": "Контроль доступа к интерфейсу по IP клиента (белый/чёрный список)",
     },
     "printer": {
-        "value": {"ip": "", "port": 631, "mode": "agent", "name": ""},
-        "description": "Основной принтер: имя, режим печати (agent|ipp)",
+        # Очередь CUPS на сервере MSB для бланков A4.
+        "value": {"ip": "", "port": 631, "mode": "cups_local", "name": DEFAULT_A4_QUEUE},
+        "description": "Принтер бланков A4: очередь CUPS (cups_local|cups_remote|agent|ipp)",
     },
     "label_printer": {
-        # Адрес и имя очереди намеренно пустые: их задаёт администратор в
-        # «Админ → Принтер». Хардкодить внутренний IP в коде нельзя — при
-        # переносе на другой сервер этикетки молча уезжали бы не туда.
+        # Очередь CUPS на сервере MSB для этикеток 58×38 мм. Адрес принтера
+        # знает сам CUPS (`lpstat -v 3B-350B`), поэтому IP не нужен: достаточно
+        # имени очереди. Если имя не совпадёт с реальным, печать остановится с
+        # внятной ошибкой и списком очередей — молча на другой принтер документ
+        # не уедет.
         "value": {
             "ip": "",
             "port": 631,
-            "mode": "cups_remote",
-            "name": "",
+            "mode": "cups_local",
+            "name": DEFAULT_LABEL_QUEUE,
             "width_mm": 58,
             "height_mm": 38,
             "media": "Custom.58x38mm",
@@ -240,10 +262,24 @@ async def get_consent_repair_text(db: AsyncSession) -> str:
 
 
 async def get_printer(db: AsyncSession) -> dict:
-    s = await get_setting(db, "printer")
-    if s:
-        return s
-    return DEFAULT_SETTINGS["printer"]["value"]
+    """Настройки принтера бланков A4.
+
+    По умолчанию — очередь `office_printer_a4` в CUPS самого сервера MSB:
+    print-agent и API работают на одной машине с CUPS, поэтому адрес и порт не
+    нужны. Режимы `cups_remote`/`ipp` оставлены для принтера на другом
+    компьютере, `agent` — для печати драйвером ОС (Windows/SumatraPDF).
+    """
+    value = dict(DEFAULT_SETTINGS["printer"]["value"])
+    saved = await get_setting(db, "printer")
+    if saved:
+        value.update(saved)
+    if value.get("mode") not in PRINTER_MODES:
+        value["mode"] = "cups_local"
+    if not str(value.get("name") or "").strip():
+        # Пустое имя означает «очередь не задана»: подставляем очередь сервера,
+        # иначе агент печатал бы на принтер по умолчанию CUPS (этикеточный).
+        value["name"] = DEFAULT_A4_QUEUE
+    return value
 
 
 async def get_label_printer(db: AsyncSession) -> dict:
@@ -255,7 +291,7 @@ async def get_label_printer(db: AsyncSession) -> dict:
     Режимы:
       cups_local  — очередь в CUPS на том же сервере, где работает print-agent.
                     Нужен только `name`; адрес принтера знает сам CUPS
-                    (`lpstat -v label58` → `socket://192.168.5.105:9100`).
+                    (`lpstat -v 3B-350B` → `socket://192.168.5.105:9100`).
       cups_remote — очередь расшарена CUPS на другом компьютере: нужны
                     `ip`, `port` (порт CUPS, 631) и `name`.
     """
@@ -264,7 +300,9 @@ async def get_label_printer(db: AsyncSession) -> dict:
     if saved:
         value.update(saved)
     if value.get("mode") not in LABEL_PRINTER_MODES:
-        value["mode"] = "cups_remote"
+        value["mode"] = "cups_local"
+    if not str(value.get("name") or "").strip():
+        value["name"] = DEFAULT_LABEL_QUEUE
     # Размер этикетки не настраивается — он определён физическим носителем.
     value.update(width_mm=58, height_mm=38)
     return value

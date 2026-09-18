@@ -1,14 +1,17 @@
 """Одноразовые миграции ДАННЫХ (в отличие от `db/migrate.py` — про колонки).
 
 `Base.metadata.create_all` создаёт таблицы, `db/migrate.py` добавляет колонки,
-но neither не умеет пересчитать уже лежащие в БД значения. Здесь — список
-идемпотентных пересчётов, каждый помечается применённым в
+но ни то, ни другое не умеет пересчитать уже лежащие в БД значения. Здесь —
+список идемпотентных пересчётов, каждый помечается применённым в
 `Setting["data_migrations"]`, поэтому при следующем старте не повторяется.
 
-Сейчас здесь одна миграция: `client_phone_norm_v2`. Старая `normalize_phone()`
-была написана под российские коды 7/8 и не приводила туркменские номера к
-единому виду, из-за чего один человек, записанный как «+993 61 234567» и как
-«8 61 234567», получал две разные записи в `clients`.
+`client_phone_norm_v2`: старая `normalize_phone()` была написана под российские
+коды 7/8 и не приводила туркменские номера к единому виду, из-за чего один
+человек, записанный как «+993 61 234567» и как «8 61 234567», получал две
+разные записи в `clients`.
+
+`cups_local_queues_v1`: оба принтера стоят в CUPS самого сервера MSB —
+`office_printer_a4` (бланки A4) и `3B-350B` (этикетки 58×38).
 """
 import logging
 
@@ -157,10 +160,68 @@ async def migrate_repair_statuses(db: AsyncSession) -> dict:
     }
 
 
+# Названия очередей, которые считаются устаревшими: пустое имя (ничего не
+# задано) и значения прошлой схемы — Epson L3250 по USB на рабочей машине для
+# бланков и `label58` для этикеток. Очередь `3B-350B` раньше была расшарена
+# CUPS на другом компьютере и теперь переехала в CUPS самого сервера MSB,
+# поэтому её сохранённый `cups_remote` тоже приводится к локальной очереди.
+LEGACY_A4_NAMES = ("", "epson l3250", "epson_l3250")
+LEGACY_LABEL_NAMES = ("", "label58", "3b-350b")
+
+
+async def align_cups_queues(db: AsyncSession) -> dict:
+    """Привести настройки печати к двум очередям CUPS самого сервера MSB.
+
+    Оба принтера подключены к CUPS на той же машине, где работает MSB и
+    print-agent:
+
+      `office_printer_a4` — бланки A4;
+      `3B-350B`           — этикетки 58×38 мм.
+
+    Поэтому режим `cups_local` (нужно только имя очереди, адрес знает CUPS)
+    вытесняет прежние схемы: драйвер ОС для бланков (`agent` + `MSB_PRINT_CMD`
+    с Epson L3250) и удалённый CUPS для этикеток. Намеренно заданные варианты
+    не трогаем: `ipp`/`cups_remote` для бланков и чужое имя очереди для
+    этикеток остаются как есть — администратор настроил их сам.
+    """
+    from app.services.settings import DEFAULT_A4_QUEUE, DEFAULT_LABEL_QUEUE
+
+    changed: dict[str, str] = {}
+
+    printer = await get_setting(db, "printer") or {}
+    mode = str(printer.get("mode") or "").strip()
+    name = str(printer.get("name") or "").strip()
+    if mode == "agent" and name.lower() in LEGACY_A4_NAMES:
+        await set_setting(
+            db,
+            "printer",
+            {"ip": "", "port": 631, "mode": "cups_local", "name": DEFAULT_A4_QUEUE},
+            "Принтер бланков A4: очередь CUPS, режим печати",
+        )
+        changed["printer"] = f"{mode}/{name or '—'} → cups_local/{DEFAULT_A4_QUEUE}"
+
+    label = await get_setting(db, "label_printer") or {}
+    label_mode = str(label.get("mode") or "").strip()
+    label_name = str(label.get("name") or "").strip()
+    if label_mode == "cups_remote" and label_name.lower() in LEGACY_LABEL_NAMES:
+        value = dict(label)
+        value.update(
+            ip="", mode="cups_local", name=DEFAULT_LABEL_QUEUE,
+            width_mm=58, height_mm=38,
+        )
+        await set_setting(db, "label_printer", value, "CUPS-принтер этикеток 58×38 мм")
+        changed["label_printer"] = (
+            f"{label_mode}/{label_name or '—'} → cups_local/{DEFAULT_LABEL_QUEUE}"
+        )
+
+    return changed or {"ok": True}
+
+
 # Реестр миграций: имя -> функция. Порядок не важен (каждая идемпотентна).
 MIGRATIONS = {
     "client_phone_norm_v2": reindex_client_phones,
     "repair_statuses_v2": migrate_repair_statuses,
+    "cups_local_queues_v1": align_cups_queues,
 }
 
 

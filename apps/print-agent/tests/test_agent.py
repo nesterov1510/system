@@ -59,9 +59,9 @@ class RemoteCupsTests(unittest.TestCase):
 
 
 class LocalCupsTests(unittest.TestCase):
-    """Очередь label58 подключена к CUPS самого сервера по raw-сокету.
+    """Очередь 3B-350B подключена к CUPS самого сервера по raw-сокету.
 
-    `lpstat -v label58` → `socket://192.168.5.105:9100`: адрес принтера знает
+    `lpstat -v 3B-350B` → `socket://192.168.5.105:9100`: адрес принтера знает
     CUPS, поэтому агенту нужно только имя очереди. Порт 9100 — raw-порт
     принтера, а не порт CUPS, и в настройках MSB он не участвует.
     """
@@ -69,7 +69,7 @@ class LocalCupsTests(unittest.TestCase):
     def setUp(self):
         self.printer = {
             "mode": "cups_local",
-            "name": "label58",
+            "name": "3B-350B",
             "media": "Custom.58x38mm",
         }
 
@@ -77,7 +77,7 @@ class LocalCupsTests(unittest.TestCase):
         command = agent._local_cups_command(self.printer, "/tmp/label.pdf")
         self.assertEqual(
             command,
-            ["lp", "-d", "label58", "-o", "media=Custom.58x38mm", "/tmp/label.pdf"],
+            ["lp", "-d", "3B-350B", "-o", "media=Custom.58x38mm", "/tmp/label.pdf"],
         )
 
     def test_no_host_or_port_in_command(self):
@@ -103,6 +103,44 @@ class LocalCupsTests(unittest.TestCase):
         self.assertEqual(mode, "cups_local")
         local.assert_called_once_with(b"PDF", self.printer)
         via_os.assert_not_called()
+
+
+class TwoLocalQueuesTests(unittest.TestCase):
+    """Бланки A4 и этикетки — две разные очереди одного CUPS сервера MSB.
+
+    `office_printer_a4` печатает бланки, `3B-350B` — этикетки 58×38. Документ
+    не должен попасть не в ту очередь: у бланка нет media-опции (размер задаёт
+    драйвер A4-принтера), у этикетки — обязательна.
+    """
+
+    A4 = {"mode": "cups_local", "name": "office_printer_a4"}
+    LABEL = {"mode": "cups_local", "name": "3B-350B", "media": "Custom.58x38mm"}
+
+    def test_blank_goes_to_a4_queue_without_media(self):
+        command = agent._local_cups_command(self.A4, "/tmp/blank.pdf")
+        self.assertEqual(command, ["lp", "-d", "office_printer_a4", "/tmp/blank.pdf"])
+
+    def test_queues_are_not_interchangeable(self):
+        blank = agent._local_cups_command(self.A4, "/tmp/x.pdf")
+        label = agent._local_cups_command(self.LABEL, "/tmp/x.pdf")
+        self.assertNotEqual(blank[2], label[2])
+        self.assertIn("office_printer_a4", blank)
+        self.assertIn("3B-350B", label)
+        self.assertNotIn("3B-350B", blank)
+
+    def test_a4_local_mode_bypasses_global_print_command(self):
+        """Бланк в локальную очередь, а не через MSB_PRINT_CMD старого Epson."""
+        with patch.object(agent, "print_via_local_cups") as local, patch.object(
+            agent, "print_via_os"
+        ) as via_os, patch.object(agent, "PRINT_CMD", "lp -d EPSON_L3250 {file}"):
+            mode = agent.print_pdf(b"PDF", self.A4)
+        self.assertEqual(mode, "cups_local")
+        local.assert_called_once_with(b"PDF", self.A4)
+        via_os.assert_not_called()
+
+    def test_missing_queue_name_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "имя локальной CUPS-очереди"):
+            agent._local_cups_command({"mode": "cups_local", "name": ""}, "/tmp/x.pdf")
 
 
 if __name__ == "__main__":

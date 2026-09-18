@@ -186,13 +186,19 @@ def test_intake_autoprints_label_not_blank(client, admin_headers):
     """При приёмке автоматически ставится в очередь ЭТИКЕТКА (repair_label), а не бланк."""
     cookies = _login(client)
     # Включаем CUPS-принтер этикеток — иначе автопечать молча пропускается.
+    # Режим форма отправляет всегда (select), здесь он задан явно.
     r = client.post("/admin/settings/label", cookies=cookies, data={
+        "label_mode": "cups_remote",
         "label_name": "Zebra_58",
         "label_ip": "192.168.5.99",
         "label_port": "631",
         "label_media": "Custom.58x38mm",
     }, follow_redirects=False)
     assert r.status_code == 303, r.text
+
+    queued_before = {
+        j["id"] for j in client.get("/api/print/jobs", headers=admin_headers).json()
+    }
 
     cities = client.get("/api/lookups/cities", cookies=cookies).json()
     r = client.post("/repairs/new", cookies=cookies, data={
@@ -208,10 +214,20 @@ def test_intake_autoprints_label_not_blank(client, admin_headers):
     }, follow_redirects=False)
     assert r.status_code == 303, r.text
 
+    # Смотрим только на задания этой приёмки: очередь печати общая для всех
+    # тестов, и в ней лежат этикетки других конфигураций принтера.
     jobs = client.get("/api/print/jobs", headers=admin_headers).json()
-    labels = [j for j in jobs if (j.get("payload") or {}).get("document_kind") == "repair_label"]
-    assert labels, "после приёмки в очереди печати должна быть этикетка"
+    fresh = [j for j in jobs if j["id"] not in queued_before]
+    kinds = [
+        (j.get("payload") or {}).get("document_kind")
+        for j in fresh
+    ]
+    labels = [j for j in fresh if (j.get("payload") or {}).get("document_kind") in ("repair_label", "client_label")]
+    assert labels, f"после приёмки в очереди печати должна быть этикетка: {kinds}"
     assert all((j.get("payload") or {}).get("printer", {}).get("mode") == "cups_remote" for j in labels)
+    assert all((j.get("payload") or {}).get("printer", {}).get("name") == "Zebra_58" for j in labels)
+    blanks = [j for j in fresh if j not in labels]
+    assert not blanks, f"бланк A4 не должен печататься при auto=label: {kinds}"
 
 
 def test_board_view_renders(client):

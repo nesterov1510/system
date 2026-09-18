@@ -49,21 +49,21 @@ def test_label_printer_config_and_validation(client, admin_headers):
 
 
 def test_local_cups_queue_needs_no_ip(client, admin_headers):
-    """label58 подключён к CUPS самого сервера — адрес знает CUPS, не MSB.
+    """3B-350B подключён к CUPS самого сервера — адрес знает CUPS, не MSB.
 
-    `lpstat -v label58` → `socket://192.168.5.105:9100`: 9100 это raw-порт
+    `lpstat -v 3B-350B` → `socket://192.168.5.105:9100`: 9100 это raw-порт
     принтера, а не порт CUPS, поэтому в настройках MSB он не указывается.
     """
     local_config = {
         "mode": "cups_local",
-        "name": "label58",
+        "name": "3B-350B",
         "media": "Custom.58x38mm",
     }
     r = client.put("/api/admin/printer/label", headers=admin_headers, json=local_config)
     assert r.status_code == 200, r.text
     saved = r.json()["label_printer"]
     assert saved["mode"] == "cups_local"
-    assert saved["name"] == "label58"
+    assert saved["name"] == "3B-350B"
     assert saved["width_mm"] == 58 and saved["height_mm"] == 38
 
     config = client.get("/api/admin/printer", headers=admin_headers)
@@ -79,7 +79,7 @@ def test_local_cups_queue_needs_no_ip(client, admin_headers):
     no_ip = client.put(
         "/api/admin/printer/label",
         headers=admin_headers,
-        json={"mode": "cups_remote", "name": "label58"},
+        json={"mode": "cups_remote", "name": "3B-350B"},
     )
     assert no_ip.status_code == 400, no_ip.text
 

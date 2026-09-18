@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""MSB print-agent — печать бланков из очереди на принтер.
+"""MSB print-agent — печать бланков и этикеток из очереди на принтер.
 
 Режимы (настраиваются в админке «Принтер»):
-  - mode=agent      : печать через локальный драйвер ОС (Epson L3250).
-  - mode=cups_remote: печать в CUPS-очередь на другом Linux-компьютере.
-  - mode=ipp        : прямая печать по AirPrint/IPP на http://IP:631/ipp/print.
+  - mode=cups_local  : очередь в CUPS на этом же сервере (нужно только имя).
+                       Так печатают оба принтера сервера MSB:
+                       `office_printer_a4` — бланки A4, `3B-350B` — этикетки.
+  - mode=cups_remote : печать в CUPS-очередь на другом Linux-компьютере.
+  - mode=agent       : печать через драйвер ОС (Windows/SumatraPDF, `MSB_PRINT_CMD`).
+  - mode=ipp         : прямая печать по AirPrint/IPP на http://IP:631/ipp/print.
 
 ВАЖНО для Windows:
   - для тихой печати PDF нужен SumatraPDF (бесплатный, portable):
@@ -269,10 +272,11 @@ def print_via_remote_cups(pdf_bytes: bytes, printer: dict) -> None:
 def _local_cups_command(printer: dict, pdf_path: str) -> list[str]:
     """Команда печати в локальную очередь CUPS.
 
-    Сетевой принтер этикеток может быть подключён к CUPS самого сервера по
-    raw-сокету: `lpstat -v label58` → `socket://192.168.5.105:9100`. Адрес и
-    порт в этом случае знает CUPS, поэтому агенту нужно только имя очереди —
-    raw-порт 9100 не является портом CUPS и в настройках MSB не указывается.
+    Оба принтера сервера MSB подключены к его же CUPS: `office_printer_a4`
+    печатает бланки A4, `3B-350B` — этикетки 58×38 (устройство очереди видно в
+    `lpstat -v 3B-350B`). Адрес и порт знает CUPS, поэтому агенту нужно только
+    имя очереди: raw-порт принтера (например 9100) не является портом CUPS и в
+    настройках MSB не указывается.
     """
     name = str(printer.get("name") or "").strip()
     if not name:

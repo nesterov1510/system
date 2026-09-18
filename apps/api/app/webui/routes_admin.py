@@ -670,14 +670,25 @@ async def admin_settings_printer(request: Request):
         return redir
     try:
         f = await request.form()
+        name = (f.get("printer_name") or "").strip()
+        ip = (f.get("printer_ip") or "").strip()
+        mode = (f.get("printer_mode") or "cups_local").strip()
+        if mode not in settings_svc.PRINTER_MODES:
+            return HTMLResponse("Неизвестный режим печати бланков", status_code=400)
+        if not name:
+            return HTMLResponse("Укажите имя очереди принтера", status_code=400)
+        # Локальной очереди адрес знает сам CUPS — IP нужен только удалённому
+        # CUPS и прямой печати по IPP.
+        if mode in ("cups_remote", "ipp") and not ip:
+            return HTMLResponse("Укажите IP компьютера с принтером", status_code=400)
         value = {
-            "ip": (f.get("printer_ip") or "").strip(),
+            "ip": ip,
             "port": int(_fnum(f.get("printer_port"), 631) or 631),
-            "mode": (f.get("printer_mode") or "agent").strip(),
-            "name": (f.get("printer_name") or "").strip(),
+            "mode": mode,
+            "name": name,
         }
         await settings_svc.set_setting(
-            db, "printer", value, "Принтер: IP, порт, режим печати (agent|ipp)"
+            db, "printer", value, "Принтер бланков A4: очередь CUPS, режим печати"
         )
         return RedirectResponse("/admin/settings?section=printer&saved=1", status_code=303)
     finally:
@@ -693,7 +704,7 @@ async def admin_settings_label(request: Request):
         f = await request.form()
         name = (f.get("label_name") or "").strip()
         ip = (f.get("label_ip") or "").strip()
-        mode = (f.get("label_mode") or "cups_remote").strip()
+        mode = (f.get("label_mode") or "cups_local").strip()
         if mode not in settings_svc.LABEL_PRINTER_MODES:
             return HTMLResponse("Неизвестный режим печати этикеток", status_code=400)
         if not name:

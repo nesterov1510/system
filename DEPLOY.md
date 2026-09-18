@@ -152,7 +152,10 @@ SEED_ADMIN_PHONE=+99300000000
 MSB_API_URL=http://127.0.0.1:8085
 MSB_EMAIL=admin@msb.local
 MSB_PASSWORD=${ADMIN_PASSWORD}
-MSB_PRINT_CMD='lp -d EPSON_L3250 {file}'
+# Обе очереди — в CUPS этого сервера (lpstat -p). MSB_PRINT_CMD в режиме
+# cups_local не используется, поэтому здесь его нет.
+MSB_PRINTER_A4=office_printer_a4
+MSB_PRINTER_LABEL=3B-350B
 MSB_POLL_SECONDS=3
 MSB_SAVE_DIR=/home/windowrepair-ae/msb/apps/print-agent/printed
 EOF
@@ -381,44 +384,47 @@ grep '^SEED_ADMIN_PASSWORD=' .env
 
 ---
 
-## 9. Print-agent и Epson L3250 (опционально)
+## 9. Print-agent и две очереди CUPS
 
-> Принтер этикеток 58×38 — очередь `label58` в CUPS на этом же сервере
-> (устройство `socket://192.168.5.105:9100`). Настраивается отдельно по
-> инструкции [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
+> Оба принтера подключены к CUPS этого же сервера: `office_printer_a4` печатает
+> бланки A4, `3B-350B` — этикетки 58×38 мм (устройство
+> `socket://192.168.5.105:9100`). Настройка обеих очередей описана в
+> [`LABEL_PRINTER.md`](LABEL_PRINTER.md).
 
-Не запускайте `msb-print-agent`, пока принтер не установлен в ОС. Если агент
+Не запускайте `msb-print-agent`, пока принтеры не установлены в CUPS. Если агент
 будет работать на другом компьютере рядом с принтером, на нём нужно указать
-`MSB_API_URL=http://192.168.8.81:8085`. Ниже описан вариант на этом же Linux-
-сервере.
+`MSB_API_URL=http://192.168.8.81:8085`, а в админке выбрать режим «На другом
+компьютере». Ниже описан вариант на этом же Linux-сервере.
 
-### 9.1. Установка CUPS и принтера
+### 9.1. Установка CUPS и очередей
 
 ```bash
 sudo apt install -y cups cups-client
 sudo systemctl enable --now cups
 
-lpstat -t
+lpstat -p -d
 lpinfo -v
 ```
 
 Для сетевого принтера с поддержкой IPP Everywhere (замените IP принтера):
 
 ```bash
-sudo lpadmin -p EPSON_L3250 -E \
+sudo lpadmin -p office_printer_a4 -E \
   -v ipp://192.168.8.X/ipp/print -m everywhere
-sudo lpoptions -d EPSON_L3250
+sudo lpadmin -p 3B-350B -E \
+  -v socket://192.168.5.105:9100 -m everywhere
 lpstat -p -d
 ```
 
-Если `-m everywhere` не поддерживается устройством, установите драйвер Epson и
-создайте очередь через CUPS. Точное имя очереди из `lpstat -p` должно совпадать
-с именем после `-d` в `MSB_PRINT_CMD`.
+Если `-m everywhere` не поддерживается устройством, установите драйвер модели и
+создайте очередь через CUPS. Точные имена очередей из `lpstat -p` должны
+совпадать с полями «Имя очереди» в `Админ → Настройки → Принтер`.
 
 Тест CUPS:
 
 ```bash
-printf 'MSB printer test\n' | lp -d EPSON_L3250
+printf 'MSB printer test\n' | lp -d office_printer_a4
+printf 'MSB label test\n' | lp -d 3B-350B
 ```
 
 ### 9.2. Учётная запись агента
@@ -430,11 +436,14 @@ printf 'MSB printer test\n' | lp -d EPSON_L3250
 ```ini
 MSB_EMAIL=printer@msb.local
 MSB_PASSWORD=ВСТАВЬТЕ_ПАРОЛЬ_ПОЛЬЗОВАТЕЛЯ
-MSB_PRINT_CMD='lp -d EPSON_L3250 {file}'
 ```
 
 Пароль без пробелов и shell-символов проще всего получить командой
 `openssl rand -hex 16`.
+
+`MSB_PRINT_CMD` в режиме `cups_local` не нужен и не используется: очередь
+указана в настройках MSB. Если строка осталась в `.env` от прежней схемы
+(`lp -d EPSON_L3250 {file}`), удалите её, чтобы она не вводила в заблуждение.
 
 ### 9.3. Установка и запуск агента
 
