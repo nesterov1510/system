@@ -698,3 +698,83 @@ def test_import_real_legacy_export_from_docs(client, admin_headers):
     assert rr.status_code == 200, rr.text
     rr = client.put("/api/admin/sms/templates", headers=admin_headers, json=sms_before["templates"])
     assert rr.status_code == 200, rr.text
+
+
+# --------------------------------------------------------------------------
+# Файл строго по спецификации (docs/EXPORT_FORMAT.md): int-id, минимум полей
+# --------------------------------------------------------------------------
+def test_import_spec_minimal_external_file(client, admin_headers):
+    payload = {
+        "version": "1.0",
+        "exported_at": "2026-09-23 12:00:00",
+        "tables": {
+            "clients": [
+                {"id": 1, "name": "Внешний Клиент", "phone": "+99364111222",
+                 "created_at": "2026-03-01 09:00:00", "is_archived": 0},
+                {"id": 2, "full_name": "Архивный Клиент", "phone": "+99364333444",
+                 "created_at": "2026-03-01 09:00:00", "is_archived": 1},
+            ],
+            "repairs": [
+                {"id": 10, "number": "TV-2026-001", "category": "Ноутбуки", "brand": "HP",
+                 "model": "250 G8", "serial_number": "5CD123", "equipment_json": "[\"charger\"]",
+                 "fault_client": "Не заряжается", "work_done": "Замена разъёма",
+                 "status": "Принят", "price_final_cents": 25000, "is_paid": 1, "client_id": 1},
+                {"id": 11, "number": "TV-2026-002", "category": "Телевизор", "brand": "LG",
+                 "serial": "SN-2", "status": "Выдан", "price_final_cents": 0, "is_paid": 0,
+                 "client_id": 2, "created_at": "2026-03-02 10:00:00"},
+                {"id": 12, "number": "TV-2026-003", "category": "Кофемашина", "status": "Что-то странное",
+                 "client_id": 1},
+            ],
+            "repair_masters": [
+                {"repair_id": 10, "user_id": 5, "display_name": "Внешний Мастер", "assignment_role": "master"},
+            ],
+            "repair_parts": [
+                {"id": 1, "repair_id": 10, "name": "Разъём питания", "quantity": 2, "unit_cost_cents": 1500},
+            ],
+            "repair_history": [
+                {"id": 1, "repair_id": 10, "event_type": "comment", "comment": "Принят в работу",
+                 "created_at": "2026-03-01 09:05:00"},
+            ],
+            "donor_units": [{"id": 1, "brand": "HP", "model": "255 G7"}],
+            "donor_parts": [{"id": 1, "donor_id": 1, "name": "Матрица", "price_cents": 20000}],
+            "sms_log": [],
+            "print_log": [],
+        },
+    }
+    r = _post_import(client, admin_headers, payload)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["ok"], rep
+    assert rep["tables"]["clients"]["created"] == 2
+    assert rep["tables"]["repairs"]["created"] == 3
+    assert rep["tables"]["repair_parts"]["created"] == 1
+    assert rep["tables"]["donor_parts"]["created"] == 1
+    assert any("Что-то странное" in w for w in rep["warnings"])
+
+    a = client.get("/api/repairs/by-number/TV-2026-001", headers=admin_headers).json()
+    assert a["device_type"] == "Компьютеры"          # «Ноутбуки» → класс MSB
+    assert a["status"] == "Новый"                    # «Принят»
+    assert a["paid"] is True and float(a["price_final"]) == 250.0
+    assert a["serial"] == "5CD123"
+    assert a["complectation"] == {"Зарядное устройство": True}
+    assert a["master_names"] == ["Внешний Мастер"]
+
+    b = client.get("/api/repairs/by-number/TV-2026-002", headers=admin_headers).json()
+    assert b["device_type"] == "Телевизоры" and b["status"] == "Завершён"
+    assert b["issued_at"] is not None and b["ready_at"] is not None
+
+    c = client.get("/api/repairs/by-number/TV-2026-003", headers=admin_headers).json()
+    assert c["device_type"] == "Другое" and c["status"] == "Новый"
+
+    # Архивный клиент помечен удалённым.
+    exp = client.get("/api/admin/backup/export?format=json", headers=admin_headers).json()
+    arch = next(x for x in exp["tables"]["clients"] if x["phone_norm"] == "99364333444")
+    assert arch["is_archived"] == 1 and arch["deleted_at"]
+    live = next(x for x in exp["tables"]["clients"] if x["phone_norm"] == "99364111222")
+    assert live["is_archived"] == 0
+    exp_a = next(x for x in exp["tables"]["repairs"] if x["number"] == "TV-2026-001")
+    assert exp_a["is_paid"] == 1 and exp_a["price_final_cents"] == 25000
+
+    # Повторный импорт — без дублей.
+    r2 = _post_import(client, admin_headers, payload)
+    assert r2.status_code == 200 and r2.json()["created"] == 0, r2.text

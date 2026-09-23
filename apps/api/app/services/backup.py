@@ -155,6 +155,120 @@ LEGACY_EQUIP_LABELS = {
     "none": "Без комплекта",
 }
 _ALL_EQUIP_LABELS = {**LEGACY_EQUIP_LABELS, **EQUIP_LABELS}
+# Статусы внешних систем/старых баз сверх LEGACY_STATUS_MAP моделей.
+# Ключи сравниваются без учёта регистра и «ё».
+EXTERNAL_STATUS_MAP = {
+    "принят": RepairStatus.NEW,
+    "принято": RepairStatus.NEW,
+    "новый": RepairStatus.NEW,
+    "новая": RepairStatus.NEW,
+    "new": RepairStatus.NEW,
+    "accepted": RepairStatus.NEW,
+    "диагностика": RepairStatus.DIAGNOSTICS,
+    "на диагностике": RepairStatus.DIAGNOSTICS,
+    "diagnostics": RepairStatus.DIAGNOSTICS,
+    "в работе": RepairStatus.IN_WORK,
+    "в ремонте": RepairStatus.IN_WORK,
+    "ремонт": RepairStatus.IN_WORK,
+    "согласование": RepairStatus.IN_WORK,
+    "in_work": RepairStatus.IN_WORK,
+    "in_progress": RepairStatus.IN_WORK,
+    "ждет запчастей": RepairStatus.WAITING_PARTS,
+    "ожидание запчастей": RepairStatus.WAITING_PARTS,
+    "ожидает запчасти": RepairStatus.WAITING_PARTS,
+    "waiting_parts": RepairStatus.WAITING_PARTS,
+    "завершен": RepairStatus.DONE,
+    "завершено": RepairStatus.DONE,
+    "готов": RepairStatus.DONE,
+    "готово": RepairStatus.DONE,
+    "готово к выдаче": RepairStatus.DONE,
+    "выдан": RepairStatus.DONE,
+    "выдано": RepairStatus.DONE,
+    "закрыт": RepairStatus.DONE,
+    "закрыто": RepairStatus.DONE,
+    "отказ": RepairStatus.DONE,
+    "архив": RepairStatus.DONE,
+    "done": RepairStatus.DONE,
+    "finished": RepairStatus.DONE,
+    "completed": RepairStatus.DONE,
+    "issued": RepairStatus.DONE,
+    "closed": RepairStatus.DONE,
+}
+# Статусы, означающие «технику уже отдали клиенту» (проставляем issued_at).
+EXTERNAL_ISSUED_STATUSES = {"выдан", "выдано", "закрыт", "закрыто", "issued", "closed"}
+
+# Категории внешних систем → классы техники MSB (см. webui/catalog.py).
+EXTERNAL_CATEGORY_MAP = {
+    "телевизор": "Телевизоры",
+    "телевизоры": "Телевизоры",
+    "тв": "Телевизоры",
+    "tv": "Телевизоры",
+    "монитор": "Мониторы",
+    "мониторы": "Мониторы",
+    "monitor": "Мониторы",
+    "приставка": "ТВ-приставки",
+    "приставки": "ТВ-приставки",
+    "тв-приставка": "ТВ-приставки",
+    "тв-приставки": "ТВ-приставки",
+    "ноутбук": "Компьютеры",
+    "ноутбуки": "Компьютеры",
+    "laptop": "Компьютеры",
+    "компьютер": "Компьютеры",
+    "компьютеры": "Компьютеры",
+    "пк": "Компьютеры",
+    "pc": "Компьютеры",
+    "моноблок": "Компьютеры",
+    "моноблоки": "Компьютеры",
+    "бытовая": "Бытовая техника",
+    "бытовая техника": "Бытовая техника",
+    "аудио": "Бытовая техника",
+    "другое": "Другое",
+    "прочее": "Другое",
+    "other": "Другое",
+}
+
+
+def _fold(text: str | None) -> str:
+    return (text or "").strip().lower().replace("ё", "е")
+
+
+def map_external_status(raw: str | None) -> str:
+    """Статус любой внешней системы → один из пяти статусов MSB."""
+    if not raw:
+        return RepairStatus.NEW
+    mapped = map_status(str(raw).strip())
+    if mapped in RepairStatus.ALL:
+        return mapped
+    return EXTERNAL_STATUS_MAP.get(_fold(raw), RepairStatus.NEW)
+
+
+def status_means_issued(raw: str | None) -> bool:
+    if not raw:
+        return False
+    return str(raw).strip() in LEGACY_ISSUED_STATUSES or _fold(raw) in EXTERNAL_ISSUED_STATUSES
+
+
+_KNOWN_CLASSES = set(EXTERNAL_CATEGORY_MAP.values())
+
+
+def map_external_category(raw: str | None) -> tuple[str, bool]:
+    """Категория внешней системы → (класс техники MSB, известна ли она).
+
+    Неизвестная категория становится «Другое»: список классов у MSB
+    фиксированный (нумерация, доска, статистика), а исходное название
+    вызывающий код сохраняет в предупреждении импорта.
+    """
+    if not raw:
+        return "Другое", True
+    mapped = normalize_class(str(raw).strip())
+    if mapped in _KNOWN_CLASSES:
+        return mapped, True
+    mapped = EXTERNAL_CATEGORY_MAP.get(_fold(raw))
+    if mapped:
+        return mapped, True
+    return "Другое", False
+
+
 _EQUIP_CODE_BY_LABEL = {v: k for k, v in EQUIP_LABELS.items()}
 _COND_CODE_BY_LABEL = {v: k for k, v in COND_LABELS.items()}
 
@@ -550,6 +664,7 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
                 "phone": c.phone,
                 "phone_norm": c.phone_norm,
                 "extra_phones_json": "[]",
+                "is_archived": int(c.deleted_at is not None),
                 "consent_pdn_at": fmt_dt(c.consent_pdn_at),
                 "consent_storage_at": fmt_dt(c.consent_storage_at),
                 "created_at": fmt_dt(c.created_at),
@@ -599,6 +714,7 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
                 "price_final_cents": to_cents(r.price_final),
                 "paid_cents": paid_by_repair.get(r.id, 0),
                 "payment_mark": int(bool(r.paid)),
+                "is_paid": int(bool(r.paid)),
                 "master_payout_cents": to_cents(r.master_payout),
                 "cost_cents": to_cents(r.cost_amount),
                 "warranty_text": r.warranty_text,
@@ -1616,6 +1732,12 @@ async def _import_clients(ctx: _Ctx, rows: list[dict]) -> None:
         client.consent_storage_at = parse_dt(rec.get("consent_storage_at")) or client.consent_storage_at
         if "deleted_at" in rec:
             client.deleted_at = parse_dt(rec.get("deleted_at"))
+        if "is_archived" in rec:
+            # Архивный клиент внешней системы = «удалённый» (скрыт из приёмки).
+            if _bool(rec.get("is_archived")):
+                client.deleted_at = client.deleted_at or parse_dt(rec.get("updated_at")) or _utcnow()
+            elif "deleted_at" not in rec:
+                client.deleted_at = None
         created = parse_dt(rec.get("created_at"))
         if created:
             client.created_at = created
@@ -1746,6 +1868,8 @@ async def _import_equipment(ctx: _Ctx, rows: list[dict]) -> None:
         eq = by_id.get(uid) if uid else None
         if eq is None:
             eq = by_key.get((name, brand, model, fmt_dt(purchased)))
+        if eq is None and purchased is None:
+            eq = next((e for (n, b, m, _), e in by_key.items() if (n, b, m) == (name, brand, model)), None)
         if eq is None:
             eq = Equipment(id=uid if uid and uid not in by_id else uuid.uuid4(), name=name)
             ctx.db.add(eq)
@@ -1815,7 +1939,12 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
             st.skipped += 1
             continue
 
-        device_type = normalize_class(_s(_first(rec, "category", "device_type"), 32) or "Другое")
+        raw_category = _s(_first(rec, "category", "device_type"))
+        device_type, known_category = map_external_category(raw_category)
+        if not known_category:
+            ctx.report.warn(
+                f"Ремонт {_s(rec.get('number')) or ref}: категория «{raw_category}» неизвестна → «{device_type}»"
+            )
         uid = _uuid(ref)
         number = _s(rec.get("number"), 64)
         repair = by_id.get(uid) if uid else None
@@ -1877,15 +2006,18 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
         repair.delivery_comment = comment
         repair.delivery_courier_phone = _s(_first(rec, "delivery_phone", "delivery_courier_phone"), 32)
 
-        status = map_status(_s(rec.get("status"), 64)) or RepairStatus.NEW
         raw_status = _s(rec.get("status"), 64)
+        status = map_external_status(raw_status)
+        if raw_status and status == RepairStatus.NEW and _fold(raw_status) not in EXTERNAL_STATUS_MAP \
+                and map_status(raw_status) not in RepairStatus.ALL:
+            ctx.report.warn(f"Ремонт {repair.number}: неизвестный статус «{raw_status}» → «{status}»")
         repair.status = status
         repair.price_min = _money_in(rec, "price_min")
         repair.price_max = _money_in(rec, "price_max")
         repair.price_final = _money_in(rec, "price_final")
         repair.cost_amount = _money_in(rec, "cost") if ("cost_cents" in rec or "cost" in rec) else _money_in(rec, "cost_amount")
         repair.master_payout = _money_in(rec, "master_payout")
-        repair.paid = _bool(_first(rec, "payment_mark", "paid", default=0))
+        repair.paid = _bool(_first(rec, "payment_mark", "is_paid", "paid", default=0))
         repair.eta_days = _int(rec.get("eta_days"))
         repair.eta_source = _s(rec.get("eta_source"), 16)
         repair.source = _s(rec.get("source"), 16) or repair.source or "walkin"
@@ -1923,7 +2055,7 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
         repair.storage_until = parse_dt(rec.get("storage_until"))
         if repair.status == RepairStatus.DONE and repair.ready_at is None:
             repair.ready_at = repair.issued_at or updated or accepted or _utcnow()
-        if raw_status in LEGACY_ISSUED_STATUSES and repair.issued_at is None:
+        if status_means_issued(raw_status) and repair.issued_at is None:
             repair.issued_at = updated or repair.ready_at or _utcnow()
 
         master = await ctx.user_by_ref(
@@ -2062,6 +2194,8 @@ async def _import_part_orders(ctx: _Ctx, rows: list[dict]) -> None:
         order = by_id.get(uid) if uid else None
         if order is None:
             order = by_key.get((repair.id, name, fmt_dt(created)))
+        if order is None and created is None:
+            order = next((o for (rid, n, _), o in by_key.items() if rid == repair.id and n == name), None)
         if order is None:
             order = RepairPartOrder(id=uid if uid and uid not in by_id else uuid.uuid4(), repair_id=repair.id, name=name)
             ctx.db.add(order)
@@ -2376,8 +2510,13 @@ async def _import_donors(ctx: _Ctx, rows: list[dict]) -> None:
         created = parse_dt(rec.get("created_at"))
         uid = _uuid(rec.get("id"))
         donor = by_id.get(uid) if uid else None
+        if donor is None and rec.get("id") is not None:
+            donor = ctx.donors.get(str(rec["id"]).strip())
         if donor is None:
             donor = by_key.get((brand, model, fmt_dt(created)))
+        if donor is None and created is None:
+            # Внешний файл без дат: та же марка+модель — тот же донор.
+            donor = next((d for (b, m, _), d in by_key.items() if b == brand and m == model), None)
         comment = _s(rec.get("comment"))
         extras = []
         if _s(rec.get("serial_number")):
