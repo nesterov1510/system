@@ -552,3 +552,67 @@ def test_replace_mode_restores_own_backup(client, admin_headers, created_repair)
     assert got.status_code == 200, got.text
     assert got.json()["number"] == created_repair["number"]
     assert got.json()["public_token"] == created_repair["public_token"]
+
+
+# --------------------------------------------------------------------------
+# Грязные выгрузки старых баз: скаляры вместо JSON-списков, словари вместо списков
+# --------------------------------------------------------------------------
+def test_jload_ignores_scalars():
+    assert backup_svc.jload(0, []) == []
+    assert backup_svc.jload("0", []) == []
+    assert backup_svc.jload("null", []) == []
+    assert backup_svc.jload("true", {}) == {}
+    assert backup_svc.jload(5, None) is None
+    assert backup_svc.jlist(0) == []
+    assert backup_svc.jlist('{"remote": 1, "box": 0}') == ["remote"]
+    assert backup_svc.jlist('["a"]') == ["a"]
+
+
+def test_import_tolerates_scalar_json_fields_and_dict_tables(client, admin_headers):
+    payload = {
+        "version": "1.0",
+        "tables": {
+            # словарь {id: запись} вместо списка
+            "clients": {
+                "c-500": {"full_name": "Словарный Клиент", "phone": "+99363500500",
+                          "extra_phones_json": 0},
+            },
+            "repairs": [
+                {
+                    "id": "r-500", "number": "DIRTY-500", "client_id": "c-500",
+                    "category": "Телевизоры",
+                    "equipment_json": 0, "condition_json": "0", "photos_json": 1,
+                    "is_delivery": "0", "status": "Готово к выдаче",
+                    "price_final_cents": "12000", "accepted_by_id": 0,
+                    "created_at": "2026-02-02 10:00:00",
+                }
+            ],
+            "repair_history": {"rows": [
+                {"id": 1, "repair_id": "r-500", "event_type": "comment",
+                 "comment": "Из старой базы", "details_json": 0,
+                 "created_at": "2026-02-02 11:00:00"},
+            ]},
+            "app_settings": [
+                {"key": "brand", "value_json": "\"MSB\""},
+            ],
+            "users": [
+                # active=0: тесты делят одну БД, лишний активный оператор
+                # сбил бы тесты чата, которые берут «первого оператора».
+                {"id": 3, "name": "Старый Оператор", "email": "old-op@msb.local",
+                 "roles": 0, "permissions": "null", "role": "operator", "active": 0},
+            ],
+        },
+    }
+    r = _post_import(client, admin_headers, payload)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["ok"], rep
+    assert rep["tables"]["clients"]["created"] == 1
+    assert rep["tables"]["repairs"]["created"] == 1
+    assert rep["tables"]["repair_history"]["created"] == 1
+    assert rep["tables"]["users"]["created"] == 1
+    got = client.get("/api/repairs/by-number/DIRTY-500", headers=admin_headers).json()
+    assert got["status"] == "Завершён" and got["ready_at"]
+    assert float(got["price_final"]) == 120.0
+    assert got["complectation"] is None
+    assert any(e["type"] == "comment" for e in got["events"])

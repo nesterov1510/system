@@ -261,17 +261,35 @@ def jdump(value) -> str:
 
 
 def jload(value, default):
-    """Поле *_json может прийти строкой JSON или уже разобранным значением."""
+    """Поле *_json может прийти строкой JSON или уже разобранным значением.
+
+    Возвращает только list/dict (или `default`): число, «0», «null», «true»
+    и прочие скаляры, которые встречаются в выгрузках старых баз вместо
+    пустого списка, не должны попадать в циклы `for … in`.
+    """
     if value is None or value == "":
         return default
     if isinstance(value, (list, dict)):
         return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "replace")
     if isinstance(value, str):
         try:
-            return json.loads(value)
+            parsed = json.loads(value)
         except ValueError:
             return default
+        if isinstance(parsed, (list, dict)):
+            return parsed
+        return default
     return default
+
+
+def jlist(value) -> list:
+    """Как jload, но всегда список: dict → его ключи с истинными значениями."""
+    parsed = jload(value, [])
+    if isinstance(parsed, dict):
+        return [k for k, v in parsed.items() if v]
+    return parsed if isinstance(parsed, list) else []
 
 
 def _uuid(value) -> uuid.UUID | None:
@@ -418,7 +436,7 @@ def condition_out(notes: str | None) -> tuple[list[str], str]:
 def condition_in(rec: dict) -> str | None:
     parts: list[str] = []
     raw = _first(rec, "condition_json", "condition")
-    for item in jload(raw, []) or []:
+    for item in jlist(raw):
         text = str(item).strip()
         if text:
             parts.append(COND_LABELS.get(text, text))
@@ -856,7 +874,7 @@ def _media_files(tables: dict[str, list[dict]]) -> list[str]:
         return []
     keys: list[str] = []
     for r in tables.get("repairs", []):
-        for ph in jload(r.get("photos_json"), []) or []:
+        for ph in jlist(r.get("photos_json")):
             if isinstance(ph, dict):
                 for k in (ph.get("object_key"), ph.get("thumb_key")):
                     if k:
@@ -1070,6 +1088,15 @@ class _Ctx:
         self.event_keys: dict[uuid.UUID, set] = {}
         self.event_ids: set[uuid.UUID] = set()
         self.history_ids: set[str] = set()
+        # Для сообщения об ошибке: какую таблицу/запись обрабатывали.
+        self.current_table: str | None = None
+        self.current_ref: object = None
+
+    def at(self, table: str, rec: dict | None = None) -> None:
+        self.current_table = table
+        self.current_ref = None if rec is None else (
+            rec.get("id") or rec.get("number") or rec.get("key") or rec.get("repair_id")
+        )
 
     # --- пользователи ---
     async def load(self) -> None:
@@ -1225,7 +1252,21 @@ class _Ctx:
 
 
 def _rows(tables: dict, name: str) -> list[dict]:
+    """Записи таблицы. Понимает список, обёртку {rows|items|data: [...]}
+    и словарь {id: запись} (так выгружают некоторые старые базы)."""
     rows = tables.get(name)
+    if isinstance(rows, dict):
+        inner = next((rows[k] for k in ("rows", "items", "data", "records") if isinstance(rows.get(k), list)), None)
+        if inner is not None:
+            rows = inner
+        else:
+            out = []
+            for key, rec in rows.items():
+                if isinstance(rec, dict):
+                    rec = dict(rec)
+                    rec.setdefault("id", key)
+                    out.append(rec)
+            return out
     if not isinstance(rows, list):
         return []
     return [r for r in rows if isinstance(r, dict)]
@@ -1299,15 +1340,23 @@ async def import_payload(
         report.error = str(e)
     except Exception as e:  # noqa: BLE001 — любая ошибка = откат целиком
         await db.rollback()
-        log.exception("Импорт данных прерван")
-        report.error = f"Импорт прерван, изменения отменены: {type(e).__name__}: {e}"
+        log.exception("Импорт данных прерван (таблица %s)", ctx.current_table)
+        where = ""
+        if ctx.current_table:
+            where = f" [таблица {ctx.current_table}"
+            if ctx.current_ref is not None:
+                where += f", запись {ctx.current_ref}"
+            where += "]"
+        report.error = f"Импорт прерван, изменения отменены{where}: {type(e).__name__}: {e}"
     return report
 
 
 # --- справочники -----------------------------------------------------------
 async def _import_cities(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("cities")
+    ctx.at("cities")
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         slug = _s(rec.get("slug"), 16)
         if not slug:
             st.skipped += 1
@@ -1337,7 +1386,9 @@ async def _import_cities(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_branches(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("branches")
+    ctx.at("branches")
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         name = _s(rec.get("name"), 255)
         if not name:
             st.skipped += 1
@@ -1369,8 +1420,10 @@ async def _import_branches(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("users")
+    ctx.at("users")
     valid_roles = {r.value for r in UserRole}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         email = _s(rec.get("email"), 255)
         name = _s(rec.get("name"), 255) or _s(rec.get("display_name"), 255)
         uid = _uuid(rec.get("id"))
@@ -1385,8 +1438,8 @@ async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
         role = _s(rec.get("role"), 32)
         if role not in valid_roles:
             role = UserRole.OPERATOR.value
-        extra_roles = [r for r in (jload(_first(rec, "extra_roles_json", "roles"), []) or []) if r in valid_roles]
-        perms = [str(p) for p in (jload(_first(rec, "permissions_json", "permissions"), []) or [])]
+        extra_roles = [r for r in jlist(_first(rec, "extra_roles_json", "roles")) if r in valid_roles]
+        perms = [str(p) for p in jlist(_first(rec, "permissions_json", "permissions"))]
         city = ctx.city_by_ref(rec.get("city_id"), rec.get("city_slug"))
         branch = ctx.branch_by_ref(rec.get("branch_id"), rec.get("branch_name"), city)
         is_actor = user is not None and user.id == ctx.actor.id
@@ -1436,12 +1489,14 @@ async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
 # --- клиенты ---------------------------------------------------------------
 async def _import_clients(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("clients")
+    ctx.at("clients")
     if not rows:
         return
     existing = (await ctx.db.execute(select(Client))).scalars().all()
     by_id = {c.id: c for c in existing}
     by_norm = {c.phone_norm: c for c in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         phone = _s(_first(rec, "phone", "phone_raw"), 32) or ""
         norm = _s(rec.get("phone_norm"), 32) or normalize_phone(phone)
         if not norm:
@@ -1487,10 +1542,12 @@ async def _import_clients(ctx: _Ctx, rows: list[dict]) -> None:
 # --- склад / прайс / купленная техника ------------------------------------
 async def _import_parts(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("parts")
+    ctx.at("parts")
     if not rows:
         return
     by_sku = {p.sku: p for p in ctx.parts_by_id.values() if p.sku}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         name = _s(rec.get("name"), 255)
         if not name:
             st.skipped += 1
@@ -1531,6 +1588,7 @@ async def _import_parts(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_prices(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("price_items")
+    ctx.at("price_items")
     if not rows:
         return
     existing = (await ctx.db.execute(select(PriceItem))).scalars().all()
@@ -1541,6 +1599,7 @@ async def _import_prices(ctx: _Ctx, rows: list[dict]) -> None:
 
     by_key = {nkey(p.device_type, p.brand, p.model_or_line, p.fault): p for p in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         dt = _s(rec.get("device_type"), 32)
         brand = _s(rec.get("brand"), 128)
         model = _s(rec.get("model_or_line"), 128)
@@ -1577,12 +1636,14 @@ async def _import_prices(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_equipment(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("equipment")
+    ctx.at("equipment")
     if not rows:
         return
     existing = (await ctx.db.execute(select(Equipment))).scalars().all()
     by_id = {e.id: e for e in existing}
     by_key = {(e.name, e.brand, e.model, fmt_dt(e.purchased_at)): e for e in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         name = _s(rec.get("name"), 255)
         if not name:
             st.skipped += 1
@@ -1622,6 +1683,7 @@ async def _import_equipment(ctx: _Ctx, rows: list[dict]) -> None:
 # --- ремонты ---------------------------------------------------------------
 async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repairs")
+    ctx.at("repairs")
     if not rows:
         return
     existing = (
@@ -1635,6 +1697,7 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
         ctx.repairs_by_number[r.number] = r
 
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         ref = rec.get("id")
         if parse_dt(rec.get("deleted_at")):
             st.skipped += 1
@@ -1792,9 +1855,11 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_repair_masters(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repair_masters")
+    ctx.at("repair_masters")
     touched: dict[uuid.UUID, Repair] = {}
     rewards: dict[uuid.UUID, int] = {}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         if repair is None:
             ctx.report.warn(f"Мастер на ремонте: ремонт {rec.get('repair_id')} не найден")
@@ -1842,12 +1907,14 @@ async def _import_repair_masters(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_repair_parts(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repair_parts")
+    ctx.at("repair_parts")
     if not rows:
         return
     existing = (await ctx.db.execute(select(RepairPart))).scalars().all()
     by_id = {rp.id: rp for rp in existing}
     by_pair = {(rp.repair_id, rp.part_id): rp for rp in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         name = _s(rec.get("name"), 255)
         if repair is None or not name:
@@ -1882,12 +1949,14 @@ async def _import_repair_parts(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_part_orders(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repair_part_orders")
+    ctx.at("repair_part_orders")
     if not rows:
         return
     existing = (await ctx.db.execute(select(RepairPartOrder))).scalars().all()
     by_id = {o.id: o for o in existing}
     by_key = {(o.repair_id, o.name, fmt_dt(o.created_at)): o for o in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         name = _s(rec.get("name"), 255)
         if repair is None or not name:
@@ -1919,11 +1988,13 @@ async def _import_part_orders(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_payments(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("payments")
+    ctx.at("payments")
     existing = (await ctx.db.execute(select(Payment))).scalars().all()
     by_id = {p.id: p for p in existing}
     by_key = {(p.repair_id, to_cents(p.amount), fmt_dt(p.paid_at)): p for p in existing}
     has_payments = {p.repair_id for p in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         amount = _money_in(rec, "amount")
         if repair is None or amount is None:
@@ -1990,6 +2061,7 @@ async def _add_event(ctx: _Ctx, repair: Repair, etype: str, created_at, data: di
 
 async def _import_history(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repair_history")
+    ctx.at("repair_history")
     if not rows:
         return
     repairs = [ctx.repair_by_ref(r.get("repair_id")) for r in rows]
@@ -2023,6 +2095,7 @@ async def _import_history(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_sms_log(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("sms_log")
+    ctx.at("sms_log")
     if not rows:
         return
     repairs = [ctx.repair_by_ref(r.get("repair_id")) for r in rows]
@@ -2055,12 +2128,14 @@ async def _import_sms_log(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_print_log(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("print_log")
+    ctx.at("print_log")
     if not rows:
         return
     existing = (await ctx.db.execute(select(PrintJob))).scalars().all()
     by_id = {j.id: j for j in existing}
     by_key = {(j.repair_id, fmt_dt(j.created_at)): j for j in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         created = parse_dt(rec.get("created_at"))
         uid = _uuid(rec.get("id"))
@@ -2096,11 +2171,13 @@ async def _import_print_log(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_aliases(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("repair_number_aliases")
+    ctx.at("repair_number_aliases")
     if not rows:
         return
     setting = (await ctx.db.execute(select(Setting).where(Setting.key == ALIASES_KEY))).scalar_one_or_none()
     items: dict = dict(((setting.value or {}).get("items") or {}) if setting else {})
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         old = _s(rec.get("old_number"), 64)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         if not old or repair is None:
@@ -2123,6 +2200,7 @@ async def _import_aliases(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_donors(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("donor_units")
+    ctx.at("donor_units")
     if not rows:
         return
     existing = (await ctx.db.execute(select(DonorUnit))).scalars().all()
@@ -2131,6 +2209,7 @@ async def _import_donors(ctx: _Ctx, rows: list[dict]) -> None:
     for d in existing:
         ctx.donors[str(d.id)] = d
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         brand = _s(rec.get("brand"), 128)
         if not brand:
             st.skipped += 1
@@ -2176,12 +2255,14 @@ async def _import_donors(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_donor_parts(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("donor_parts")
+    ctx.at("donor_parts")
     if not rows:
         return
     existing = (await ctx.db.execute(select(DonorPart))).scalars().all()
     by_id = {p.id: p for p in existing}
     by_key = {(p.donor_id, p.name, p.panel_number or ""): p for p in existing}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         donor = ctx.donors.get(str(rec.get("donor_id") or "").strip())
         name = _s(rec.get("name"), 255)
         if donor is None or not name:
@@ -2218,10 +2299,12 @@ async def _import_donor_parts(ctx: _Ctx, rows: list[dict]) -> None:
 
 async def _import_settings(ctx: _Ctx, rows: list[dict]) -> None:
     st = ctx.report.stat("app_settings")
+    ctx.at("app_settings")
     if not rows:
         return
     existing = {s.key: s for s in (await ctx.db.execute(select(Setting))).scalars().all()}
     for rec in rows:
+        ctx.at(ctx.current_table or "?", rec)
         key = _s(rec.get("key"), 128)
         if not key:
             st.skipped += 1
@@ -2229,7 +2312,16 @@ async def _import_settings(ctx: _Ctx, rows: list[dict]) -> None:
         if key in PROTECTED_SETTINGS or key == ALIASES_KEY:
             st.skipped += 1
             continue
-        value = jload(_first(rec, "value_json", "value"), None)
+        raw = _first(rec, "value_json", "value")
+        value = jload(raw, None)
+        if value is None and isinstance(raw, str):
+            # Скаляр в виде JSON-строки ("\"MSB\"", "3", "true") — разбираем сами.
+            try:
+                value = json.loads(raw)
+            except ValueError:
+                value = raw
+        elif value is None:
+            value = raw
         if not isinstance(value, dict):
             # Setting.value — словарь; скалярные значения старой базы оборачиваем.
             value = {"value": value}
@@ -2266,11 +2358,13 @@ async def _restore_media(media: dict[str, bytes]) -> int:
 async def _import_photos(ctx: _Ctx, rows: list[dict]) -> None:
     """Записи о фото создаются только когда сам файл есть в хранилище."""
     st = ctx.report.stat("repair_photos")
+    ctx.at("repair_photos")
     root = Path(app_settings.UPLOAD_DIR)
     existing_keys: set[str] | None = None
     missing = 0
     for rec in rows:
-        photos = jload(rec.get("photos_json"), []) or []
+        ctx.at(ctx.current_table or "?", rec)
+        photos = jlist(rec.get("photos_json"))
         if not photos:
             continue
         repair = ctx.repair_by_ref(rec.get("id"))
