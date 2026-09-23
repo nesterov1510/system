@@ -616,3 +616,85 @@ def test_import_tolerates_scalar_json_fields_and_dict_tables(client, admin_heade
     assert float(got["price_final"]) == 120.0
     assert got["complectation"] is None
     assert any(e["type"] == "comment" for e in got["events"])
+
+
+# --------------------------------------------------------------------------
+# Реальная выгрузка старой базы: docs/msb_export_20260923_173848.json
+# --------------------------------------------------------------------------
+def test_import_real_legacy_export_from_docs(client, admin_headers):
+    import pathlib
+
+    path = pathlib.Path(__file__).resolve().parents[3] / "docs" / "msb_export_20260923_173848.json"
+    data = path.read_bytes()
+    # Тесты делят одну БД: запомним настройки SMS, чтобы вернуть их после импорта.
+    sms_before = client.get("/api/admin/sms", headers=admin_headers).json()
+    r = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": (path.name, data, "application/json")},
+        data={"mode": "merge"},
+    )
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["ok"], rep
+    assert rep["tables"]["clients"]["created"] == 1
+    assert rep["tables"]["repairs"]["created"] == 1
+    assert rep["tables"]["repair_masters"]["created"] == 2
+    assert rep["tables"]["app_settings"]["created"] + rep["tables"]["app_settings"]["updated"] == 3
+    # SMS/печать без ремонта попадают в журнал аудита, а не теряются
+    assert rep["tables"]["sms_log"]["created"] == 7
+    assert rep["tables"]["print_log"]["created"] == 5
+    assert rep["warnings"] == []
+
+    got = client.get("/api/repairs/by-number/tv-btrx-260918-DB0F3E25", headers=admin_headers)
+    assert got.status_code == 200, got.text
+    repair = got.json()
+    assert repair["public_token"] == "8824cadb589444228754ab2cf5a442b120e4e9a3b4de474c8df841d86472a5fe"
+    assert repair["device_type"] == "Телевизоры"
+    assert repair["serial"] == "FDFDFDFDFD"
+    assert repair["complectation"] == {"Только телевизор (без комплекта)": True}
+    assert repair["condition_notes"] == "fdsfsfsf"
+    assert repair["master_names"] == ["Yoldash SABYROV"]
+    assert repair["helper_names"] == ["Merdan Sabyrov"]
+    # '2026-09-18T00:15:27+05:00' → UTC
+    assert repair["accepted_at"].startswith("2026-09-17T19:15:27")
+
+    # Один человек принял и чинит: оператор + мастер.
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    yoldash = next(u for u in users if u["name"] == "Yoldash SABYROV")
+    assert yoldash["active"] is False
+    assert set(yoldash.get("roles") or [yoldash["role"]]) >= {"operator", "master"}
+
+    # SMS-шлюз из старой базы применён.
+    sms = client.get("/api/admin/sms", headers=admin_headers).json()["server"]
+    assert sms["url"] == "https://192.168.5.238/api/3rdparty/v1/messages"
+    assert sms["username"] == "56FNPL"
+    assert sms["enabled"] is True
+
+    audit = client.get("/api/admin/audit?action=sms.sent", headers=admin_headers).json()
+    assert sum(1 for a in audit if (a["meta"] or {}).get("imported")) == 7
+
+    # Повторно — ничего не дублируется.
+    r2 = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": (path.name, data, "application/json")},
+        data={"mode": "merge"},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["created"] == 0, r2.json()
+
+    # Экспорт после импорта содержит те же записи журнала в совместимом виде.
+    exp = client.get("/api/admin/backup/export?format=json", headers=admin_headers).json()
+    sms_rows = [x for x in exp["tables"]["sms_log"] if x["kind"] == "staff_chat"]
+    assert sms_rows and sms_rows[0]["body"] == "Чат [nikita Nesterov]: privte" and sms_rows[0]["ok"] == 1
+    prt = [x for x in exp["tables"]["print_log"] if x["target"] == "192.168.8.75:9100"]
+    assert len(prt) == 5
+
+    # Вернуть настройки SMS как были (см. test_sms.py).
+    restore = {k: v for k, v in sms_before["server"].items() if k != "password"}
+    restore["password"] = ""
+    rr = client.put("/api/admin/sms", headers=admin_headers, json=restore)
+    assert rr.status_code == 200, rr.text
+    rr = client.put("/api/admin/sms/templates", headers=admin_headers, json=sms_before["templates"])
+    assert rr.status_code == 200, rr.text

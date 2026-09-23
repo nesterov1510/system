@@ -48,6 +48,7 @@ from app.core.config import settings as app_settings
 from app.core.security import hash_password
 from app.db.models import (
     LEGACY_ISSUED_STATUSES,
+    AuditLog,
     Branch,
     City,
     Client,
@@ -140,6 +141,20 @@ TABLE_LABELS = {
     "repair_photos": "Фотографии",
 }
 
+# Коды комплектации старой базы, которых нет в форме приёмки MSB.
+LEGACY_EQUIP_LABELS = {
+    "tv_only": "Только телевизор (без комплекта)",
+    "stand": "Подставка",
+    "power_supply": "Блок питания",
+    "battery": "Аккумулятор",
+    "documents": "Документы",
+    "bag": "Сумка",
+    "cable": "Кабель",
+    "charger": "Зарядное устройство",
+    "mount": "Крепёж",
+    "none": "Без комплекта",
+}
+_ALL_EQUIP_LABELS = {**LEGACY_EQUIP_LABELS, **EQUIP_LABELS}
 _EQUIP_CODE_BY_LABEL = {v: k for k, v in EQUIP_LABELS.items()}
 _COND_CODE_BY_LABEL = {v: k for k, v in COND_LABELS.items()}
 
@@ -395,7 +410,7 @@ def _complectation_labels(value) -> list[str]:
         labels.extend(str(k).strip() for k, v in value.items() if k != "items" and v and str(k).strip())
     elif isinstance(value, list):
         labels.extend(str(x).strip() for x in value if str(x).strip())
-    return [EQUIP_LABELS.get(x, x) for x in labels]
+    return [_ALL_EQUIP_LABELS.get(x, x) for x in labels]
 
 
 def equipment_in(rec: dict) -> dict | None:
@@ -598,6 +613,10 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
                 "contact2_name": r.contact2_name,
                 "contact2_phone": r.contact2_phone,
                 "contact2_relation": r.contact2_relation,
+                "secondary_name": r.contact2_name or "",
+                "secondary_phone": r.contact2_phone or "",
+                "secondary_relation": r.contact2_relation or "",
+                "notified_at": fmt_dt(r.reminder_last_at),
                 "consent_repair_at": fmt_dt(r.consent_repair_at),
                 "city_slug": city_slug.get(r.city_id),
                 "branch_name": branch_name.get(r.branch_id),
@@ -659,13 +678,17 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
             }
         )
         if e.type == "notify":
+            sms_text = data.get("sms_text") or comment or ""
             t["sms_log"].append(
                 {
                     "id": str(e.id),
                     "repair_id": str(e.repair_id),
                     "kind": data.get("kind") or "sms",
+                    "type": data.get("kind") or "sms",
                     "phone": data.get("phone"),
-                    "text": data.get("sms_text") or comment or "",
+                    "text": sms_text,
+                    "body": sms_text,
+                    "ok": int(bool(data.get("ok", True))),
                     "status": "sent" if data.get("ok", True) else "failed",
                     "detail": data.get("detail"),
                     "actor_user_id": str(e.actor_id) if e.actor_id else None,
@@ -727,14 +750,60 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
                 "id": str(j.id),
                 "repair_id": str(j.repair_id) if j.repair_id else None,
                 "kind": payload.get("kind") or "blank",
+                "target": payload.get("target"),
                 "template_id": j.template_id,
                 "status": j.status,
+                "ok": int(j.status == "done"),
                 "attempts": j.attempts,
                 "error": j.error,
+                "detail": j.error or payload.get("detail"),
                 "sent_at": fmt_dt(j.sent_at),
                 "created_at": fmt_dt(j.created_at),
             }
         )
+    # SMS и печать без ремонта (тесты шлюза/принтера, чат) хранятся в аудите.
+    audit_rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.action.in_(("sms.sent", "print.log")))
+            .order_by(AuditLog.created_at)
+        )
+    ).scalars().all()
+    for a in audit_rows:
+        m = a.meta if isinstance(a.meta, dict) else {}
+        if a.action == "sms.sent":
+            t["sms_log"].append(
+                {
+                    "id": str(a.id),
+                    "repair_id": None,
+                    "kind": m.get("kind") or "sms",
+                    "type": m.get("kind") or "sms",
+                    "phone": m.get("phone"),
+                    "text": m.get("text") or "",
+                    "body": m.get("text") or "",
+                    "ok": int(bool(m.get("ok"))),
+                    "status": "sent" if m.get("ok") else "failed",
+                    "detail": m.get("detail"),
+                    "actor_user_id": str(a.actor_id) if a.actor_id else None,
+                    "actor_name": user_name.get(a.actor_id),
+                    "created_at": fmt_dt(a.created_at),
+                }
+            )
+        else:
+            t["print_log"].append(
+                {
+                    "id": str(a.id),
+                    "repair_id": None,
+                    "kind": m.get("kind") or "test",
+                    "target": m.get("target"),
+                    "status": m.get("status") or "done",
+                    "ok": int((m.get("status") or "done") == "done"),
+                    "detail": m.get("detail"),
+                    "created_by_id": str(a.actor_id) if a.actor_id else None,
+                    "created_by_name": user_name.get(a.actor_id),
+                    "created_at": fmt_dt(a.created_at),
+                }
+            )
 
     for u in users:
         t["users"].append(
@@ -1116,6 +1185,15 @@ class _Ctx:
             self.parts_by_id[p.id] = p
             self.parts_by_name.setdefault(p.name.strip().lower(), p)
 
+    def _grant_role(self, u: User, role: str | None) -> None:
+        """Сотруднику, созданному импортом, дописать вторую роль (оператор
+        принял технику и он же её чинит → operator + master)."""
+        if not role or u.has_role(role) or u.id == self.actor.id:
+            return
+        if not (u.email or "").startswith("import-"):
+            return  # настоящим сотрудникам роли импортом не раздаём
+        u.extra_roles = [*(u.extra_roles or []), role]
+
     def _index_user(self, u: User) -> None:
         self.users_by_id[u.id] = u
         self.users_by_email[(u.email or "").lower()] = u
@@ -1165,6 +1243,7 @@ class _Ctx:
             key = str(ref).strip()
             u = self.user_refs.get(key)
             if u:
+                self._grant_role(u, create_role)
                 return u
             uid = _uuid(key)
             if uid and uid in self.users_by_id:
@@ -1177,6 +1256,7 @@ class _Ctx:
             if u:
                 if ref is not None:
                     self.user_refs[str(ref).strip()] = u
+                self._grant_role(u, create_role)
                 return u
             if create_role:
                 # Неактивен и без известного пароля: админ включит его и
@@ -1235,6 +1315,17 @@ class _Ctx:
             etype, fmt_dt(created_at), d.get("message") or "",
             str(d.get("from") or ""), str(d.get("to") or ""), str(d.get("kind") or ""),
         )
+
+    async def audit_keys(self, action: str) -> set[tuple]:
+        """Ключи уже записанных строк аудита (дедупликация журналов без ремонта)."""
+        rows = (
+            await self.db.execute(select(AuditLog).where(AuditLog.action == action))
+        ).scalars().all()
+        keys: set[tuple] = set()
+        for a in rows:
+            m = a.meta if isinstance(a.meta, dict) else {}
+            keys.add((fmt_dt(a.created_at), m.get("phone") or m.get("target") or "", m.get("text") or m.get("detail") or ""))
+        return keys
 
     async def part_by_name(self, name: str, *, part_ref=None, sell_price=None) -> Part:
         uid = _uuid(part_ref)
@@ -1528,7 +1619,7 @@ async def _import_clients(ctx: _Ctx, rows: list[dict]) -> None:
         created = parse_dt(rec.get("created_at"))
         if created:
             client.created_at = created
-        updated = parse_dt(rec.get("updated_at"))
+        updated = parse_dt(rec.get("updated_at")) or created
         if updated:
             client.updated_at = updated
         await ctx.db.flush()
@@ -1799,9 +1890,9 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
         repair.eta_source = _s(rec.get("eta_source"), 16)
         repair.source = _s(rec.get("source"), 16) or repair.source or "walkin"
         repair.print_count = _int(rec.get("print_count"), repair.print_count or 0)
-        repair.contact2_name = _s(rec.get("contact2_name"), 255)
-        repair.contact2_phone = _s(rec.get("contact2_phone"), 32)
-        repair.contact2_relation = _s(rec.get("contact2_relation"), 128)
+        repair.contact2_name = _s(_first(rec, "contact2_name", "secondary_name"), 255)
+        repair.contact2_phone = _s(_first(rec, "contact2_phone", "secondary_phone"), 32)
+        repair.contact2_relation = _s(_first(rec, "contact2_relation", "secondary_relation"), 128)
         repair.consent_repair_at = parse_dt(rec.get("consent_repair_at"))
 
         warranty = _s(rec.get("warranty_text"), 64)
@@ -1820,9 +1911,13 @@ async def _import_repairs(ctx: _Ctx, rows: list[dict]) -> None:
             repair.accepted_at = accepted
         if created:
             repair.created_at = created
-        updated = parse_dt(rec.get("updated_at"))
+        updated = parse_dt(rec.get("updated_at")) or created
         if updated:
             repair.updated_at = updated
+        # Старая база: notified_at — когда клиенту ушло SMS о готовности.
+        notified = parse_dt(rec.get("notified_at"))
+        if notified:
+            repair.reminder_last_at = notified
         repair.ready_at = parse_dt(_first(rec, "finished_at", "ready_at"))
         repair.issued_at = parse_dt(rec.get("issued_at"))
         repair.storage_until = parse_dt(rec.get("storage_until"))
@@ -2100,25 +2195,57 @@ async def _import_sms_log(ctx: _Ctx, rows: list[dict]) -> None:
         return
     repairs = [ctx.repair_by_ref(r.get("repair_id")) for r in rows]
     await ctx.preload_events(list({r.id for r in repairs if r}))
+    audit_keys = await ctx.audit_keys("sms.sent")
     for rec, repair in zip(rows, repairs):
-        if repair is None:
-            st.skipped += 1
-            continue
         if rec.get("id") is not None and str(rec["id"]) in ctx.history_ids:
             st.skipped += 1  # уже загружено как событие истории
             continue
-        text = _s(rec.get("text")) or ""
-        status = (_s(rec.get("status")) or "sent").lower()
-        ok = status in ("sent", "ok", "delivered", "1", "true")
-        data = {
-            "message": text if ok else f"SMS не отправлено: {_s(rec.get('detail')) or status}",
-            "kind": _s(rec.get("kind")) or "sms",
-            "sms_text": text,
-            "phone": _s(rec.get("phone"), 32),
-            "ok": ok,
-        }
-        actor = await ctx.user_by_ref(_first(rec, "actor_user_id", "actor_id"), rec.get("actor_name"))
+        text = _s(_first(rec, "text", "body", "message")) or ""
+        if "ok" in rec and rec.get("ok") not in (None, ""):
+            ok = _bool(rec.get("ok"))
+        else:
+            status = (_s(rec.get("status")) or "sent").lower()
+            ok = status in ("sent", "ok", "delivered", "1", "true")
+        detail = _s(rec.get("detail"))
+        kind = _s(_first(rec, "kind", "type")) or "sms"
+        phone = _s(rec.get("phone"), 32)
+        actor = await ctx.user_by_ref(
+            _first(rec, "actor_user_id", "actor_id", "created_by_id"),
+            _first(rec, "actor_name", "created_by_name"),
+        )
         created = parse_dt(_first(rec, "created_at", "sent_at"))
+        if repair is None:
+            # SMS без ремонта (тест шлюза, чат) — в журнал аудита, чтобы не потерять.
+            key = (fmt_dt(created), phone or "", text)
+            if key in audit_keys:
+                st.skipped += 1
+                continue
+            entry = AuditLog(
+                actor_id=actor.id if actor else None,
+                action="sms.sent",
+                entity="sms",
+                entity_id=str(rec.get("id")) if rec.get("id") is not None else None,
+                meta={"phone": phone, "text": text, "kind": kind, "ok": ok,
+                      "detail": detail, "imported": True},
+            )
+            if created:
+                entry.created_at = created
+                entry.updated_at = created
+            ctx.db.add(entry)
+            audit_keys.add(key)
+            st.created += 1
+            continue
+        data = {
+            "message": (
+                f"SMS отправлено: {text}" if ok
+                else f"SMS не отправлено ({detail or 'ошибка'}): {text}"
+            ),
+            "kind": kind,
+            "sms_text": text,
+            "phone": phone,
+            "ok": ok,
+            "detail": detail,
+        }
         if await _add_event(ctx, repair, "notify", created, data, actor.id if actor else None, _uuid(rec.get("id"))):
             st.created += 1
         else:
@@ -2134,32 +2261,62 @@ async def _import_print_log(ctx: _Ctx, rows: list[dict]) -> None:
     existing = (await ctx.db.execute(select(PrintJob))).scalars().all()
     by_id = {j.id: j for j in existing}
     by_key = {(j.repair_id, fmt_dt(j.created_at)): j for j in existing}
+    audit_keys = await ctx.audit_keys("print.log")
     for rec in rows:
         ctx.at(ctx.current_table or "?", rec)
         repair = ctx.repair_by_ref(rec.get("repair_id"))
         created = parse_dt(rec.get("created_at"))
         uid = _uuid(rec.get("id"))
+        kind = _s(rec.get("kind")) or "blank"
+        detail = _s(_first(rec, "detail", "error"))
+        target = _s(rec.get("target"))
+        actor = await ctx.user_by_ref(rec.get("created_by_id"), rec.get("created_by_name"))
+        if "ok" in rec and rec.get("ok") not in (None, ""):
+            status = "done" if _bool(rec.get("ok")) else "failed"
+        else:
+            status = (_s(rec.get("status"), 16) or "done").lower()
+        if repair is None:
+            # Тестовая печать / печать без ремонта — в журнал аудита: очередь
+            # print_jobs без ремонта и без PDF агенту печати ни к чему.
+            key = (fmt_dt(created), target or "", detail or "")
+            if key in audit_keys:
+                st.skipped += 1
+                continue
+            entry = AuditLog(
+                actor_id=actor.id if actor else None,
+                action="print.log",
+                entity="print",
+                entity_id=str(rec.get("id")) if rec.get("id") is not None else None,
+                meta={"kind": kind, "target": target, "status": status,
+                      "detail": detail, "imported": True},
+            )
+            if created:
+                entry.created_at = created
+                entry.updated_at = created
+            ctx.db.add(entry)
+            audit_keys.add(key)
+            st.created += 1
+            continue
         job = by_id.get(uid) if uid else None
-        if job is None and repair is not None:
+        if job is None:
             job = by_key.get((repair.id, fmt_dt(created)))
         if job is not None:
             st.skipped += 1
             continue
-        status = (_s(rec.get("status"), 16) or "done").lower()
-        error = _s(rec.get("error"))
+        error = None if status == "done" else detail
         if status in ("queued", "sent"):
             # Без PDF задание печатать нечем: агент печати опрашивает очередь.
             status, error = "failed", error or "Импорт: задание восстановлено без PDF"
         job = PrintJob(
             id=uid if uid and uid not in by_id else uuid.uuid4(),
-            repair_id=repair.id if repair else None,
+            repair_id=repair.id,
             template_id=_s(rec.get("template_id"), 64),
-            payload={"imported": True, "kind": _s(rec.get("kind")) or "blank"},
+            payload={"imported": True, "kind": kind, "target": target, "detail": detail},
             status=status,
             attempts=_int(rec.get("attempts"), 0) or 0,
             error=error,
-            branch_id=repair.branch_id if repair else None,
-            sent_at=parse_dt(rec.get("sent_at")),
+            branch_id=repair.branch_id,
+            sent_at=parse_dt(rec.get("sent_at")) or (created if status == "done" else None),
         )
         if created:
             job.created_at = created
@@ -2167,6 +2324,7 @@ async def _import_print_log(ctx: _Ctx, rows: list[dict]) -> None:
         st.created += 1
         await ctx.db.flush()
         by_id[job.id] = job
+        by_key[(repair.id, fmt_dt(job.created_at))] = job
 
 
 async def _import_aliases(ctx: _Ctx, rows: list[dict]) -> None:
