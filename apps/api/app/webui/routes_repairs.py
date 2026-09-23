@@ -1244,6 +1244,21 @@ async def repair_by_number(request: Request, number: str):
         )
         repair = row.scalar_one_or_none()
         if repair is None:
+            # Номер из прежней базы (repair_number_aliases в импорте).
+            from app.services.backup import resolve_alias
+
+            alias_id = await resolve_alias(db, number)
+            if alias_id is not None:
+                row = await db.execute(
+                    select(Repair)
+                    .where(Repair.id == alias_id)
+                    .options(
+                        selectinload(Repair.masters),
+                        selectinload(Repair.accepted_by_user),
+                    )
+                )
+                repair = row.scalar_one_or_none()
+        if repair is None:
             return HTMLResponse("Ремонт не найден", status_code=404)
         # Редирект раскрывает UUID ремонта, поэтому доступ проверяем здесь,
         # а не только на карточке: иначе мастер перебором номеров узнавал,

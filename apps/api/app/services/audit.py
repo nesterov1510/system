@@ -38,6 +38,8 @@ ACTION_SETTING_UPDATE = "setting.update"
 ACTION_PRINT_FAILURE = "print.failure"
 ACTION_SMS_SENT = "sms.sent"
 ACTION_LOGIN = "auth.login"
+ACTION_DATA_EXPORT = "data.export"
+ACTION_DATA_IMPORT = "data.import"
 
 
 async def record(

@@ -1,0 +1,554 @@
+"""Экспорт/импорт данных (msb_backup.zip): формат, права, идемпотентность."""
+import io
+import json
+import zipfile
+
+import pytest
+
+from app.services import backup as backup_svc
+
+
+@pytest.fixture(autouse=True)
+def _clear_web_session(client):
+    yield
+    client.get("/logout", follow_redirects=False)
+    client.cookies.clear()
+
+
+def _login(client, email="admin@msb.local", password="admin123"):
+    r = client.post(
+        "/login",
+        data={"email": email, "password": password, "next_url": "/repairs"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303, r.text
+    return r.cookies
+
+
+def _unzip(content: bytes) -> tuple[dict, dict]:
+    zf = zipfile.ZipFile(io.BytesIO(content))
+    names = zf.namelist()
+    assert "meta.json" in names
+    assert "msb_export.json" in names
+    meta = json.loads(zf.read("meta.json"))
+    data = json.loads(zf.read("msb_export.json"))
+    return meta, data
+
+
+# --------------------------------------------------------------------------
+# Чистые функции формата
+# --------------------------------------------------------------------------
+def test_cents_and_dates_roundtrip():
+    assert backup_svc.to_cents(500) == 50000
+    assert backup_svc.to_cents("12.5") == 1250
+    assert backup_svc.from_cents(50000) == 500.0
+    assert backup_svc.to_cents(None) is None
+    assert backup_svc.fmt_dt(backup_svc.parse_dt("2026-01-01 10:00:00")) == "2026-01-01 10:00:00"
+    assert backup_svc.parse_dt("2026-01-02T12:00:00Z").hour == 12
+    assert backup_svc.parse_dt("мусор") is None
+    assert backup_svc.parse_date("2026-04-01").month == 4
+
+
+def test_equipment_and_condition_mapping():
+    codes, other = backup_svc.equipment_out({"Пульт": True, "Сумка": True, "Ножки": False})
+    assert codes == ["remote"] and other == "Сумка"
+    codes, other = backup_svc.equipment_out({"items": ["Пульт", "Шнур питания"]})
+    assert codes == ["remote", "power_cable"] and other == ""
+    comp = backup_svc.equipment_in({"equipment_json": '["remote"]', "equipment_other": "Сумка, Кабель HDMI"})
+    assert comp == {"Пульт": True, "Сумка": True, "Кабель HDMI": True}
+    # старая база: complectation вместо equipment_json
+    # наш экспорт: словарь берётся дословно (формат в БД не меняется)
+    comp = backup_svc.equipment_in({"complectation": {"items": ["Пульт"]}})
+    assert comp == {"items": ["Пульт"]}
+    comp = backup_svc.equipment_in({"complectation": ["remote", "Сумка"]})
+    assert comp == {"Пульт": True, "Сумка": True}
+    codes, other = backup_svc.condition_out("Царапины на корпусе; трещина")
+    assert codes == ["body_scratches"] and other == "трещина"
+    assert backup_svc.condition_in({"condition_json": '["body_scratches"]', "condition_other": "трещина"}) == (
+        "Царапины на корпусе; трещина"
+    )
+
+
+def test_warranty_days():
+    assert backup_svc.warranty_days("90 дней") == 90
+    assert backup_svc.warranty_days("3 aý") == 90
+    assert backup_svc.warranty_days("1 год") == 365
+    assert backup_svc.warranty_days(None) is None
+
+
+def test_read_backup_file_accepts_zip_json_and_rejects_garbage():
+    payload = {"version": "1.0", "tables": {"clients": []}}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("meta.json", json.dumps({"x": 1}))
+        zf.writestr("data.json", json.dumps(payload))
+    got, meta, media = backup_svc.read_backup_file(buf.getvalue())
+    assert got["tables"] == {"clients": []} and meta == {"x": 1} and media == {}
+
+    got, _, _ = backup_svc.read_backup_file(json.dumps(payload).encode())
+    assert got["tables"] == {"clients": []}
+    # «плоский» JSON без tables
+    got, _, _ = backup_svc.read_backup_file(json.dumps({"clients": [], "repairs": []}).encode())
+    assert "clients" in got["tables"]
+
+    with pytest.raises(backup_svc.ImportError_):
+        backup_svc.read_backup_file(b"not json at all")
+    with pytest.raises(backup_svc.ImportError_):
+        backup_svc.read_backup_file(b"")
+
+
+# --------------------------------------------------------------------------
+# API: экспорт
+# --------------------------------------------------------------------------
+def test_export_zip_structure(client, admin_headers, created_repair):
+    r = client.get("/api/admin/backup/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("application/zip")
+    assert "msb_backup_" in r.headers["content-disposition"]
+    meta, data = _unzip(r.content)
+
+    assert meta["format"] == "msb_backup"
+    assert meta["record_count"] == sum(meta["tables"].values())
+    assert meta["exported_at"] == data["exported_at"]
+    assert data["version"] == "1.0"
+    tables = data["tables"]
+    for name in (
+        "clients", "repairs", "repair_masters", "repair_parts", "repair_history",
+        "repair_number_aliases", "donor_units", "donor_parts", "app_settings",
+        "sms_log", "print_log",
+    ):
+        assert name in tables, name
+
+    rep = next(x for x in tables["repairs"] if x["number"] == created_repair["number"])
+    assert rep["category"] == created_repair["device_type"]
+    assert rep["serial_number"] == created_repair.get("serial")
+    assert json.loads(rep["equipment_json"]) == ["remote", "power_cable", "legs"]
+    assert isinstance(rep["price_final_cents"], (int, type(None)))
+    assert rep["accepted_by_name"]
+    assert "T" not in (rep["created_at"] or "")  # формат 'YYYY-MM-DD HH:MM:SS'
+    cl = next(x for x in tables["clients"] if x["id"] == rep["client_id"])
+    assert cl["name"] == cl["full_name"] == "Тест Тестов"
+    assert cl["phone_norm"]
+    hist = [h for h in tables["repair_history"] if h["repair_id"] == rep["id"]]
+    assert hist and hist[0]["event_type"] == "status_change"
+    assert json.loads(hist[0]["details_json"])
+    st = next(s for s in tables["app_settings"] if s["key"] == "currency")
+    assert json.loads(st["value_json"])["code"] == "TMT"
+
+
+def test_export_json_format_and_preview(client, admin_headers):
+    r = client.get("/api/admin/backup/export?format=json", headers=admin_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["version"] == "1.0" and "tables" in data
+    p = client.get("/api/admin/backup/preview", headers=admin_headers)
+    assert p.status_code == 200
+    assert p.json()["tables"]["repairs"] == len(data["tables"]["repairs"])
+
+
+def test_export_import_admin_only(client, operator_headers, master_headers):
+    for h in (operator_headers, master_headers):
+        assert client.get("/api/admin/backup/export", headers=h).status_code == 403
+        r = client.post(
+            "/api/admin/backup/import", headers=h,
+            files={"file": ("x.json", b'{"tables":{}}', "application/json")},
+        )
+        assert r.status_code == 403
+    assert client.get("/api/admin/backup/export").status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Импорт: файл по шаблону обмена (старые id, копейки, старые названия полей)
+# --------------------------------------------------------------------------
+def _template_payload():
+    return {
+        "version": "1.0",
+        "exported_at": "2026-09-23 12:00:00",
+        "tables": {
+            "clients": [
+                {
+                    "id": "c-100",
+                    "name": "Ахмед Ахмедов",
+                    "phone": "+99361000000",
+                    "phone_norm": "99361000000",
+                    "extra_phones_json": "[]",
+                    "created_at": "2026-01-01 10:00:00",
+                    "updated_at": "2026-01-01 10:00:00",
+                    "deleted_at": None,
+                }
+            ],
+            "repairs": [
+                {
+                    "id": "r-200",
+                    "number": "tv-btrx-260101-ABCD1234",
+                    "public_token": "a1b2c3d4e5f6a1b2c3d4e5f6",
+                    "client_id": "c-100",
+                    "device_type": "Телевизоры",
+                    "brand": "SAMSUNG",
+                    "model": "QE55Q70",
+                    "serial": "SN12345",
+                    "fault_client": "Не включается",
+                    "work_done": "Замена блока питания",
+                    "diagnosis": "Сгорел ШИМ-контроллер",
+                    "equipment_json": "[\"remote\"]",
+                    "equipment_other": "Сумка",
+                    "condition_json": "[\"body_scratches\"]",
+                    "condition_other": "",
+                    "photos_json": "[]",
+                    "is_delivery": 1,
+                    "delivery_district": "Парахат 3/2",
+                    "delivery_person": "Курьер",
+                    "delivery_phone": "+99361111111",
+                    "delivery_fee_cents": 1250,
+                    "accepted_by_id": 1,
+                    "accepted_by_name": "Админ",
+                    "status": "Выдано",
+                    "price_final_cents": 50000,
+                    "price_max_cents": 60000,
+                    "paid_cents": 50000,
+                    "payment_mark": 1,
+                    "master_payout_cents": 15000,
+                    "warranty_start": "2026-01-01",
+                    "warranty_until": "2026-04-01",
+                    "responsible_master_id": 7,
+                    "issued_at": "2026-01-02 12:00:00",
+                    "finished_at": "2026-01-01 18:00:00",
+                    "created_at": "2026-01-01 10:00:00",
+                    "updated_at": "2026-01-02 12:00:00",
+                    "deleted_at": None,
+                }
+            ],
+            "repair_masters": [
+                {
+                    "repair_id": "r-200",
+                    "user_id": 7,
+                    "display_name": "Мастер Ахмед",
+                    "assignment_role": "master",
+                    "reward_cents": 15000,
+                },
+                {
+                    "repair_id": "r-200",
+                    "user_id": 8,
+                    "display_name": "Помощник Мерген",
+                    "assignment_role": "assistant",
+                    "reward_cents": 0,
+                },
+            ],
+            "repair_parts": [
+                {
+                    "id": "p-10",
+                    "repair_id": "r-200",
+                    "name": "ШИМ контроллер",
+                    "quantity": 1,
+                    "unit_cost_cents": 3500,
+                    "created_at": "2026-01-01 11:00:00",
+                }
+            ],
+            "repair_history": [
+                {
+                    "id": "h-100",
+                    "repair_id": "r-200",
+                    "event_type": "status_change",
+                    "actor_user_id": 7,
+                    "actor_name": "Мастер Ахмед",
+                    "comment": "Ремонт завершён",
+                    "details_json": "{}",
+                    "created_at": "2026-01-01 18:00:00",
+                }
+            ],
+            "repair_number_aliases": [
+                {"old_number": "MSB-00123", "repair_id": "r-200"}
+            ],
+            "donor_units": [
+                {
+                    "id": "d-1",
+                    "brand": "LG",
+                    "model": "42LN540V",
+                    "serial_number": "SN999",
+                    "board_number": "EAX64891306",
+                    "comment": "На разбор",
+                    "created_at": "2026-01-01 10:00:00",
+                    "updated_at": "2026-01-01 10:00:00",
+                }
+            ],
+            "donor_parts": [
+                {
+                    "id": "dp-1",
+                    "donor_id": "d-1",
+                    "name": "Материнская плата Main",
+                    "quantity": 1,
+                    "panel_number": "LC420DUE",
+                    "price_cents": 30000,
+                    "created_at": "2026-01-01 10:00:00",
+                }
+            ],
+            "app_settings": [
+                {"key": "storage_months", "value_json": "{\"months\": 4}"},
+                {"key": "ip_control", "value_json": "{\"mode\": \"whitelist\", \"whitelist\": []}"},
+            ],
+            "sms_log": [
+                {
+                    "id": "s-1",
+                    "repair_id": "r-200",
+                    "phone": "+99361000000",
+                    "text": "Ваша техника готова",
+                    "status": "sent",
+                    "created_at": "2026-01-01 18:05:00",
+                }
+            ],
+            "print_log": [
+                {"id": "pl-1", "repair_id": "r-200", "kind": "blank", "status": "done",
+                 "created_at": "2026-01-01 10:05:00"}
+            ],
+        },
+    }
+
+
+def _post_import(client, headers, payload, mode="merge", **form):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return client.post(
+        "/api/admin/backup/import",
+        headers=headers,
+        files={"file": ("msb_export.json", body, "application/json")},
+        data={"mode": mode, **form},
+    )
+
+
+def test_import_template_file_and_idempotency(client, admin_headers):
+    payload = _template_payload()
+
+    dry = _post_import(client, admin_headers, payload, dry_run="1")
+    assert dry.status_code == 200, dry.text
+    assert dry.json()["dry_run"] is True and dry.json()["tables"]["repairs"] == 1
+
+    r = _post_import(client, admin_headers, payload)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["ok"] is True
+    assert rep["tables"]["clients"]["created"] == 1
+    assert rep["tables"]["repairs"]["created"] == 1
+    assert rep["tables"]["repair_masters"]["created"] == 2
+    assert rep["tables"]["repair_parts"]["created"] == 1
+    assert rep["tables"]["repair_history"]["created"] == 1
+    assert rep["tables"]["sms_log"]["created"] == 1
+    assert rep["tables"]["print_log"]["created"] == 1
+    assert rep["tables"]["repair_number_aliases"]["created"] == 1
+    assert rep["tables"]["donor_units"]["created"] == 1
+    assert rep["tables"]["donor_parts"]["created"] == 1
+    assert rep["tables"]["payments"]["created"] == 1  # paid_cents → платёж
+    # ip_control защищён, storage_months обновлён/создан
+    assert rep["tables"]["app_settings"]["skipped"] == 1
+    # Неизвестные мастера созданы как сотрудники
+    assert any("Мастер Ахмед" in u for u in rep["created_users"])
+    assert any("Помощник Мерген" in u for u in rep["created_users"])
+
+    got = client.get("/api/repairs/by-number/tv-btrx-260101-ABCD1234", headers=admin_headers)
+    assert got.status_code == 200, got.text
+    repair = got.json()
+    assert repair["device_type"] == "Телевизоры"
+    assert repair["serial"] == "SN12345"
+    assert repair["status"] == "Завершён"  # «Выдано» → Завершён + issued_at
+    assert repair["issued_at"] is not None
+    assert repair["ready_at"] is not None
+    assert float(repair["price_final"]) == 500.0
+    assert float(repair["price_max"]) == 600.0
+    assert float(repair["master_payout"]) == 150.0
+    assert repair["paid"] is True
+    assert repair["fault_master"] == "Сгорел ШИМ-контроллер"
+    assert repair["complectation"] == {"Пульт": True, "Сумка": True}
+    assert repair["condition_notes"] == "Царапины на корпусе"
+    assert repair["is_delivery"] is True
+    assert repair["delivery_district"] == "Парахат 3/2"
+    assert repair["warranty_text"] == "90 дней"
+    assert repair["master_names"] == ["Мастер Ахмед"]
+    assert repair["helper_names"] == ["Помощник Мерген"]
+    types = [e["type"] for e in repair["events"]]
+    assert "status_change" in types and "notify" in types
+
+    pays = client.get(f"/api/repairs/{repair['id']}/payments", headers=admin_headers)
+    assert pays.status_code == 200 and float(pays.json()[0]["amount"]) == 500.0
+
+    parts = client.get(f"/api/repairs/{repair['id']}/parts", headers=admin_headers)
+    assert parts.status_code == 200, parts.text
+    names = [p["name"] if "name" in p else p.get("part_name") for p in parts.json()]
+    assert any(n and "ШИМ" in n for n in names) or len(parts.json()) == 1
+
+    # Повторный импорт того же файла ничего не дублирует.
+    r2 = _post_import(client, admin_headers, payload)
+    assert r2.status_code == 200, r2.text
+    rep2 = r2.json()
+    assert rep2["created"] == 0, rep2
+    assert rep2["tables"]["repairs"]["updated"] == 1
+    assert rep2["created_users"] == []
+    got2 = client.get("/api/repairs/by-number/tv-btrx-260101-ABCD1234", headers=admin_headers).json()
+    assert len(got2["events"]) == len(repair["events"])
+    assert got2["master_names"] == ["Мастер Ахмед"]
+    pays2 = client.get(f"/api/repairs/{repair['id']}/payments", headers=admin_headers).json()
+    assert len(pays2) == 1
+
+    # Старый номер (alias) ведёт на карточку.
+    cookies = _login(client)
+    resp = client.get("/repairs/by-number/MSB-00123", cookies=cookies, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"].endswith(f"/repairs/{repair['id']}")
+
+
+def test_import_rejects_bad_file(client, admin_headers):
+    r = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": ("x.zip", b"garbage", "application/zip")},
+    )
+    assert r.status_code == 400
+    r = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": ("x.json", b'{"foo": 1}', "application/json")},
+    )
+    assert r.status_code == 400
+    assert "tables" in r.json()["detail"]
+
+
+def test_import_skips_repair_without_client_but_keeps_rest(client, admin_headers):
+    payload = {
+        "version": "1.0",
+        "tables": {
+            "clients": [{"id": "c-1", "full_name": "Без телефона", "phone": ""}],
+            "repairs": [
+                {"id": "r-1", "number": "NOCLIENT-1", "client_id": "c-404", "category": "Мониторы"},
+                {"id": "r-2", "client_id": "c-9", "client_phone": "+99365123456",
+                 "client_name": "Инлайн Клиент", "category": "Мониторы", "status": "Новый"},
+            ],
+        },
+    }
+    r = _post_import(client, admin_headers, payload)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["tables"]["clients"]["skipped"] == 1
+    assert rep["tables"]["repairs"]["skipped"] == 1
+    assert rep["tables"]["repairs"]["created"] == 1  # клиент взят из самого ремонта
+    assert any("c-404" in w for w in rep["warnings"])
+    # номер сгенерирован автоматически
+    lst = client.get("/api/repairs?q=99365123456", headers=admin_headers)
+    assert lst.status_code == 200
+    items = lst.json()["items"] if isinstance(lst.json(), dict) else lst.json()
+    assert any(i["brand"] is None and i["device_type"] == "Мониторы" for i in items)
+
+
+# --------------------------------------------------------------------------
+# Round-trip: экспорт → импорт в ту же базу ничего не меняет
+# --------------------------------------------------------------------------
+def test_export_then_import_is_noop(client, admin_headers, created_repair):
+    r = client.get("/api/admin/backup/export", headers=admin_headers)
+    _, data = _unzip(r.content)
+    before = client.get("/api/admin/backup/preview", headers=admin_headers).json()["tables"]
+
+    imp = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": ("msb_backup.zip", r.content, "application/zip")},
+        data={"mode": "merge"},
+    )
+    assert imp.status_code == 200, imp.text
+    rep = imp.json()
+    assert rep["ok"] and rep["created"] == 0, rep
+    after = client.get("/api/admin/backup/preview", headers=admin_headers).json()["tables"]
+    assert before == after
+
+    got = client.get(f"/api/repairs/{created_repair['id']}", headers=admin_headers).json()
+    assert got["number"] == created_repair["number"]
+    assert got["complectation"] == created_repair["complectation"]
+
+
+# --------------------------------------------------------------------------
+# Веб-интерфейс: вкладка «Данные»
+# --------------------------------------------------------------------------
+def test_web_backup_page_export_and_import(client, admin_headers):
+    cookies = _login(client)
+    page = client.get("/admin/settings?section=backup", cookies=cookies)
+    assert page.status_code == 200
+    assert "msb_backup.zip" in page.text
+    assert 'action="/admin/settings/backup/import"' in page.text
+    assert "/admin/settings/backup/export" in page.text
+    # ссылка на вкладку есть и в остальных разделах
+    general = client.get("/admin/settings?section=general", cookies=cookies)
+    assert "section=backup" in general.text
+
+    dl = client.get("/admin/settings/backup/export", cookies=cookies)
+    assert dl.status_code == 200
+    meta, data = _unzip(dl.content)
+    assert meta["exported_by"] == "admin@msb.local"
+
+    payload = _template_payload()
+    payload["tables"]["clients"][0]["id"] = "c-777"
+    payload["tables"]["clients"][0]["phone"] = "+99362777777"
+    payload["tables"]["clients"][0]["phone_norm"] = "99362777777"
+    payload["tables"]["repairs"][0].update({"id": "r-777", "client_id": "c-777",
+                                            "number": "WEB-IMPORT-1", "public_token": "tok777"})
+    for row in payload["tables"]["repair_masters"] + payload["tables"]["repair_parts"] + \
+            payload["tables"]["repair_history"] + payload["tables"]["sms_log"] + payload["tables"]["print_log"]:
+        row["repair_id"] = "r-777"
+    payload["tables"]["repair_number_aliases"] = []
+    body = json.dumps(payload, ensure_ascii=False).encode()
+    res = client.post(
+        "/admin/settings/backup/import",
+        cookies=cookies,
+        files={"file": ("msb_export.json", body, "application/json")},
+        data={"mode": "merge"},
+    )
+    assert res.status_code == 200, res.text[:500]
+    assert "Импорт выполнен" in res.text
+    assert "WEB-IMPORT-1" in client.get("/api/repairs/by-number/WEB-IMPORT-1", headers=admin_headers).text
+
+    # режим «заменить» без подтверждения отклоняется
+    res = client.post(
+        "/admin/settings/backup/import",
+        cookies=cookies,
+        files={"file": ("msb_export.json", body, "application/json")},
+        data={"mode": "replace"},
+    )
+    assert res.status_code == 400
+    assert "ЗАМЕНИТЬ" in res.text
+
+
+def test_web_backup_requires_admin(client):
+    cookies = _login(client, "operator@msb.local", "operator123")
+    assert client.get("/admin/settings?section=backup", cookies=cookies).status_code == 403
+    assert client.get("/admin/settings/backup/export", cookies=cookies).status_code == 403
+    client.cookies.clear()
+    r = client.get("/admin/settings/backup/export", follow_redirects=False)
+    assert r.status_code == 303
+
+
+# --------------------------------------------------------------------------
+# Режим «заменить»: восстановление из собственной копии сохраняет всё, включая id
+# --------------------------------------------------------------------------
+def test_replace_mode_restores_own_backup(client, admin_headers, created_repair):
+    before = client.get("/api/admin/backup/preview", headers=admin_headers).json()["tables"]
+    dump = client.get("/api/admin/backup/export?media=1", headers=admin_headers)
+    assert dump.status_code == 200
+    _, data = _unzip(dump.content)
+    repair_ids = {r["id"] for r in data["tables"]["repairs"]}
+    assert created_repair["id"] in repair_ids
+
+    imp = client.post(
+        "/api/admin/backup/import",
+        headers=admin_headers,
+        files={"file": ("msb_backup.zip", dump.content, "application/zip")},
+        data={"mode": "replace"},
+    )
+    assert imp.status_code == 200, imp.text
+    rep = imp.json()
+    assert rep["ok"] and rep["mode"] == "replace"
+    assert rep["tables"]["repairs"]["created"] == before["repairs"]
+    assert rep["tables"]["clients"]["created"] == before["clients"]
+
+    after = client.get("/api/admin/backup/preview", headers=admin_headers).json()["tables"]
+    for name in ("clients", "repairs", "repair_masters", "repair_parts", "repair_history",
+                 "payments", "donor_units", "donor_parts", "sms_log", "users"):
+        assert after[name] == before[name], name
+
+    got = client.get(f"/api/repairs/{created_repair['id']}", headers=admin_headers)
+    assert got.status_code == 200, got.text
+    assert got.json()["number"] == created_repair["number"]
+    assert got.json()["public_token"] == created_repair["public_token"]

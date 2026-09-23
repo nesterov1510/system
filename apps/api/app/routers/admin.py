@@ -1,7 +1,8 @@
 import base64
+import json
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -647,6 +648,125 @@ async def run_reminders_now(db: DbSession, user: CurrentUser):
     )
     await db.commit()
     return report
+
+
+# --- Резервная копия: экспорт / импорт данных ---
+MAX_IMPORT_BYTES = 512 * 1024 * 1024
+
+
+@router.get("/backup/export")
+async def backup_export(
+    db: DbSession,
+    user: CurrentUser,
+    media: bool = False,
+    format: str = "zip",
+):
+    """Выгрузить все данные архивом `msb_backup.zip` (meta.json + msb_export.json).
+
+    `media=1` — добавить в архив файлы фотографий (папка media/).
+    `format=json` — отдать только msb_export.json без архива.
+    """
+    from fastapi.responses import Response
+
+    from app.services import backup
+
+    if format == "json":
+        payload = await backup.build_export(db, exported_by=user.email)
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = backup.backup_filename(payload["exported_at"]).replace(".zip", ".json")
+        media_type = "application/json"
+    else:
+        body, meta = await backup.build_backup_zip(
+            db, exported_by=user.email, include_media=bool(media)
+        )
+        filename = backup.backup_filename(meta["exported_at"])
+        media_type = "application/zip"
+    await audit.record(
+        db,
+        audit.ACTION_DATA_EXPORT,
+        actor_id=user.id,
+        entity="system",
+        meta={"filename": filename, "media": bool(media), "bytes": len(body)},
+    )
+    await db.commit()
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/backup/preview")
+async def backup_preview(db: DbSession):
+    """Сколько записей уйдёт в выгрузку (для страницы админки)."""
+    from app.services import backup
+
+    tables = await backup.export_tables(db)
+    counts = {k: len(v) for k, v in tables.items()}
+    return {"tables": counts, "total": sum(counts.values())}
+
+
+@router.post("/backup/import")
+async def backup_import(
+    db: DbSession,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    mode: str = Form("merge"),
+    dry_run: bool = Form(False),
+):
+    """Загрузить `msb_backup.zip` (или msb_export.json).
+
+    `mode=merge` — добавить и обновить записи, `mode=replace` — сначала
+    очистить клиентов, ремонты и склад разбора. `dry_run=1` — только
+    проверить файл и показать, что в нём, ничего не записывая.
+    """
+    from app.services import backup
+
+    data = await file.read()
+    if len(data) > MAX_IMPORT_BYTES:
+        raise HTTPException(413, "Файл слишком большой")
+    try:
+        payload, meta, media_files = backup.read_backup_file(data, file.filename or "")
+    except backup.ImportError_ as e:
+        raise HTTPException(400, str(e))
+    tables = payload.get("tables") or {}
+    summary = {
+        k: len(v) for k, v in tables.items() if isinstance(v, list)
+    }
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "meta": meta,
+            "version": payload.get("version"),
+            "exported_at": payload.get("exported_at"),
+            "tables": summary,
+            "media_files": len(media_files),
+        }
+    report = await backup.import_payload(
+        db, payload, actor=user, mode=mode, media=media_files, source_meta=meta
+    )
+    result = report.as_dict()
+    result["filename"] = file.filename
+    await audit.record(
+        db,
+        audit.ACTION_DATA_IMPORT,
+        actor_id=user.id,
+        entity="system",
+        meta={
+            "filename": file.filename,
+            "mode": report.mode,
+            "ok": report.error is None,
+            "error": report.error,
+            "created": report.created,
+            "updated": report.updated,
+            "skipped": report.skipped,
+        },
+    )
+    await db.commit()
+    if report.error:
+        raise HTTPException(400, result)
+    return result
 
 
 # --- Audit log ---

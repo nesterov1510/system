@@ -522,6 +522,8 @@ async def admin_settings(request: Request, section: str = "general", saved: str 
     if redir:
         return redir
     try:
+        if section == "backup":
+            return await _render_backup_page(request, db, saved=saved)
         printer = await settings_svc.get_printer(db)
         label = await settings_svc.get_label_printer(db)
         sms = await settings_svc.get_sms_server(db)
@@ -947,3 +949,105 @@ async def admin_settings_label_test(request: Request):
         return RedirectResponse("/admin/settings?section=printer&saved=test", status_code=303)
     finally:
         await db.close()
+
+
+# ==========================================================================
+# Резервная копия: экспорт / импорт данных (вкладка «Данные» в настройках)
+# ==========================================================================
+@router.get("/admin/settings/backup/export")
+async def admin_backup_export(request: Request, media: str | None = None):
+    """Скачать msb_backup.zip прямо из браузера (без Bearer-токена)."""
+    from fastapi.responses import Response
+
+    from app.services import backup
+
+    db, user, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        body, meta = await backup.build_backup_zip(
+            db, exported_by=user.email, include_media=bool(media)
+        )
+        filename = backup.backup_filename(meta["exported_at"])
+        await audit.record(
+            db,
+            audit.ACTION_DATA_EXPORT,
+            actor_id=user.id,
+            entity="system",
+            meta={"filename": filename, "media": bool(media), "bytes": len(body)},
+        )
+        await db.commit()
+        return Response(
+            content=body,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    finally:
+        await db.close()
+
+
+@router.post("/admin/settings/backup/import")
+async def admin_backup_import(request: Request):
+    """Загрузить архив/JSON и показать отчёт на той же вкладке."""
+    from app.services import backup
+
+    db, user, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        mode = (form.get("mode") or "merge").strip()
+        confirm = (form.get("confirm_replace") or "").strip()
+        if mode == "replace" and confirm != "ЗАМЕНИТЬ":
+            return await _render_backup_page(
+                request, db,
+                error="Для режима «заменить» введите слово ЗАМЕНИТЬ в поле подтверждения.",
+            )
+        if upload is None or not getattr(upload, "filename", ""):
+            return await _render_backup_page(request, db, error="Выберите файл msb_backup.zip или msb_export.json.")
+        data = await upload.read()
+        try:
+            payload, meta, media_files = backup.read_backup_file(data, upload.filename)
+        except backup.ImportError_ as e:
+            return await _render_backup_page(request, db, error=str(e))
+        report = await backup.import_payload(
+            db, payload, actor=user, mode=mode, media=media_files, source_meta=meta
+        )
+        await audit.record(
+            db,
+            audit.ACTION_DATA_IMPORT,
+            actor_id=user.id,
+            entity="system",
+            meta={
+                "filename": upload.filename,
+                "mode": report.mode,
+                "ok": report.error is None,
+                "error": report.error,
+                "created": report.created,
+                "updated": report.updated,
+                "skipped": report.skipped,
+            },
+        )
+        await db.commit()
+        return await _render_backup_page(
+            request, db, report=report.as_dict(), filename=upload.filename,
+            error=report.error,
+        )
+    finally:
+        await db.close()
+
+
+async def _render_backup_page(request: Request, db, **extra) -> HTMLResponse:
+    """Вкладка «Данные» страницы настроек: счётчики + форма импорта + отчёт."""
+    from app.services import backup
+
+    tables = await backup.export_tables(db)
+    counts = {k: len(v) for k, v in tables.items()}
+    ctx = await base_context(
+        request, await get_web_user(request), active="/admin/settings",
+        section="backup", backup_counts=counts, backup_total=sum(counts.values()),
+        backup_table_names=backup.TABLE_LABELS, **extra,
+    )
+    html = await render_async("admin/backup.html", **ctx)
+    return HTMLResponse(html, status_code=400 if extra.get("error") and not extra.get("report") else 200)

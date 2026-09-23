@@ -594,7 +594,54 @@ GET/POST/PATCH /api/admin/print-templates        (редактор шаблон�
 POST /api/admin/print-templates/preview          (PDF-превью бланка)
 GET/PUT /api/admin/printer                       (настройка принтера: IP/порт/режим)
 POST /api/admin/printer/test                     (тестовая печать)
+GET  /api/admin/backup/export?media=0|1&format=zip|json  (резервная копия msb_backup.zip)
+GET  /api/admin/backup/preview                   (сколько записей уйдёт в выгрузку)
+POST /api/admin/backup/import  (multipart: file, mode=merge|replace, dry_run)  (восстановление)
 ```
+
+---
+
+## Резервная копия: экспорт и импорт данных
+
+Админка → **Настройки → 💾 Данные** (`/admin/settings?section=backup`) или
+JSON-API `/api/admin/backup/*` (только роль `admin`). Реализация —
+`app/services/backup.py`, тесты — `tests/test_backup.py`.
+
+**Экспорт** отдаёт архив:
+
+```
+msb_backup_2026-09-23_120000.zip
+├── meta.json          дата, кто выгрузил, число записей по таблицам
+├── msb_export.json    {"version": "1.0", "exported_at": "...", "tables": {...}}
+└── media/…            файлы фотографий (только при ?media=1 / «Скачать с фотографиями»)
+```
+
+Таблицы в `msb_export.json`: `clients`, `repairs`, `repair_masters`,
+`repair_parts`, `repair_history`, `repair_number_aliases`, `donor_units`,
+`donor_parts`, `app_settings`, `sms_log`, `print_log` + служебные
+(`users`, `cities`, `branches`, `payments`, `repair_part_orders`, `parts`,
+`price_items`, `equipment`). Деньги — целые копейки в полях `*_cents`
+(500 ман = `50000`), даты — `YYYY-MM-DD HH:MM:SS` (UTC), JSON-поля — строки
+(`equipment_json`, `condition_json`, `details_json`…).
+
+**Импорт** принимает тот же архив либо голый `msb_export.json` / `data.json`
+и понимает выгрузку старой базы: `name` или `full_name`, `category` или
+`device_type`, `serial_number` или `serial`, `equipment_json` или
+`complectation`, строковые id `c-100` / `r-200`, числовые id сотрудников
+(сопоставляются по имени, неизвестные мастера создаются выключенными).
+Старые статусы («Выдано», «Готово к выдаче»…) переводятся в актуальные пять;
+`paid_cents` без платежей превращается в один платёж; `warranty_until`
+пересчитывается в текст гарантии; старые номера из `repair_number_aliases`
+работают в переходе `/repairs/by-number/<старый номер>`.
+
+Режимы: **merge** (по умолчанию) — записи сопоставляются по UUID, номеру
+ремонта, телефону клиента и т.д., повторный импорт того же файла ничего не
+дублирует; **replace** — сначала удаляются клиенты, ремонты (история,
+платежи, фото, запчасти) и склад разбора, затем загружается файл; в
+веб-форме требуется ввести слово `ЗАМЕНИТЬ`. Импорт идёт одной транзакцией:
+ошибка откатывает всё. Настройки `ip_control` и `data_migrations` из файла
+не применяются (чтобы чужой белый список не заблокировал администратора).
+Обе операции пишутся в журнал аудита (`data.export` / `data.import`).
 
 ---
 
