@@ -112,6 +112,21 @@
   </div>
 </div>
 
+<div class="msb-form-card">
+  <div class="msb-form-card__head"><h2>👤 Учётные записи сотрудников — отдельно</h2></div>
+  <div class="msb-form-card__body">
+    <p style="margin:0;color:var(--muted);font-size:13px">
+      Сотрудники входят в полную копию, но их можно перенести и отдельно файлом <code>msb_users.json</code>
+      (роли, права, город/точка; с паролями или без). Импорт обновляет по email и умеет отключать тех, кого нет в файле.
+    </p>
+  </div>
+  <div class="msb-form-card__foot" style="justify-content:flex-start">
+    <a class="btn primary" href="/admin/users/export">⬇ Скачать msb_users.json</a>
+    <a class="btn sec" href="/admin/users/export?passwords=0">⬇ Без паролей</a>
+    <a class="btn ghost" href="/admin/users#users-transfer">📥 Импорт учётных записей →</a>
+  </div>
+</div>
+
 <form method="post" action="/admin/settings/backup/import" enctype="multipart/form-data"
       onsubmit="return confirmImport(this)">
   <div class="msb-form-card">
