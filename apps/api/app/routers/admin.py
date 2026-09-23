@@ -696,6 +696,102 @@ async def backup_export(
     )
 
 
+@router.get("/backup/users/export")
+async def backup_users_export(db: DbSession, user: CurrentUser, passwords: bool = True):
+    """Выгрузить только учётные записи сотрудников — `msb_users.json`.
+
+    Внутри `tables.users` (+ `cities`, `branches`, на которые они ссылаются).
+    `passwords=0` — без хэшей паролей (для передачи в другой филиал).
+    """
+    from fastapi.responses import Response
+
+    from app.services import backup
+
+    payload = await backup.build_users_export(
+        db, exported_by=user.email, include_passwords=bool(passwords)
+    )
+    body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    filename = backup.users_filename(payload["exported_at"])
+    await audit.record(
+        db,
+        audit.ACTION_USERS_EXPORT,
+        actor_id=user.id,
+        entity="system",
+        meta={"filename": filename, "users": len(payload["tables"]["users"]),
+              "passwords": bool(passwords), "bytes": len(body)},
+    )
+    await db.commit()
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/backup/users/import")
+async def backup_users_import(
+    db: DbSession,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+    deactivate_missing: bool = Form(False),
+    dry_run: bool = Form(False),
+):
+    """Загрузить учётные записи из `msb_users.json` (или из полной копии —
+    берётся только таблица users).
+
+    Сотрудники сопоставляются по id/email: существующие обновляются (имя,
+    роли, права, статус, пароль — если он есть в файле), новые создаются.
+    `deactivate_missing=1` — отключить тех, кого нет в файле (кроме себя).
+    `dry_run=1` — показать, кто в файле, ничего не меняя.
+    """
+    from app.services import backup
+
+    data = await file.read()
+    if len(data) > MAX_IMPORT_BYTES:
+        raise HTTPException(413, "Файл слишком большой")
+    try:
+        payload, meta = backup.read_users_file(data, file.filename or "")
+    except backup.ImportError_ as e:
+        raise HTTPException(400, str(e))
+    if dry_run:
+        users = backup.users_file_summary(payload)
+        return {
+            "ok": True,
+            "dry_run": True,
+            "meta": meta,
+            "kind": payload.get("kind"),
+            "exported_at": payload.get("exported_at"),
+            "passwords_included": payload.get("passwords_included"),
+            "count": len(users),
+            "users": users,
+        }
+    report = await backup.import_users_payload(
+        db, payload, actor=user, deactivate_missing=deactivate_missing, source_meta=meta
+    )
+    result = report.as_dict()
+    result["filename"] = file.filename
+    await audit.record(
+        db,
+        audit.ACTION_USERS_IMPORT,
+        actor_id=user.id,
+        entity="system",
+        meta={
+            "filename": file.filename,
+            "deactivate_missing": bool(deactivate_missing),
+            "ok": report.error is None,
+            "error": report.error,
+            "created": report.created,
+            "updated": report.updated,
+            "skipped": report.skipped,
+            "deactivated": len(report.deactivated),
+        },
+    )
+    await db.commit()
+    if report.error:
+        raise HTTPException(400, result)
+    return result
+
+
 @router.get("/backup/preview")
 async def backup_preview(db: DbSession):
     """Сколько записей уйдёт в выгрузку (для страницы админки)."""

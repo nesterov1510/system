@@ -92,33 +92,38 @@ async def admin_users(request: Request):
     if redir:
         return redir
     try:
-        users = (await db.execute(select(User).order_by(User.name))).scalars().all()
-        cities = (await db.execute(select(City).order_by(City.name))).scalars().all()
-        branches = (await db.execute(select(Branch).order_by(Branch.name))).scalars().all()
-
-        def _perm_view(u):
-            grants = perms.user_grants(u)
-            return [
-                {
-                    "key": f["key"],
-                    "label": f["label"],
-                    "desc": f["desc"],
-                    "by_role": perms.role_grants_feature(u, f["key"]),
-                    "granted": f["key"] in grants,
-                }
-                for f in perms.FEATURES
-            ]
-
-        perms_by_user = {u.id: _perm_view(u) for u in users}
-        ctx = await base_context(
-            request, await get_web_user(request), active="/admin/users",
-            users=users, roles=ROLE_CHOICES, perms_by_user=perms_by_user,
-            cities=cities, branches=branches,
-        )
-        html = await render_async("admin/users.html", **ctx)
-        return HTMLResponse(html)
+        return await _render_users_page(request, db)
     finally:
         await db.close()
+
+
+async def _render_users_page(request: Request, db, **extra) -> HTMLResponse:
+    users = (await db.execute(select(User).order_by(User.name))).scalars().all()
+    cities = (await db.execute(select(City).order_by(City.name))).scalars().all()
+    branches = (await db.execute(select(Branch).order_by(Branch.name))).scalars().all()
+
+    def _perm_view(u):
+        grants = perms.user_grants(u)
+        return [
+            {
+                "key": f["key"],
+                "label": f["label"],
+                "desc": f["desc"],
+                "by_role": perms.role_grants_feature(u, f["key"]),
+                "granted": f["key"] in grants,
+            }
+            for f in perms.FEATURES
+        ]
+
+    perms_by_user = {u.id: _perm_view(u) for u in users}
+    ctx = await base_context(
+        request, await get_web_user(request), active="/admin/users",
+        users=users, roles=ROLE_CHOICES, perms_by_user=perms_by_user,
+        cities=cities, branches=branches, **extra,
+    )
+    html = await render_async("admin/users.html", **ctx)
+    status = 400 if extra.get("import_error") and not extra.get("import_report") else 200
+    return HTMLResponse(html, status_code=status)
 
 
 @router.post("/admin/users/create")
@@ -1033,6 +1038,88 @@ async def admin_backup_import(request: Request):
         return await _render_backup_page(
             request, db, report=report.as_dict(), filename=upload.filename,
             error=report.error,
+        )
+    finally:
+        await db.close()
+
+
+@router.get("/admin/users/export")
+async def admin_users_export(request: Request, passwords: str | None = "1"):
+    """Скачать msb_users.json со страницы «Сотрудники»."""
+    from fastapi.responses import Response
+
+    from app.services import backup
+
+    db, user, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        include_pw = (passwords or "").strip() not in ("0", "no", "false", "")
+        payload = await backup.build_users_export(
+            db, exported_by=user.email, include_passwords=include_pw
+        )
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        filename = backup.users_filename(payload["exported_at"])
+        await audit.record(
+            db,
+            audit.ACTION_USERS_EXPORT,
+            actor_id=user.id,
+            entity="system",
+            meta={"filename": filename, "users": len(payload["tables"]["users"]),
+                  "passwords": include_pw, "bytes": len(body)},
+        )
+        await db.commit()
+        return Response(
+            content=body,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    finally:
+        await db.close()
+
+
+@router.post("/admin/users/import")
+async def admin_users_import(request: Request):
+    """Загрузить msb_users.json и показать отчёт на странице «Сотрудники»."""
+    from app.services import backup
+
+    db, user, redir = await _require_admin(request)
+    if redir:
+        return redir
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        deactivate_missing = (form.get("deactivate_missing") or "") in ("1", "on", "true")
+        if upload is None or not getattr(upload, "filename", ""):
+            return await _render_users_page(request, db, import_error="Выберите файл msb_users.json.")
+        data = await upload.read()
+        try:
+            payload, meta = backup.read_users_file(data, upload.filename)
+        except backup.ImportError_ as e:
+            return await _render_users_page(request, db, import_error=str(e))
+        report = await backup.import_users_payload(
+            db, payload, actor=user, deactivate_missing=deactivate_missing, source_meta=meta
+        )
+        await audit.record(
+            db,
+            audit.ACTION_USERS_IMPORT,
+            actor_id=user.id,
+            entity="system",
+            meta={
+                "filename": upload.filename,
+                "deactivate_missing": deactivate_missing,
+                "ok": report.error is None,
+                "error": report.error,
+                "created": report.created,
+                "updated": report.updated,
+                "skipped": report.skipped,
+                "deactivated": len(report.deactivated),
+            },
+        )
+        await db.commit()
+        return await _render_users_page(
+            request, db, import_report=report.as_dict(), import_filename=upload.filename,
+            import_error=report.error,
         )
     finally:
         await db.close()

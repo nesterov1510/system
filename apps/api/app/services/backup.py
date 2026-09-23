@@ -921,43 +921,9 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
                 }
             )
 
-    for u in users:
-        t["users"].append(
-            {
-                "id": str(u.id),
-                "name": u.name,
-                "email": u.email,
-                "phone": u.phone,
-                "telegram": u.telegram,
-                "role": u.role,
-                "extra_roles_json": jdump(list(u.extra_roles or [])),
-                "permissions_json": jdump(list(u.extra_permissions or [])),
-                "active": int(bool(u.active)),
-                "password_hash": u.password_hash,
-                "city_slug": city_slug.get(u.city_id),
-                "branch_name": branch_name.get(u.branch_id),
-                "created_at": fmt_dt(u.created_at),
-                "updated_at": fmt_dt(u.updated_at),
-            }
-        )
-    for c in cities:
-        t["cities"].append(
-            {"id": str(c.id), "slug": c.slug, "name": c.name, "timezone": c.timezone,
-             "created_at": fmt_dt(c.created_at)}
-        )
-    for b in branches:
-        t["branches"].append(
-            {
-                "id": str(b.id),
-                "city_slug": city_slug.get(b.city_id),
-                "name": b.name,
-                "address": b.address,
-                "phone": b.phone,
-                "print_config_json": jdump(b.print_config),
-                "active": int(bool(b.active)),
-                "created_at": fmt_dt(b.created_at),
-            }
-        )
+    t["users"].extend(_user_rows(users, city_slug, branch_name))
+    t["cities"].extend(_city_rows(cities))
+    t["branches"].extend(_branch_rows(branches, city_slug))
     for p in payments:
         t["payments"].append(
             {
@@ -1042,6 +1008,54 @@ async def export_tables(db: AsyncSession) -> dict[str, list[dict]]:
     return t
 
 
+def _user_rows(users, city_slug: dict, branch_name: dict, *, include_passwords: bool = True) -> list[dict]:
+    rows = []
+    for u in users:
+        rows.append(
+            {
+                "id": str(u.id),
+                "name": u.name,
+                "email": u.email,
+                "phone": u.phone,
+                "telegram": u.telegram,
+                "role": u.role,
+                "extra_roles_json": jdump(list(u.extra_roles or [])),
+                "permissions_json": jdump(list(u.extra_permissions or [])),
+                "active": int(bool(u.active)),
+                "password_hash": u.password_hash if include_passwords else None,
+                "city_slug": city_slug.get(u.city_id),
+                "branch_name": branch_name.get(u.branch_id),
+                "created_at": fmt_dt(u.created_at),
+                "updated_at": fmt_dt(u.updated_at),
+            }
+        )
+    return rows
+
+
+def _city_rows(cities) -> list[dict]:
+    return [
+        {"id": str(c.id), "slug": c.slug, "name": c.name, "timezone": c.timezone,
+         "created_at": fmt_dt(c.created_at)}
+        for c in cities
+    ]
+
+
+def _branch_rows(branches, city_slug: dict) -> list[dict]:
+    return [
+        {
+            "id": str(b.id),
+            "city_slug": city_slug.get(b.city_id),
+            "name": b.name,
+            "address": b.address,
+            "phone": b.phone,
+            "print_config_json": jdump(b.print_config),
+            "active": int(bool(b.active)),
+            "created_at": fmt_dt(b.created_at),
+        }
+        for b in branches
+    ]
+
+
 async def build_export(db: AsyncSession, *, exported_by: str | None = None) -> dict:
     tables = await export_tables(db)
     return {
@@ -1110,6 +1124,131 @@ async def build_backup_zip(
     return buf.getvalue(), meta
 
 
+# ==========================================================================
+# Учётные записи сотрудников: отдельный экспорт / импорт
+# ==========================================================================
+USERS_KIND = "users"
+USERS_TABLES = ("users", "cities", "branches")
+
+
+async def build_users_export(
+    db: AsyncSession, *, exported_by: str | None = None, include_passwords: bool = True
+) -> dict:
+    """Файл только с учётными записями (+ города и точки, на которые они ссылаются).
+
+    `include_passwords=False` — без хэшей паролей: такой файл можно отдать
+    в другой филиал, сотрудникам там зададут пароли заново.
+    """
+    users = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
+    cities = (await db.execute(select(City).order_by(City.created_at))).scalars().all()
+    branches = (await db.execute(select(Branch).order_by(Branch.created_at))).scalars().all()
+    city_slug = {c.id: c.slug for c in cities}
+    branch_name = {b.id: b.name for b in branches}
+    return {
+        "version": FORMAT_VERSION,
+        "app": "MSB",
+        "kind": USERS_KIND,
+        "exported_at": fmt_dt(_utcnow()),
+        "exported_by": exported_by,
+        "passwords_included": bool(include_passwords),
+        "tables": {
+            "users": _user_rows(users, city_slug, branch_name, include_passwords=include_passwords),
+            "cities": _city_rows(cities),
+            "branches": _branch_rows(branches, city_slug),
+        },
+    }
+
+
+def users_filename(exported_at: str | None = None) -> str:
+    stamp = (exported_at or fmt_dt(_utcnow()) or "").replace(":", "").replace(" ", "_")
+    return f"msb_users_{stamp}.json" if stamp else "msb_users.json"
+
+
+def read_users_file(data: bytes, filename: str = "") -> tuple[dict, dict]:
+    """Файл учётных записей: msb_users.json, полный msb_backup.zip/msb_export.json
+    (берутся только users/cities/branches) или просто список сотрудников."""
+    if not data:
+        raise ImportError_("Файл пустой")
+    if data[:2] != b"PK":
+        try:
+            raw = json.loads(data.decode("utf-8-sig"))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise ImportError_(f"Файл не является корректным JSON: {e}") from e
+        if isinstance(raw, list):
+            # Просто список сотрудников: [{"name": ..., "email": ..., "role": ...}]
+            return {"version": FORMAT_VERSION, "kind": USERS_KIND, "tables": {"users": raw}}, {}
+        if isinstance(raw, dict) and "tables" not in raw and isinstance(raw.get("users"), (list, dict)):
+            return {"version": raw.get("version", FORMAT_VERSION), "kind": USERS_KIND,
+                    "tables": {k: raw[k] for k in USERS_TABLES if k in raw}}, {}
+    payload, meta, _media = read_backup_file(data, filename)
+    tables = payload.get("tables") or {}
+    if not tables.get("users"):
+        raise ImportError_("В файле нет таблицы users (учётных записей сотрудников)")
+    payload = dict(payload)
+    payload["tables"] = {k: tables[k] for k in USERS_TABLES if k in tables}
+    return payload, meta
+
+
+def users_file_summary(payload: dict) -> list[dict]:
+    """Кто в файле — для предпросмотра перед импортом."""
+    out = []
+    for rec in _rows(payload.get("tables") or {}, "users"):
+        out.append(
+            {
+                "name": _s(rec.get("name")) or _s(rec.get("display_name")),
+                "email": (_s(rec.get("email")) or "").lower(),
+                "role": _s(rec.get("role")) or UserRole.OPERATOR.value,
+                "roles": [r for r in jlist(_first(rec, "extra_roles_json", "roles"))],
+                "active": _bool(rec.get("active", 1)),
+                "has_password": bool(_s(rec.get("password_hash")) or _s(rec.get("password"))),
+            }
+        )
+    return out
+
+
+async def import_users_payload(
+    db: AsyncSession,
+    payload: dict,
+    *,
+    actor: User,
+    deactivate_missing: bool = False,
+    source_meta: dict | None = None,
+) -> ImportReport:
+    """Загрузить только учётные записи (и их города/точки). Одна транзакция.
+
+    `deactivate_missing=True` — сотрудники, которых нет в файле, отключаются
+    (кроме того, кто выполняет импорт). Никто не удаляется: история ремонтов
+    ссылается на сотрудников.
+    """
+    report = ImportReport(mode="sync" if deactivate_missing else "merge", source_meta=source_meta or {})
+    tables = payload.get("tables") or {}
+    if not isinstance(tables, dict) or not _rows(tables, "users"):
+        report.error = "В файле нет таблицы users (учётных записей сотрудников)"
+        return report
+    ctx = _Ctx(db, actor, report)
+    try:
+        await ctx.load()
+        await _import_cities(ctx, _rows(tables, "cities"))
+        await _import_branches(ctx, _rows(tables, "branches"))
+        touched = await _import_users(ctx, _rows(tables, "users"))
+        if deactivate_missing:
+            keep = {u.id for u in touched} | {actor.id}
+            for u in list(ctx.users_by_id.values()):
+                if u.id not in keep and u.active:
+                    u.active = False
+                    report.deactivated.append(f"{u.name} ({u.email})")
+        await db.commit()
+    except ImportError_ as e:
+        await db.rollback()
+        report.error = str(e)
+    except Exception as e:  # noqa: BLE001 — любая ошибка = откат целиком
+        await db.rollback()
+        log.exception("Импорт учётных записей прерван")
+        where = f" [запись {ctx.current_ref}]" if ctx.current_ref is not None else ""
+        report.error = f"Импорт прерван, изменения отменены{where}: {type(e).__name__}: {e}"
+    return report
+
+
 def backup_filename(exported_at: str | None = None) -> str:
     stamp = (exported_at or fmt_dt(_utcnow()) or "").replace(":", "").replace(" ", "_")
     return f"msb_backup_{stamp}.zip" if stamp else "msb_backup.zip"
@@ -1139,6 +1278,7 @@ class ImportReport:
     tables: dict[str, TableStats] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     created_users: list[str] = field(default_factory=list)
+    deactivated: list[str] = field(default_factory=list)
     media_restored: int = 0
     error: str | None = None
     source_meta: dict = field(default_factory=dict)
@@ -1178,6 +1318,7 @@ class ImportReport:
             },
             "warnings": self.warnings,
             "created_users": self.created_users,
+            "deactivated": self.deactivated,
             "media_restored": self.media_restored,
             "source_meta": self.source_meta,
         }
@@ -1625,14 +1766,20 @@ async def _import_branches(ctx: _Ctx, rows: list[dict]) -> None:
             ctx.branch_refs[str(rec["id"])] = branch
 
 
-async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
+async def _import_users(ctx: _Ctx, rows: list[dict]) -> list[User]:
+    """Сотрудники из файла. Возвращает созданных/обновлённых."""
     st = ctx.report.stat("users")
     ctx.at("users")
     valid_roles = {r.value for r in UserRole}
+    touched: list[User] = []
     for rec in rows:
         ctx.at(ctx.current_table or "?", rec)
-        email = _s(rec.get("email"), 255)
+        email = (_s(rec.get("email"), 255) or "").lower() or None
         name = _s(rec.get("name"), 255) or _s(rec.get("display_name"), 255)
+        # Пароль: хэш из нашей выгрузки либо открытый текст из файла, набранного вручную.
+        pw_hash = _s(rec.get("password_hash"), 255)
+        if not pw_hash and _s(rec.get("password")):
+            pw_hash = hash_password(str(rec["password"]))
         uid = _uuid(rec.get("id"))
         user = None
         if uid and uid in ctx.users_by_id:
@@ -1642,8 +1789,10 @@ async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
         if user is None and not (name or email):
             st.skipped += 1
             continue
-        role = _s(rec.get("role"), 32)
+        role = (_s(rec.get("role"), 32) or "").lower()
         if role not in valid_roles:
+            if role:
+                ctx.report.warn(f"Сотрудник «{name or email}»: неизвестная роль «{role}» → operator")
             role = UserRole.OPERATOR.value
         extra_roles = [r for r in jlist(_first(rec, "extra_roles_json", "roles")) if r in valid_roles]
         perms = [str(p) for p in jlist(_first(rec, "permissions_json", "permissions"))]
@@ -1655,26 +1804,28 @@ async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
                 id=uid if uid and uid not in ctx.users_by_id else uuid.uuid4(),
                 name=name or (email or "").split("@")[0],
                 email=email or f"import-{secrets.token_hex(4)}@msb.local",
-                password_hash=_s(rec.get("password_hash"), 255)
-                or hash_password(secrets.token_urlsafe(24)),
+                password_hash=pw_hash or hash_password(secrets.token_urlsafe(24)),
                 role=role,
                 active=_bool(rec.get("active", 1)),
             )
             ctx.db.add(user)
             st.created += 1
-            if not _s(rec.get("password_hash")):
+            if not pw_hash:
                 ctx.report.created_users.append(f"{user.name} ({role}, {user.email}) — пароль нужно задать заново")
         else:
             if name:
                 user.name = name
+            if email and email != user.email and email not in ctx.users_by_email:
+                user.email = email
             if not is_actor:
                 # Самого себя импортом не «выключаем» и не понижаем в правах.
                 user.role = role
                 if "active" in rec:
                     user.active = _bool(rec.get("active"))
-                if _s(rec.get("password_hash")):
-                    user.password_hash = _s(rec.get("password_hash"), 255)
+                if pw_hash:
+                    user.password_hash = pw_hash
             st.updated += 1
+        touched.append(user)
         user.phone = _s(rec.get("phone"), 32) or user.phone
         user.telegram = _s(rec.get("telegram"), 128) or user.telegram
         if not is_actor:
@@ -1691,6 +1842,7 @@ async def _import_users(ctx: _Ctx, rows: list[dict]) -> None:
         ctx._index_user(user)
         if rec.get("id") is not None:
             ctx.user_refs[str(rec["id"])] = user
+    return touched
 
 
 # --- клиенты ---------------------------------------------------------------

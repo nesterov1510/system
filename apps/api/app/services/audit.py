@@ -40,6 +40,8 @@ ACTION_SMS_SENT = "sms.sent"
 ACTION_LOGIN = "auth.login"
 ACTION_DATA_EXPORT = "data.export"
 ACTION_DATA_IMPORT = "data.import"
+ACTION_USERS_EXPORT = "users.export"
+ACTION_USERS_IMPORT = "users.import"
 
 
 async def record(

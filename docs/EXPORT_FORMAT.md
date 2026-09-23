@@ -190,6 +190,38 @@ SMS по ремонту становятся событиями `notify` в ис
 `price_items`, `equipment`. Нужны, чтобы восстановление собственной копии на
 чистой базе было полным (сохраняются id, пароли сотрудников, платежи кассы).
 
+## 3.12 Отдельный файл учётных записей — `msb_users.json`
+
+Страница **Сотрудники → 💾 Учётные записи** или API
+`GET /api/admin/backup/users/export[?passwords=0]`,
+`POST /api/admin/backup/users/import` (`deactivate_missing=1`, `dry_run=1`).
+
+```
+version: "1.0"
+kind: "users"
+exported_at, exported_by
+passwords_included: true|false
+tables:
+  users[]     id, name, email, phone, telegram, role, extra_roles_json,
+              permissions_json, active, password_hash|null, city_slug,
+              branch_name, created_at, updated_at
+  cities[]    id, slug, name, timezone
+  branches[]  id, city_slug, name, address, phone, active
+```
+
+Импорт принимает этот файл, полную копию (`msb_backup.zip` / `msb_export.json`
+— берётся только `users` + `cities` + `branches`) или простой список
+`[{"name", "email", "role", "password", "active"}]`, набранный вручную
+(`password` — открытый текст, хэшируется при загрузке; `role` любого регистра;
+неизвестная роль → `operator` с предупреждением).
+
+Правила: сопоставление по `id` (UUID) или `email`; существующие обновляются
+(имя, роли, права, статус, пароль — если есть в файле), новые создаются;
+без пароля — выключенными, список показывается в отчёте. Того, кто выполняет
+импорт, нельзя отключить или понизить в правах. `deactivate_missing`
+отключает сотрудников, которых нет в файле (удаления нет: история ремонтов
+ссылается на сотрудников).
+
 ## 4. Правила импорта
 
 * **Режимы:** `merge` (по умолчанию) — добавить/обновить; `replace` — сначала

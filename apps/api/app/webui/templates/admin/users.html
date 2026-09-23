@@ -148,4 +148,77 @@
     </tbody>
   </table>
 </div></div>
+
+{# ---------- Учётные записи: экспорт / импорт ---------- #}
+<div class="card" style="margin-top:16px" id="users-transfer">
+  <div class="card-h"><h3>💾 Учётные записи: экспорт и импорт</h3></div>
+  <div class="card-b">
+    {% if import_error %}<div class="flash err">⚠ {{ import_error }}</div>{% endif %}
+    {% if import_report %}
+    <div class="flash {{ 'ok' if import_report.ok else 'err' }}" style="margin-bottom:12px">
+      <b>{% if import_report.ok %}✓ Импорт учётных записей выполнен{% else %}✗ Импорт не выполнен{% endif %}</b>
+      {% if import_filename %}<span class="muted"> — {{ import_filename }}</span>{% endif %}
+      {% if import_report.ok %}
+      <div class="row" style="gap:12px;margin-top:6px">
+        <span class="chip green">создано: {{ import_report.tables.users.created if import_report.tables.users else 0 }}</span>
+        <span class="chip">обновлено: {{ import_report.tables.users.updated if import_report.tables.users else 0 }}</span>
+        <span class="chip gray">пропущено: {{ import_report.tables.users.skipped if import_report.tables.users else 0 }}</span>
+        {% if import_report.deactivated %}<span class="chip red">отключено: {{ import_report.deactivated | length }}</span>{% endif %}
+      </div>
+      {% if import_report.created_users %}
+      <div style="margin-top:8px"><b>Созданы без пароля</b> (в файле не было пароля — задайте его в карточке):
+        <ul style="margin:4px 0 0 18px">{% for u in import_report.created_users %}<li>{{ u }}</li>{% endfor %}</ul></div>
+      {% endif %}
+      {% if import_report.deactivated %}
+      <div style="margin-top:8px"><b>Отключены</b> (их нет в файле):
+        <ul style="margin:4px 0 0 18px">{% for u in import_report.deactivated %}<li>{{ u }}</li>{% endfor %}</ul></div>
+      {% endif %}
+      {% if import_report.warnings %}
+      <details style="margin-top:8px"><summary style="cursor:pointer">Предупреждения ({{ import_report.warnings | length }})</summary>
+        <ul style="margin:4px 0 0 18px">{% for w in import_report.warnings %}<li>{{ w }}</li>{% endfor %}</ul></details>
+      {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="form-grid" style="align-items:start">
+      <div>
+        <p style="margin:0 0 8px;font-weight:600">📤 Экспорт</p>
+        <p class="muted" style="margin:0 0 10px;font-size:13px">
+          Файл <code>msb_users.json</code>: сотрудники ({{ users | length }}) с ролями, правами, городом и точкой.
+          С паролями — для переноса на другой сервер «как есть»; без паролей — для передачи в другой филиал
+          (там сотрудникам зададут пароли заново).
+        </p>
+        <div class="row" style="gap:8px;flex-wrap:wrap">
+          <a class="btn primary" href="/admin/users/export">⬇ Скачать с паролями</a>
+          <a class="btn sec" href="/admin/users/export?passwords=0">⬇ Скачать без паролей</a>
+        </div>
+      </div>
+      <form method="post" action="/admin/users/import" enctype="multipart/form-data"
+            onsubmit="return confirmUsersImport(this)">
+        <p style="margin:0 0 8px;font-weight:600">📥 Импорт</p>
+        <p class="muted" style="margin:0 0 10px;font-size:13px">
+          Принимается <code>msb_users.json</code>, полная копия <code>msb_backup.zip</code> (берётся только таблица
+          <code>users</code>) или простой список <code>[{"name", "email", "role", "password"}]</code>.
+          Сотрудники сопоставляются по email: существующие обновляются, новые создаются. Себя импортом
+          отключить или понизить в правах нельзя.
+        </p>
+        <label class="fld"><span class="lbl">Файл</span>
+          <input type="file" name="file" accept=".json,.zip,application/json,application/zip" required></label>
+        <label class="check" style="margin:8px 0">
+          <input type="checkbox" name="deactivate_missing" value="1">
+          Отключить сотрудников, которых нет в файле (никто не удаляется — история ремонтов сохраняется)
+        </label>
+        <button class="btn primary" type="submit">Загрузить учётные записи</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+function confirmUsersImport(form){
+  var off = form.querySelector('input[name=deactivate_missing]').checked;
+  if (off) return confirm('Сотрудники, которых нет в файле, будут отключены (кроме вас). Продолжить?');
+  return true;
+}
+</script>
 {% endblock %}

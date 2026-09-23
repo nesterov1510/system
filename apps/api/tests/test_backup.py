@@ -778,3 +778,170 @@ def test_import_spec_minimal_external_file(client, admin_headers):
     # Повторный импорт — без дублей.
     r2 = _post_import(client, admin_headers, payload)
     assert r2.status_code == 200 and r2.json()["created"] == 0, r2.text
+
+
+# --------------------------------------------------------------------------
+# Отдельный экспорт / импорт учётных записей сотрудников
+# --------------------------------------------------------------------------
+def _post_users_import(client, headers, payload, **form):
+    body = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return client.post(
+        "/api/admin/backup/users/import",
+        headers=headers,
+        files={"file": ("msb_users.json", body, "application/json")},
+        data=form,
+    )
+
+
+def test_users_export_only_accounts(client, admin_headers):
+    r = client.get("/api/admin/backup/users/export", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.headers["content-disposition"].startswith('attachment; filename="msb_users_')
+    payload = r.json()
+    assert payload["kind"] == "users" and payload["version"] == "1.0"
+    assert payload["passwords_included"] is True
+    assert set(payload["tables"]) == {"users", "cities", "branches"}
+    admin = next(u for u in payload["tables"]["users"] if u["email"] == "admin@msb.local")
+    assert admin["role"] == "admin" and admin["password_hash"]
+    assert "created_at" in admin and "extra_roles_json" in admin
+
+    # Без паролей
+    r2 = client.get("/api/admin/backup/users/export?passwords=0", headers=admin_headers)
+    p2 = r2.json()
+    assert p2["passwords_included"] is False
+    assert all(u["password_hash"] is None for u in p2["tables"]["users"])
+
+
+def test_users_export_forbidden_for_operator(client, operator_headers):
+    r = client.get("/api/admin/backup/users/export", headers=operator_headers)
+    assert r.status_code == 403
+    r = _post_users_import(client, operator_headers, {"tables": {"users": []}})
+    assert r.status_code == 403
+
+
+def test_users_import_roundtrip_and_password_preserved(client, admin_headers):
+    # Создаём сотрудника, выгружаем, меняем ему пароль, импортируем обратно —
+    # пароль из файла должен восстановиться.
+    r = client.post("/api/admin/users", headers=admin_headers, json={
+        "name": "Экспортный Мастер", "email": "export.master@msb.local",
+        "password": "secret-1", "role": "master", "roles": ["master", "operator"],
+        "active": False,
+    })
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    exp = client.get("/api/admin/backup/users/export", headers=admin_headers).json()
+
+    client.patch(f"/api/admin/users/{uid}", headers=admin_headers,
+                 json={"password": "changed-2", "name": "Переименован", "roles": ["master"]})
+
+    # dry_run — только состав файла
+    d = _post_users_import(client, admin_headers, exp, dry_run="1")
+    assert d.status_code == 200, d.text
+    assert d.json()["dry_run"] is True
+    me = next(u for u in d.json()["users"] if u["email"] == "export.master@msb.local")
+    assert me["has_password"] is True and me["active"] is False
+    check = client.get("/api/admin/users", headers=admin_headers).json()
+    assert next(u for u in check if u["id"] == uid)["name"] == "Переименован"  # ничего не изменилось
+
+    r = _post_users_import(client, admin_headers, exp)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["ok"] and rep["tables"]["users"]["created"] == 0
+    assert rep["tables"]["users"]["updated"] >= 2 and rep["deactivated"] == []
+    u = next(u for u in client.get("/api/admin/users", headers=admin_headers).json() if u["id"] == uid)
+    assert u["name"] == "Экспортный Мастер" and u["active"] is False
+    assert set(u["roles"]) == {"master", "operator"}
+    # Пароль вернулся к secret-1 — но учётка выключена, поэтому включаем и логинимся
+    client.patch(f"/api/admin/users/{uid}", headers=admin_headers, json={"active": True})
+    login = client.post("/api/auth/login", json={"email": "export.master@msb.local", "password": "secret-1"})
+    assert login.status_code == 200, login.text
+    # Возвращаем как было (общая БД тестов): выключаем.
+    client.patch(f"/api/admin/users/{uid}", headers=admin_headers, json={"active": False})
+
+
+def test_users_import_plain_list_with_passwords_and_deactivate_missing(client, admin_headers):
+    # Простой список, набранный вручную: открытые пароли, роли в верхнем регистре.
+    body = json.dumps([
+        {"name": "Новый Оператор", "email": "New.Operator@msb.local", "role": "OPERATOR",
+         "password": "op-pass-123", "active": 0},
+        {"name": "Без Пароля", "email": "nopass@msb.local", "role": "callcenter", "active": 0},
+        {"name": "Странная Роль", "email": "weird@msb.local", "role": "director", "active": 0},
+    ]).encode("utf-8")
+    r = _post_users_import(client, admin_headers, body)
+    assert r.status_code == 200, r.text
+    rep = r.json()
+    assert rep["tables"]["users"]["created"] == 3
+    assert any("nopass@msb.local" in x for x in rep["created_users"])
+    assert any("director" in w for w in rep["warnings"])
+    users = client.get("/api/admin/users", headers=admin_headers).json()
+    by_email = {u["email"]: u for u in users}
+    assert by_email["new.operator@msb.local"]["role"] == "operator"   # email и роль нормализованы
+    assert by_email["weird@msb.local"]["role"] == "operator"
+    assert by_email["nopass@msb.local"]["active"] is False
+
+    # Повторный импорт того же — без дублей.
+    r2 = _post_users_import(client, admin_headers, body)
+    assert r2.json()["tables"]["users"]["created"] == 0
+
+    # deactivate_missing: файл только с админом → все остальные активные выключаются,
+    # сам админ (актор) остаётся. Проверяем на копии и сразу восстанавливаем.
+    before_active = {u["id"] for u in users if u["active"]}
+    exp = client.get("/api/admin/backup/users/export", headers=admin_headers).json()
+    only_admin = dict(exp)
+    only_admin["tables"] = {"users": [u for u in exp["tables"]["users"] if u["email"] == "admin@msb.local"]}
+    r3 = _post_users_import(client, admin_headers, only_admin, deactivate_missing="1")
+    assert r3.status_code == 200, r3.text
+    rep3 = r3.json()
+    assert rep3["mode"] == "sync"
+    assert len(rep3["deactivated"]) == len(before_active - {by_email["admin@msb.local"]["id"]})
+    after = client.get("/api/admin/users", headers=admin_headers).json()
+    assert [u for u in after if u["active"]] and all(u["email"] == "admin@msb.local" for u in after if u["active"])
+    # восстановить: полный экспорт с исходными статусами
+    r4 = _post_users_import(client, admin_headers, exp)
+    assert r4.status_code == 200, r4.text
+    restored = {u["id"] for u in client.get("/api/admin/users", headers=admin_headers).json() if u["active"]}
+    assert restored == before_active
+
+
+def test_users_import_from_full_backup_takes_only_users(client, admin_headers):
+    full = client.get("/api/admin/backup/export?format=json", headers=admin_headers).json()
+    assert full["tables"]["clients"] is not None
+    r = _post_users_import(client, admin_headers, full, dry_run="1")
+    assert r.status_code == 200, r.text
+    assert r.json()["count"] == len(full["tables"]["users"])
+    r = _post_users_import(client, admin_headers, full)
+    assert r.status_code == 200, r.text
+    assert set(k for k, v in r.json()["tables"].items() if v["created"] or v["updated"]) <= {"users", "cities", "branches"}
+
+
+def test_users_import_rejects_file_without_users(client, admin_headers):
+    r = _post_users_import(client, admin_headers, {"version": "1.0", "tables": {"clients": []}})
+    assert r.status_code == 400
+    assert "users" in r.text
+    r = _post_users_import(client, admin_headers, b"not json")
+    assert r.status_code == 400
+
+
+def test_web_users_page_export_and_import(client, admin_headers):
+    cookies = _login(client)
+    page = client.get("/admin/users", cookies=cookies)
+    assert page.status_code == 200
+    assert 'href="/admin/users/export"' in page.text
+    assert 'action="/admin/users/import"' in page.text
+
+    dl = client.get("/admin/users/export?passwords=0", cookies=cookies)
+    assert dl.status_code == 200
+    assert dl.headers["content-disposition"].startswith('attachment; filename="msb_users_')
+    assert dl.json()["passwords_included"] is False
+
+    body = json.dumps([{"name": "Веб Импорт", "email": "web.import@msb.local", "role": "master", "active": 0}]).encode()
+    r = client.post("/admin/users/import", cookies=cookies,
+                    files={"file": ("msb_users.json", body, "application/json")})
+    assert r.status_code == 200, r.text[:500]
+    assert "Импорт учётных записей выполнен" in r.text
+    assert "web.import@msb.local" in r.text
+
+    bad = client.post("/admin/users/import", cookies=cookies,
+                      files={"file": ("x.json", b"{}", "application/json")})
+    assert bad.status_code == 400
+    assert "users" in bad.text
