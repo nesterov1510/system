@@ -1,0 +1,243 @@
+{
+  "version": "1.0",
+  "exported_at": "2026-09-23T17:38:48+05:00",
+  "tables": {
+    "clients": [
+      {
+        "id": "b776753d-3332-4c15-9856-9d370a21f3dd",
+        "name": "YOLDASH SABYROV",
+        "phone": "+99365425130",
+        "extra_phones_json": "[]",
+        "created_at": "2026-09-18T00:15:27+05:00",
+        "phone_norm": "99365425130",
+        "updated_at": null,
+        "deleted_at": null,
+        "full_name": "YOLDASH SABYROV"
+      }
+    ],
+    "repairs": [
+      {
+        "id": "db0f3e25-72be-4fb8-b739-9d9e4a219812",
+        "number": "tv-btrx-260918-DB0F3E25",
+        "client_id": "b776753d-3332-4c15-9856-9d370a21f3dd",
+        "category": "Телевизоры",
+        "brand": "FDFDFDF",
+        "model": "FDFDFD",
+        "serial_number": "FDFDFDFDFD",
+        "fault_client": "sdsdsdsds",
+        "work_done": "",
+        "diagnosis": "",
+        "equipment_json": "[\"tv_only\"]",
+        "equipment_other": "",
+        "condition_json": "[]",
+        "condition_other": "fdsfsfsf",
+        "photos_json": "[]",
+        "is_delivery": 0,
+        "delivery_district": "",
+        "secondary_name": "",
+        "secondary_phone": "",
+        "secondary_relation": "",
+        "accepted_by_id": 1,
+        "accepted_by_name": "Yoldash SABYROV",
+        "status": "Новый",
+        "price_final_cents": null,
+        "price_max_cents": null,
+        "paid_cents": 0,
+        "master_payout_cents": 0,
+        "issued_at": null,
+        "finished_at": null,
+        "notified_at": null,
+        "created_at": "2026-09-18T00:15:27+05:00",
+        "updated_at": "2026-09-18T01:00:09+05:00",
+        "deleted_at": null,
+        "public_token": "8824cadb589444228754ab2cf5a442b120e4e9a3b4de474c8df841d86472a5fe",
+        "delivery_person": "",
+        "delivery_phone": "",
+        "delivery_fee_cents": null,
+        "warranty_until": "",
+        "responsible_master_id": 1,
+        "warranty_start": "",
+        "payment_mark": null
+      }
+    ],
+    "repair_masters": [
+      {
+        "repair_id": "db0f3e25-72be-4fb8-b739-9d9e4a219812",
+        "user_id": 1,
+        "display_name": "Yoldash SABYROV",
+        "assignment_role": "master",
+        "reward_cents": null
+      },
+      {
+        "repair_id": "db0f3e25-72be-4fb8-b739-9d9e4a219812",
+        "user_id": 2,
+        "display_name": "Merdan Sabyrov",
+        "assignment_role": "assistant",
+        "reward_cents": null
+      }
+    ],
+    "repair_parts": [],
+    "repair_history": [],
+    "repair_number_aliases": [],
+    "donor_units": [],
+    "donor_parts": [],
+    "app_settings": [
+      {
+        "key": "sms_server",
+        "value_json": "{\"enabled\": true, \"url\": \"https://192.168.5.238/api/3rdparty/v1/messages\", \"username\": \"56FNPL\", \"password\": \"uv9bmvwgdrcs5z\", \"verify_ssl\": false, \"timeout_sec\": 10.0, \"sender\": \"\"}",
+        "updated_at": "2026-09-21T18:29:24+05:00"
+      },
+      {
+        "key": "sms_templates",
+        "value_json": "{\"ready\": \"\", \"pickup_reminder\": \"Ремонт закончен. Уважаемый клиент, просим забрать вашу технику из нашего сервиса MERYOSAB. Находимся по адресу: Парахат 3/2, ж14.\", \"master_assign\": \"\"}",
+        "updated_at": "2026-09-21T18:29:24+05:00"
+      },
+      {
+        "key": "reminder_rules",
+        "value_json": "{\"after_days\": 3, \"every_days\": 3}",
+        "updated_at": "2026-09-21T18:29:24+05:00"
+      }
+    ],
+    "sms_log": [
+      {
+        "id": 1,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 0,
+        "detail": "URLError",
+        "created_at": "2026-09-21T16:54:01+05:00",
+        "type": ""
+      },
+      {
+        "id": 2,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 0,
+        "detail": "URLError",
+        "created_at": "2026-09-21T16:57:09+05:00",
+        "type": ""
+      },
+      {
+        "id": 3,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 0,
+        "detail": "http_401",
+        "created_at": "2026-09-21T17:02:36+05:00",
+        "type": ""
+      },
+      {
+        "id": 4,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 0,
+        "detail": "http_401",
+        "created_at": "2026-09-21T18:12:55+05:00",
+        "type": ""
+      },
+      {
+        "id": 5,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 0,
+        "detail": "URLError",
+        "created_at": "2026-09-21T18:14:29+05:00",
+        "type": ""
+      },
+      {
+        "id": 6,
+        "repair_id": null,
+        "phone": "+99371693009",
+        "kind": "test",
+        "body": "MSB: тестовое сообщение со шлюза.",
+        "ok": 1,
+        "detail": "http_202",
+        "created_at": "2026-09-21T18:29:31+05:00",
+        "type": "test"
+      },
+      {
+        "id": 7,
+        "repair_id": null,
+        "phone": "+99371948555",
+        "kind": "staff_chat",
+        "body": "Чат [nikita Nesterov]: privte",
+        "ok": 1,
+        "detail": "http_202",
+        "created_at": "2026-09-22T13:41:49+05:00",
+        "type": "staff_chat"
+      }
+    ],
+    "print_log": [
+      {
+        "id": 1,
+        "repair_id": "",
+        "kind": "test",
+        "target": "192.168.8.75:9100",
+        "ok": 1,
+        "detail": "192.168.8.75:9100 отвечает",
+        "bytes": null,
+        "created_by_id": 3,
+        "created_by_name": "nikita Nesterov",
+        "created_at": "2026-09-21T12:24:09+05:00"
+      },
+      {
+        "id": 2,
+        "repair_id": "",
+        "kind": "test",
+        "target": "192.168.8.75:9100",
+        "ok": 1,
+        "detail": "192.168.8.75:9100 отвечает",
+        "bytes": null,
+        "created_by_id": 3,
+        "created_by_name": "nikita Nesterov",
+        "created_at": "2026-09-21T12:24:31+05:00"
+      },
+      {
+        "id": 3,
+        "repair_id": "",
+        "kind": "test",
+        "target": "192.168.8.75:9100",
+        "ok": 1,
+        "detail": "sent 17725 bytes to 192.168.8.75:9100",
+        "bytes": null,
+        "created_by_id": 3,
+        "created_by_name": "nikita Nesterov",
+        "created_at": "2026-09-21T12:29:28+05:00"
+      },
+      {
+        "id": 4,
+        "repair_id": "",
+        "kind": "test",
+        "target": "192.168.8.75:9100",
+        "ok": 1,
+        "detail": "192.168.8.75:9100 отвечает",
+        "bytes": null,
+        "created_by_id": 3,
+        "created_by_name": "nikita Nesterov",
+        "created_at": "2026-09-21T12:58:54+05:00"
+      },
+      {
+        "id": 5,
+        "repair_id": "",
+        "kind": "test",
+        "target": "192.168.8.75:9100",
+        "ok": 1,
+        "detail": "sent 17725 bytes to 192.168.8.75:9100",
+        "bytes": null,
+        "created_by_id": 3,
+        "created_by_name": "nikita Nesterov",
+        "created_at": "2026-09-21T13:00:40+05:00"
+      }
+    ]
+  }
+}
