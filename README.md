@@ -53,9 +53,11 @@ PROJECT_ANALYSIS.md  аудит проекта: найденные дефект�
 > [`RUN_LOCAL.md`](RUN_LOCAL.md) (backend + UI на `localhost:8085`,
 > SQLite, ничего настраивать не нужно).
 >
-> 🖥️ **Production на `192.168.8.81`** — полная инструкция для каталога
-> `/home/windowrepair-ae/msb`, systemd, PostgreSQL и порта `8085`:
-> [`DEPLOY.md`](DEPLOY.md).
+> 🖥️ **Production на `192.168.8.81`** — одной командой:
+> `sudo bash deploy/msb.sh install` (каталог `/home/windowrepair-ae/msb`,
+> systemd, PostgreSQL, порт `8085`). Удаление — `sudo bash deploy/msb.sh uninstall --purge`,
+> ещё `start|stop|restart|status|logs|update|backup`. Подробности и ручная
+> инструкция: [`DEPLOY.md`](DEPLOY.md).
 
 ### 1. Docker Compose (prod-подобный путь)
 

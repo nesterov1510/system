@@ -5,6 +5,40 @@ Ubuntu/Debian. Проект уже находится в каталоге
 `/home/windowrepair-ae/msb`. API (и UI) запускаются через `systemd`, PostgreSQL —
 как системная служба.
 
+## Быстрый способ: `deploy/msb.sh`
+
+Все шаги ниже автоматизированы одним скриптом (пакеты, пользователь, `.env` с
+секретами, PostgreSQL, venv, unit-файлы, firewall, health-check). Ручная
+инструкция дальше по тексту остаётся справочником — что именно делает скрипт.
+
+```bash
+# проект уже лежит в /home/windowrepair-ae/msb:
+cd /home/windowrepair-ae/msb && sudo bash deploy/msb.sh install
+
+# или с нуля, код из GitHub:
+curl -fsSL https://raw.githubusercontent.com/nesterov1510/system/main/deploy/msb.sh -o msb.sh
+sudo bash msb.sh install --repo https://github.com/nesterov1510/system.git --branch main
+```
+
+| Команда | Что делает |
+|---|---|
+| `install [--repo URL --branch BR \| --from-dir DIR] [--sqlite] [--with-agent]` | развернуть / довести до рабочего состояния (повторный запуск безопасен, `.env` и база не перезаписываются) |
+| `uninstall [--purge] [--purge-user] [--no-backup] [--yes]` | убрать службы из systemd; `--purge` — плюс каталог проекта, база и роль PostgreSQL (перед этим — резервная копия) |
+| `start` / `stop` / `restart` | управление службами |
+| `status` | состояние служб, порт, `/health`, БД, версия кода |
+| `logs [-f] [N]` / `logs agent` | журнал API / print-agent |
+| `update [--branch BR]` | `git pull` + `deploy/update.sh` (venv, зависимости, перезапуск) |
+| `backup [DIR]` | `pg_dump` (или `msb.db`) + фото + `.env` |
+| `enable-agent` / `disable-agent` | включить/выключить print-agent |
+| `env` | показать `.env` с замаскированными секретами |
+
+При первой установке скрипт печатает сгенерированный пароль администратора
+(`admin@msb.local`); он же сохранён в `.env` → `SEED_ADMIN_PASSWORD`.
+Пути, порт и пользователя можно переопределить переменными
+`MSB_ROOT`, `MSB_API_PORT`, `MSB_USER`, `MSB_HOST`, `MSB_LAN`.
+
+---
+
 ## Зафиксированная схема
 
 | Компонент | Адрес / порт | Доступ |
